@@ -1,0 +1,27 @@
+# Go
+/bin/
+/dist/
+*.test
+*.out
+
+# Node / frontend
+node_modules/
+web/dist/
+.vite/
+
+# Local data & secrets
+/data/
+*.local.yaml
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Agent workspace
+.omo/
+/vendor-src/
