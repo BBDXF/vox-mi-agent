@@ -12,7 +12,11 @@ services:
     environment:
       TZ: Asia/Shanghai
       APP_BASE_PATH: ""
+      VOX_LLM_PROVIDER: ${VOX_LLM_PROVIDER:-custom}
+      VOX_LLM_MODEL: ${VOX_LLM_MODEL:-}
+      VOX_LLM_API_KEY: ${VOX_LLM_API_KEY:-}
     command: ["serve", "--listen", "tcp://0.0.0.0:8080", "--data", "/data"]
     volumes:
       - ${VOX_DATA:-./data}:/data
-      # - /vol1/1000/Music:/music:ro
+      # Music library (read-only). Set VOX_MUSIC in .env for local testing; on fnOS use an authorised share path.
+      - ${VOX_MUSIC:-./music}:/music:ro

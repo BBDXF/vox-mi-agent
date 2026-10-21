@@ -47,3 +47,11 @@ dev: tools
 
 clean:
 	rm -rf dist web/dist
+
+# Run the runtime image locally with .env (music mount, LLM key). Data in $$VOX_DATA.
+up: image-local
+	docker compose --env-file .env -f app/docker/docker-compose.yaml up -d
+down:
+	docker compose --env-file .env -f app/docker/docker-compose.yaml down
+logs:
+	docker compose --env-file .env -f app/docker/docker-compose.yaml logs -f --tail=100
