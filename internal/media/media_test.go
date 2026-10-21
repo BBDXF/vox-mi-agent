@@ -602,3 +602,24 @@ func TestIndexReconfigureChangesNextQueryArgs(t *testing.T) {
 		t.Fatal("reconfigure defaults")
 	}
 }
+
+func TestUniqueTrackIDCollision(t *testing.T) {
+	a, b := "/m/a.mp3", "/m/b.mp3"
+	taken := map[string]string{}
+	ida := uniqueTrackID(a, taken)
+	taken[ida] = a
+	// force a fake collision: pretend b's short id is already held by a
+	taken[TrackID(b)] = a
+	idb := uniqueTrackID(b, taken)
+	if len(ida) != idLen || len(idb) != 16 || idb[:idLen] != TrackID(b) {
+		t.Fatalf("ida=%s idb=%s", ida, idb)
+	}
+	// same path keeps its id
+	if uniqueTrackID(a, taken) != ida {
+		t.Fatal("same path must keep id")
+	}
+	// NFC and NFD spellings of the same name give the same id
+	if TrackID("/m/caf\u00e9.mp3") != TrackID("/m/cafe\u0301.mp3") {
+		t.Fatal("unicode normalisation")
+	}
+}

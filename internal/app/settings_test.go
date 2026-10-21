@@ -620,3 +620,16 @@ func TestConcurrentSettingsAreRaceFree(t *testing.T) {
 		t.Fatalf("limit %d", l)
 	}
 }
+
+func TestMediaRejectsNestedFolders(t *testing.T) {
+	a, _ := newTestApp(t, nil)
+	m := musicDir(t, "A - B.mp3")
+	sub := filepath.Join(m, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := a.UpdateMedia(context.Background(), MediaUpdate{Folders: []string{m, sub}})
+	if err == nil || !strings.Contains(err.Error(), "nested") {
+		t.Fatalf("want nested error, got %v", err)
+	}
+}

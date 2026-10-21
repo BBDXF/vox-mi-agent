@@ -454,10 +454,21 @@ func (s *Syncer) run(ctx context.Context) (Status, error) {
 
 	// 2. generate
 	tracks := make([]Track, 0, len(files))
+	byID := make(map[string]string, len(files)) // id -> abs path
+	seenPath := make(map[string]bool, len(files))
 	for _, f := range files {
+		if seenPath[f.abs] { // overlapping folders: same file reached twice
+			continue
+		}
+		seenPath[f.abs] = true
+		id := uniqueTrackID(f.abs, byID)
+		if len(id) != idLen {
+			s.log.Warn("media: track id collision, using a longer id", "id", id, "path", f.abs)
+		}
+		byID[id] = f.abs
 		artist, title := parseName(re, f.rel)
 		t := Track{
-			ID: TrackID(f.abs), Title: title, Artist: artist,
+			ID: id, Title: title, Artist: artist,
 			Alias: []string{}, Path: f.abs,
 		}
 		if a := aliases[title]; len(a) > 0 {

@@ -6,6 +6,7 @@ package media
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"golang.org/x/text/unicode/norm"
 	"path/filepath"
 
 	"github.com/andy/vox-mi-agent/internal/config"
@@ -34,8 +35,29 @@ type Hit struct {
 // sha1(<cleaned absolute slash path>). It does not depend on folder order;
 // it is the key used by play_audio, traces and media URLs (/audio/{id}.{ext}).
 func TrackID(absPath string) string {
-	sum := sha1.Sum([]byte(filepath.ToSlash(filepath.Clean(absPath))))
-	return hex.EncodeToString(sum[:])[:12]
+	return trackHash(absPath)[:idLen]
+}
+
+// idLen is the normal track id length (48 bits; ~1.8e-5 chance of any
+// collision among 100k files).
+const idLen = 12
+
+func trackHash(absPath string) string {
+	sum := sha1.Sum([]byte(norm.NFC.String(filepath.ToSlash(filepath.Clean(absPath)))))
+	return hex.EncodeToString(sum[:])
+}
+
+// uniqueTrackID returns TrackID(absPath) unless another path already holds
+// it in taken; then it lengthens the prefix (16, 24, … 40 hex) until free.
+// Files are processed in sorted path order, so the result is deterministic.
+func uniqueTrackID(absPath string, taken map[string]string) string {
+	h := trackHash(absPath)
+	for n := idLen; n <= len(h); n += 4 {
+		if p, ok := taken[h[:n]]; !ok || p == absPath {
+			return h[:n]
+		}
+	}
+	return h
 }
 
 // IndexArgs is the SINGLE source of the fzq arguments that influence the

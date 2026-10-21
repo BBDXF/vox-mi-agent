@@ -178,6 +178,13 @@ func mediaSection() *section {
 					clean = append(clean, c)
 				}
 			}
+			for _, c := range clean {
+				for _, o := range clean {
+					if c != o && media.UnderRoots([]string{o}, c) {
+						fe[c] = "nested inside " + o + " (would scan the same files twice)"
+					}
+				}
+			}
 			if len(clean) > MaxMediaFolders {
 				fe["folders"] = fmt.Sprintf("at most %d folders", MaxMediaFolders)
 			}

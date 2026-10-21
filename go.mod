@@ -3,13 +3,14 @@ module github.com/andy/vox-mi-agent
 go 1.27.2
 
 require (
+	github.com/go-chi/chi/v5 v5.5.0
+	golang.org/x/text v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.60.1
 )
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/go-chi/chi/v5 v5.5.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
