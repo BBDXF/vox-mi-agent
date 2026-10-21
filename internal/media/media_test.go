@@ -241,11 +241,11 @@ func contains(l []string, s string) bool {
 func TestIDStability(t *testing.T) {
 	e := newEnv(t, sampleFiles, nil)
 	e.trigger(t)
-	tr1, _ := e.lib.Lookup(TrackID(0, "sub/朴树 - 平凡之路.m4a"))
+	tr1, _ := e.lib.Lookup(TrackID(filepath.Join(e.music, "sub/朴树 - 平凡之路.m4a")))
 	if tr1.Title != "平凡之路" || tr1.Artist != "朴树" {
 		t.Fatalf("%+v", tr1)
 	}
-	sum := sha1.Sum([]byte("0/sub/朴树 - 平凡之路.m4a"))
+	sum := sha1.Sum([]byte(filepath.ToSlash(filepath.Join(e.music, "sub/朴树 - 平凡之路.m4a"))))
 	if tr1.ID != hex.EncodeToString(sum[:])[:12] {
 		t.Fatalf("id %s", tr1.ID)
 	}
@@ -277,9 +277,9 @@ func TestIDStability(t *testing.T) {
 			t.Fatalf("id %s lost after adding a file", id)
 		}
 	}
-	// same relative path in another folder index gets another id
-	if TrackID(0, "a.mp3") == TrackID(1, "a.mp3") {
-		t.Fatal("folder index must be part of the id")
+	// same relative path in another folder gets another id; cleaning is applied
+	if TrackID("/m1/a.mp3") == TrackID("/m2/a.mp3") || TrackID("/m1/x/../a.mp3") != TrackID("/m1/a.mp3") {
+		t.Fatal("id must be derived from the cleaned absolute path")
 	}
 }
 

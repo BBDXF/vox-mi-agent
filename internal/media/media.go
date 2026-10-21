@@ -6,7 +6,6 @@ package media
 import (
 	"crypto/sha1"
 	"encoding/hex"
-	"fmt"
 	"path/filepath"
 
 	"github.com/andy/vox-mi-agent/internal/config"
@@ -32,9 +31,10 @@ type Hit struct {
 }
 
 // TrackID is the stable id of a file: first 12 hex chars of
-// sha1("<folderIndex>/<relative slash path>").
-func TrackID(folderIdx int, rel string) string {
-	sum := sha1.Sum([]byte(fmt.Sprintf("%d/%s", folderIdx, filepath.ToSlash(rel))))
+// sha1(<cleaned absolute slash path>). It does not depend on folder order;
+// it is the key used by play_audio, traces and media URLs (/audio/{id}.{ext}).
+func TrackID(absPath string) string {
+	sum := sha1.Sum([]byte(filepath.ToSlash(filepath.Clean(absPath))))
 	return hex.EncodeToString(sum[:])[:12]
 }
 

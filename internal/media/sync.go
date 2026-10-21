@@ -352,12 +352,17 @@ func scan(folders, exts []string, max int) (files []fileEntry, truncated bool, e
 	return files, truncated, nil
 }
 
-// snapshotHash covers every input of the songs file: relpath+size+mtime of all
-// files, the filename pattern, and the alias table.
+// songsSchema versions the songs-file format and the track-id algorithm; bump
+// it whenever either changes so existing libraries are regenerated.
+const songsSchema = "v2-abs-path-id"
+
+// snapshotHash covers every input of the songs file: schema version, absolute
+// path+size+mtime of all files, the filename pattern, and the alias table.
 func snapshotHash(files []fileEntry, pattern string, aliases map[string][]string) string {
 	h := sha1.New()
+	fmt.Fprintf(h, "schema\x00%s\n", songsSchema)
 	for _, f := range files {
-		fmt.Fprintf(h, "%d\x00%s\x00%d\x00%d\n", f.folder, f.rel, f.size, f.mtime)
+		fmt.Fprintf(h, "%s\x00%s\x00%d\x00%d\n", f.abs, f.rel, f.size, f.mtime)
 	}
 	fmt.Fprintf(h, "pattern\x00%s\n", pattern)
 	titles := make([]string, 0, len(aliases))
@@ -452,7 +457,7 @@ func (s *Syncer) run(ctx context.Context) (Status, error) {
 	for _, f := range files {
 		artist, title := parseName(re, f.rel)
 		t := Track{
-			ID: TrackID(f.folder, f.rel), Title: title, Artist: artist,
+			ID: TrackID(f.abs), Title: title, Artist: artist,
 			Alias: []string{}, Path: f.abs,
 		}
 		if a := aliases[title]; len(a) > 0 {

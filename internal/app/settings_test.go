@@ -211,7 +211,7 @@ func TestSectionMediaExtraFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, "first sync", func() bool { return a.Library.Len() == 1 && !a.Syncer.Status().Running })
-	id := media.TrackID(0, "Artist - Song One.mp3")
+	id := media.TrackID(filepath.Join(m1, "Artist - Song One.mp3"))
 	if tr, ok := a.Library.Lookup(id); !ok || tr.Artist != "Artist" || tr.Title != "Song One" {
 		t.Fatalf("default pattern track %+v", tr)
 	}
@@ -267,7 +267,7 @@ func TestSectionAliasesDBAndSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, "first sync", func() bool { return a.Library.Len() == 1 && !a.Syncer.Status().Running })
-	id := media.TrackID(0, "Artist - Song One.mp3")
+	id := media.TrackID(filepath.Join(m, "Artist - Song One.mp3"))
 
 	res := put(t, a, "aliases", `{"items":[{"title":"Song One","artist":"Artist","aliases":["uno"," 一号 ","uno"]},{"title":"Other","aliases":[]}]}`)
 	if res.SyncStarted == nil || len(res.Changed) != 1 {

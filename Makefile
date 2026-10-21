@@ -34,7 +34,8 @@ test: tools
 
 test-docker:
 	docker buildx build --load $(SECRET) --target test -t $(IMAGE):test .
-	docker compose -f docker-compose.test.yaml run --rm test
+	docker compose -f docker-compose.test.yaml run --rm test; rc=$$?; \
+	docker rmi -f $(IMAGE):test >/dev/null 2>&1; exit $$rc
 
 image: build
 	docker buildx build --platform $(shell echo $(ARCHES) | sed 's/[^ ]*/linux\/&/g; s/ /,/g') $(SECRET) --target runtime -t $(IMAGE):$(VERSION) .

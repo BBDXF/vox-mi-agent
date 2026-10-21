@@ -236,12 +236,17 @@ desktop_applaunchname=fnos-ai-agent.main
 - 通过 `manifest` 的 `service_port` 声明（`checkport` 默认 true）。
 - **监听地址可配置**，默认 `0.0.0.0`。v4.1 的"必须绑定 192.168.x.x"不可行：平台无此能力声明，且安装时未必知道宿主 IP，DHCP 变更后即失效。
 - 对外 URL 由独立配置项 `PUBLIC_MEDIA_BASE_URL` 给出，不从监听地址推导。
+- **URL 与曲目 ID 关联**：URL 直接携带曲目 ID，与 `search_audio` 结果、`play_audio` 参数、追踪日志中的 ID 为同一个值，便于排查：
+  - 形如 `{PUBLIC_MEDIA_BASE_URL}/audio/{track_id}.{ext}?exp={unix}&sig={HMAC}`；`ext` 取原文件扩展名（音箱可按扩展名判断格式）
+  - `sig = HMAC-SHA256(server_secret, track_id + "." + ext + "|" + exp)` 截断 16 字节、base64url；`server_secret` 首次启动随机生成存于 `/data`；无需服务端状态表
+  - 服务端校验签名与过期 → 用 `track_id` 在曲库中查回绝对路径 → 流式返回（支持 Range）；ID 不存在或已被重扫移除 → 404
+  - 追踪中 `play_audio` 记录 `track_id`，媒体端口访问日志也记录 `track_id`，二者可直接关联
 - **防御清单**（应用层自保）：
-  - URL 形如 `http://{HOST}:{PORT}/audio/{UUID}?name={Base64}`
+  - URL 形如上；不再使用一次性 UUID 映射表（v5.1 的 `/audio/{UUID}?name={Base64}` 方案由签名 URL 取代）
   - 仅允许 `GET` / `HEAD`
   - 拦截空 User-Agent（具体 UA 规则待 S0 实测音箱真实 UA 后确定）
-  - TTL 1 小时自动清理
-  - 服务端只认 UUID 查表，绝不拼接路径，防目录遍历
+  - `exp` 默认 1 小时（签名过期即失效，无需清理任务）
+  - 服务端只认 `track_id` 查曲库表，绝不拼接路径，防目录遍历
   - 独立 mux，不注册任何 API 路由
 
 ---
@@ -320,7 +325,7 @@ search:
 | 步骤 | 动作 |
 |---|---|
 | 1 扫描 | 遍历 `media.folders`，按扩展名过滤；不跟随符号链接；超出 `max_files` 截断并告警。以「相对路径 + size + mtime」与上次快照比对，无任何变化则**直接结束**（不改文件、不重建缓存） |
-| 2 生成 | 用 `filename_pattern` 解析 artist/title（可选：读取 ID3/FLAC 标签覆盖）；`alias` 来自 UI 维护的别名表（DB）。生成 songs list：每行 `{"id","title","artist","album","alias":[],"path"}`，`id` = 相对路径的 SHA1 前 12 位（稳定，重扫不变）；按路径排序，保证同内容同字节 |
+| 2 生成 | 用 `filename_pattern` 解析 artist/title（可选：读取 ID3/FLAC 标签覆盖）；`alias` 来自 UI 维护的别名表（DB）。生成 songs list：每行 `{"id","title","artist","album","alias":[],"path"}`，`id` = **文件绝对路径**（clean 后、`/` 分隔）的 SHA1 前 12 位（稳定，重扫不变，与 `media.folders` 顺序无关；挂载路径变化时 ID 随之变化）；按路径排序，保证同内容同字节 |
 | 3 落盘 | 写 `/data/media/songs.jsonl.tmp` → `fsync` → `rename` 为 `/data/media/songs.jsonl`（原子替换） |
 | 4 重建缓存 | 立即以**与查询完全相同的建索引参数**运行一次 fzq（空查询），在固定目录 `/data/cache/fzq/` 生成新缓存 |
 | 5 清理 | 删除 `/data/cache/fzq/` 中除最新 2 个以外的缓存文件 |
