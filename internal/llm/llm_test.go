@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -72,6 +73,33 @@ func collect(t *testing.T, ch <-chan Event) []Event {
 		case <-timeout:
 			t.Fatal("timeout collecting events")
 		}
+	}
+}
+
+func TestBuildBodyExtraBody(t *testing.T) {
+	extra := map[string]any{
+		"enable_thinking": false, "top_k": 20, "nested": map[string]any{"a": 1},
+		"model": "evil", "messages": "evil", "tools": "evil", "stream": false, "stream_options": "evil",
+	}
+	b, err := buildBody("m", Request{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["enable_thinking"] != false || got["top_k"] != float64(20) || got["nested"] == nil {
+		t.Fatalf("extra not merged: %s", b)
+	}
+	so, _ := got["stream_options"].(map[string]any)
+	msgs, _ := got["messages"].([]any)
+	if got["model"] != "m" || got["stream"] != true || so["include_usage"] != true || len(msgs) != 1 || got["tools"] != nil {
+		t.Fatalf("reserved keys overridden: %s", b)
+	}
+	b2, _ := buildBody("m", Request{}, nil)
+	if bytes.Contains(b2, []byte("enable_thinking")) {
+		t.Fatalf("unexpected: %s", b2)
 	}
 }
 

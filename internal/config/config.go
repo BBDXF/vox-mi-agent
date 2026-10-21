@@ -79,6 +79,21 @@ type LLM struct {
 	Model       string        `yaml:"model" json:"model"`
 	Temperature float64       `yaml:"temperature" json:"temperature"`
 	Timeout     time.Duration `yaml:"timeout" json:"timeout"`
+	// ExtraBody is merged into the chat/completions request body (e.g.
+	// enable_thinking: false). Empty = use the provider preset's default.
+	ExtraBody map[string]any `yaml:"extra_body" json:"extra_body,omitempty"`
+}
+
+// EffectiveExtraBody returns ExtraBody, or the preset default when it is
+// empty and Provider names a preset that defines one.
+func (l LLM) EffectiveExtraBody() map[string]any {
+	if len(l.ExtraBody) > 0 {
+		return l.ExtraBody
+	}
+	if p, ok := llm.PresetByID(l.Provider); ok {
+		return p.ExtraBody
+	}
+	return nil
 }
 
 // EffectiveBaseURL returns the base URL actually used: a preset whose base URL

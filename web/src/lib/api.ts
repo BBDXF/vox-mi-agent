@@ -338,7 +338,7 @@ export const mockProviders: LLMProvider[] = [
     id: 'siliconflow',
     name: '硅基流动',
     base_url: 'https://api.siliconflow.cn/v1',
-    default_model: 'Qwen/Qwen2.5-7B-Instruct',
+    default_model: 'Qwen/Qwen3-8B',
     key_required: true,
     base_url_editable: false,
     docs_url: 'https://docs.siliconflow.cn',
@@ -603,7 +603,7 @@ export async function getLLMModels(body: GetLLMModelsRequest): Promise<LLMModels
         'gpt-3.5-turbo',
       ],
       'siliconflow': [
-        'Qwen/Qwen2.5-7B-Instruct',
+        'Qwen/Qwen3-8B',
         'deepseek-ai/DeepSeek-V3',
         'deepseek-ai/DeepSeek-R1',
         'THUDM/glm-4-9b-chat',

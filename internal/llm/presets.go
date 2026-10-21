@@ -20,6 +20,9 @@ type Preset struct {
 	KeyRequired     bool   `json:"key_required"`
 	BaseURLEditable bool   `json:"base_url_editable"`
 	DocsURL         string `json:"docs_url"`
+	// ExtraBody is the default request-body extension for this provider,
+	// used when the config's llm.extra_body is empty.
+	ExtraBody map[string]any `json:"extra_body,omitempty"`
 }
 
 // CustomPresetID is the provider id for a user-supplied endpoint.
@@ -34,12 +37,14 @@ func Presets() []Preset {
 			KeyRequired: true, DocsURL: "https://api-docs.deepseek.com/"},
 		{ID: "dashscope", Name: "通义千问 (DashScope)", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
 			DefaultModel: "qwen-plus", KeyRequired: true,
-			DocsURL: "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope"},
+			ExtraBody: map[string]any{"enable_thinking": false},
+			DocsURL:   "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope"},
 		{ID: "openai", Name: "OpenAI", BaseURL: "https://api.openai.com/v1", DefaultModel: "gpt-4o-mini",
 			KeyRequired: true, DocsURL: "https://platform.openai.com/docs/api-reference"},
 		{ID: "siliconflow", Name: "硅基流动 (SiliconFlow)", BaseURL: "https://api.siliconflow.cn/v1",
-			DefaultModel: "Qwen/Qwen2.5-7B-Instruct", KeyRequired: true,
-			DocsURL: "https://docs.siliconflow.cn/cn/api-reference/chat-completions/chat-completions"},
+			DefaultModel: "Qwen/Qwen3-8B", KeyRequired: true,
+			ExtraBody: map[string]any{"enable_thinking": false},
+			DocsURL:   "https://docs.siliconflow.cn/cn/api-reference/chat-completions/chat-completions"},
 		{ID: "openrouter", Name: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", DefaultModel: "",
 			KeyRequired: true, DocsURL: "https://openrouter.ai/docs/quickstart"},
 		{ID: "ollama", Name: "Ollama (本地)", BaseURL: "http://127.0.0.1:11434/v1", DefaultModel: "qwen2.5",

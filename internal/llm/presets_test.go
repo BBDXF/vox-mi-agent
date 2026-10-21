@@ -30,6 +30,17 @@ func TestPresets(t *testing.T) {
 	if c.KeyRequired || !c.BaseURLEditable || c.BaseURL != "" {
 		t.Errorf("custom = %+v", c)
 	}
+	sf, _ := PresetByID("siliconflow")
+	if sf.DefaultModel != "Qwen/Qwen3-8B" || sf.ExtraBody["enable_thinking"] != false {
+		t.Errorf("siliconflow = %+v", sf)
+	}
+	ds, _ := PresetByID("dashscope")
+	if ds.ExtraBody["enable_thinking"] != false {
+		t.Errorf("dashscope = %+v", ds)
+	}
+	if o.ExtraBody != nil || z.ExtraBody != nil {
+		t.Errorf("unexpected extra body: %+v %+v", o, z)
+	}
 	if _, ok := PresetByID("nope"); ok {
 		t.Error("unknown preset found")
 	}

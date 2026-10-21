@@ -159,7 +159,8 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 }
 
 func newOpenAI(l config.LLM) llm.Provider {
-	return llm.NewOpenAI(llm.Config{BaseURL: l.EffectiveBaseURL(), APIKey: l.APIKey, Model: l.Model, Timeout: l.Timeout})
+	return llm.NewOpenAI(llm.Config{BaseURL: l.EffectiveBaseURL(), APIKey: l.APIKey, Model: l.Model, Timeout: l.Timeout,
+		ExtraBody: l.EffectiveExtraBody()})
 }
 
 // normalize returns a copy of cfg with filesystem paths made absolute (the
@@ -220,6 +221,8 @@ type LLMTarget struct {
 	BaseURL  string
 	APIKey   string
 	Preset   llm.Preset
+	// ExtraBody is the request-body extension that applies to this target.
+	ExtraBody map[string]any
 }
 
 // ResolveLLM resolves a user-supplied (provider, base_url, api_key) triple
@@ -259,7 +262,11 @@ func (a *App) resolveLocked(cur config.LLM, provider, baseURL, apiKey string) (L
 	if apiKey == "" && provider == curProv {
 		apiKey = cur.APIKey
 	}
-	return LLMTarget{Provider: provider, BaseURL: baseURL, APIKey: apiKey, Preset: preset}, nil
+	eb := preset.ExtraBody
+	if len(cur.ExtraBody) > 0 {
+		eb = cur.ExtraBody
+	}
+	return LLMTarget{Provider: provider, BaseURL: baseURL, APIKey: apiKey, Preset: preset, ExtraBody: eb}, nil
 }
 
 // UpdateLLM validates u, persists it to <data>/config.yaml (the file is

@@ -40,10 +40,13 @@ func TestPrecedence(t *testing.T) {
 		},
 		{
 			name: "file overrides defaults",
-			file: "llm:\n  model: file-model\n  temperature: 0\n  timeout: 5s\ntools:\n  shell:\n    max_output: 1MiB\nmedia:\n  sync_interval: 0\nsources:\n  - {name: contacts, file: c.json, format: json, keys: [name]}\n",
+			file: "llm:\n  model: file-model\n  temperature: 0\n  timeout: 5s\n  extra_body:\n    enable_thinking: false\n    nested: {a: 1}\ntools:\n  shell:\n    max_output: 1MiB\nmedia:\n  sync_interval: 0\nsources:\n  - {name: contacts, file: c.json, format: json, keys: [name]}\n",
 			check: func(t *testing.T, c *Config) {
 				if c.LLM.Model != "file-model" || c.LLM.Temperature != 0 || c.LLM.Timeout != 5*time.Second {
 					t.Errorf("llm: %+v", c.LLM)
+				}
+				if eb := c.LLM.EffectiveExtraBody(); eb["enable_thinking"] != false || eb["nested"] == nil {
+					t.Errorf("extra_body: %+v", eb)
 				}
 				if c.Tools.Shell.MaxOutput != 1<<20 || c.Tools.Shell.Isolation != "landlock" {
 					t.Errorf("shell: %+v", c.Tools.Shell)

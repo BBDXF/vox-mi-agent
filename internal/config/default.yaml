@@ -16,6 +16,8 @@ llm:
   model: "gpt-4o-mini"
   temperature: 0.3
   timeout: 60s
+  # extra_body:                       # merged into the chat/completions request JSON
+  #   enable_thinking: false          # (siliconflow/dashscope presets default to this)
 
 tools:
   # dir: /usr/local/bin               # VOX_TOOLS_DIR; fzq/jq/yq default to <dir>/<name>

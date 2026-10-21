@@ -141,6 +141,7 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 			streamEr error
 			finished bool
 			sp       = NewSplitter()
+			tf       TextFilter
 		)
 		sendSentence := func(s string) {
 			if s == "" {
@@ -148,6 +149,16 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 			}
 			markSentence()
 			emit(Event{Type: EventSentence, Data: SentenceData{Text: s}})
+		}
+		pushText := func(vis string) {
+			if tm.FirstTokenMS == 0 {
+				tm.FirstTokenMS = max(since(), 1)
+			}
+			text.WriteString(vis)
+			emit(Event{Type: EventToken, Data: TokenData{Text: vis}})
+			for _, s := range sp.Push(vis) {
+				sendSentence(s)
+			}
 		}
 	recv:
 		for {
@@ -160,17 +171,11 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 				}
 				switch ev.Type {
 				case llm.EventDelta:
-					if ev.Text == "" {
+					vis := tf.Push(ev.Text)
+					if vis == "" {
 						continue
 					}
-					if tm.FirstTokenMS == 0 {
-						tm.FirstTokenMS = max(since(), 1)
-					}
-					text.WriteString(ev.Text)
-					emit(Event{Type: EventToken, Data: TokenData{Text: ev.Text}})
-					for _, s := range sp.Push(ev.Text) {
-						sendSentence(s)
-					}
+					pushText(vis)
 				case llm.EventToolCall:
 					if ev.ToolCall != nil {
 						calls = append(calls, *ev.ToolCall)
@@ -209,6 +214,9 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 			}
 			log.Error("llm stream error", "err", streamEr)
 			return fail(streamEr)
+		}
+		if tail := tf.Flush(); tail != "" {
+			pushText(tail)
 		}
 		sendSentence(sp.Flush())
 

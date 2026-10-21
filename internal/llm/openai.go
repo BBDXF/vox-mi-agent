@@ -23,6 +23,10 @@ type Config struct {
 	Model      string        // default model
 	Timeout    time.Duration // overall deadline per Stream call; 0 = none
 	HTTPClient *http.Client  // optional; defaults to a client without timeout
+	// ExtraBody is merged into the top-level request JSON (e.g.
+	// {"enable_thinking": false}). It cannot override model, messages, tools,
+	// stream or stream_options.
+	ExtraBody map[string]any
 }
 
 // OpenAI is a Provider for OpenAI-compatible /chat/completions endpoints.
@@ -88,7 +92,12 @@ type wireRequest struct {
 	} `json:"stream_options,omitempty"`
 }
 
-func buildBody(model string, req Request) ([]byte, error) {
+// reservedBodyKeys cannot be overridden by Config.ExtraBody.
+var reservedBodyKeys = map[string]bool{
+	"model": true, "messages": true, "tools": true, "stream": true, "stream_options": true,
+}
+
+func buildBody(model string, req Request, extra map[string]any) ([]byte, error) {
 	wr := wireRequest{Model: model, Temperature: req.Temperature, MaxTokens: req.MaxTokens, Stream: true}
 	wr.StreamOptions = &struct {
 		IncludeUsage bool `json:"include_usage"`
@@ -119,7 +128,25 @@ func buildBody(model string, req Request) ([]byte, error) {
 		wr.Tools = append(wr.Tools, wireTool{Type: "function",
 			Function: wireToolFn{Name: t.Name, Description: t.Description, Parameters: params}})
 	}
-	return json.Marshal(wr)
+	b, err := json.Marshal(wr)
+	if err != nil || len(extra) == 0 {
+		return b, err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	for k, v := range extra {
+		if reservedBodyKeys[k] {
+			continue
+		}
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("extra_body %q: %w", k, err)
+		}
+		m[k] = raw
+	}
+	return json.Marshal(m)
 }
 
 type streamChunk struct {
@@ -154,7 +181,7 @@ func (o *OpenAI) Stream(ctx context.Context, req Request) (<-chan Event, error) 
 	if model == "" {
 		model = o.cfg.Model
 	}
-	body, err := buildBody(model, req)
+	body, err := buildBody(model, req, o.cfg.ExtraBody)
 	if err != nil {
 		return nil, fmt.Errorf("llm: encode request: %w", err)
 	}

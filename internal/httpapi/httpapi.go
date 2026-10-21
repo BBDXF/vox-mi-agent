@@ -451,7 +451,7 @@ func (s *Server) llmTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := llm.NewOpenAI(llm.Config{BaseURL: t.BaseURL, APIKey: t.APIKey, Model: model,
-		Timeout: 20 * time.Second, HTTPClient: s.hc})
+		Timeout: 20 * time.Second, HTTPClient: s.hc, ExtraBody: t.ExtraBody})
 	temp := 0.0
 	start := time.Now()
 	msg, err := llm.Complete(r.Context(), p, llm.Request{

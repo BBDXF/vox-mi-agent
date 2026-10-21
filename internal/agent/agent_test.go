@@ -101,6 +101,29 @@ func TestPlainAnswer(t *testing.T) {
 	}
 }
 
+func TestThinkAndSpecialTokensFiltered(t *testing.T) {
+	f := llm.NewFake(llm.FakeTurn{Text: "<think>先想想。</think>\n\n好的。</tool_call><|im_end|>"})
+	rt := New(Options{Provider: f})
+	var c collector
+	if err := rt.Run(context.Background(), Input{Text: "hi", ConversationID: "c1"}, c.emit); err != nil {
+		t.Fatal(err)
+	}
+	var sb strings.Builder
+	for _, e := range c.find(EventToken) {
+		sb.WriteString(e.Data.(TokenData).Text)
+	}
+	if sb.String() != "好的。" {
+		t.Fatalf("tokens %q", sb.String())
+	}
+	if got := c.sentences(); len(got) != 1 || got[0] != "好的。" {
+		t.Fatalf("sentences %q", got)
+	}
+	h := rt.mem["c1"]
+	if last := h[len(h)-1]; last.Role != llm.RoleAssistant || last.Content != "好的。" {
+		t.Fatalf("persisted %+v", last)
+	}
+}
+
 func TestToolRoundTrip(t *testing.T) {
 	f := llm.NewFake(
 		llm.FakeTurn{Text: "好的，我来查。", ToolCalls: []llm.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"x":1}`)}}},

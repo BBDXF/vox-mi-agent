@@ -717,13 +717,14 @@ func TestLLMProvidersEndpoint(t *testing.T) {
 	}
 	var r struct {
 		Items []struct {
-			ID              string `json:"id"`
-			Name            string `json:"name"`
-			BaseURL         string `json:"base_url"`
-			DefaultModel    string `json:"default_model"`
-			KeyRequired     bool   `json:"key_required"`
-			BaseURLEditable bool   `json:"base_url_editable"`
-			DocsURL         string `json:"docs_url"`
+			ID              string         `json:"id"`
+			Name            string         `json:"name"`
+			BaseURL         string         `json:"base_url"`
+			DefaultModel    string         `json:"default_model"`
+			KeyRequired     bool           `json:"key_required"`
+			BaseURLEditable bool           `json:"base_url_editable"`
+			DocsURL         string         `json:"docs_url"`
+			ExtraBody       map[string]any `json:"extra_body"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(b, &r); err != nil {
@@ -732,6 +733,11 @@ func TestLLMProvidersEndpoint(t *testing.T) {
 	if len(r.Items) != 8 || r.Items[0].ID != "opencode-zen" || r.Items[0].DocsURL != "https://opencode.ai/docs/zen" ||
 		r.Items[6].ID != "ollama" || r.Items[6].KeyRequired || !r.Items[6].BaseURLEditable {
 		t.Errorf("providers = %s", b)
+	}
+	for _, it := range r.Items {
+		if it.ID == "siliconflow" && (it.DefaultModel != "Qwen/Qwen3-8B" || it.ExtraBody["enable_thinking"] != false) {
+			t.Errorf("siliconflow = %+v", it)
+		}
 	}
 }
 
