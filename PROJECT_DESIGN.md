@@ -390,17 +390,63 @@ LLM 可见参数（JSON Schema）：
 **密钥管理（MVP 简化）**：LLM API Key 与小米凭据存于 `/data`，文件权限 `0600`，UI 只做脱敏展示、不回显明文。
 > v4.1 的 AES-GCM 加密推迟：主密钥与数据库同处 `/data`，加密在单机自托管场景下基本只是形式。
 
-### 6.7 小米接入（最高风险）
+### 6.7 小米接入（v5.2 设计，自写 Go 实现）
 
-**现状核实**：
-- Python `MiService` 生态活跃（`Yonsm/MiService` 856★，2026-10 仍有提交），但**登录鉴权长期不稳定**：接口返回值变更（issue #60）、异常登录风控验证（#61/#62）、多条登录失败 issue 未关闭。mi-gpt 置顶 issue #326 专门处理登录验证失败。
-- **没有成熟的 Go 小米库**：`lsongdev/miservice-go` 仅 12★（2026-03 更新），是否覆盖 MiNA 的 TTS/播放、能否应对新登录验证，均未验证。
-- 风控：异常登录需人工在同 IP/设备完成验证；机房或海外服务器风险更高，NAS 跑在家庭内网相对安全。
+参考：`Yonsm/MiService`（登录/MiNA/MIoT）、`hanxi/xiaomusic`（对话轮询、型号表）、`idootop/mi-service-lite`（MiNA 参数）。不引入 Python sidecar；协议全部在 `internal/speaker/xiaomi` 中自写。
 
-**设计要求**：
-- 必须有**登录失败的降级路径**、**人工验证入口**（UI 引导）、**令牌持久化**。
-- `SpeakerAdapter` 接口必须足够抽象，以便在"自写 Go 实现"和"Python sidecar 子进程"之间切换而不动上层代码。
-- S0 Spike 的结论决定走哪条路。若两条都不通，需重新评估整个项目（或转向 Open-XiaoAI 刷固件方案）。
+#### 6.7.1 分层
+
+```
+Agent ──Player/Speaker 接口──▶ speaker.Manager ──▶ Driver: mock | log | xiaomi
+                                    ▲                      │
+                          Hook(轮询到用户提问) ◀────────────┘
+```
+
+`speaker.Driver` 接口（mock 与 xiaomi 同一套，方法名对齐 MiNAService）：
+
+| 方法 | 小米实现 |
+|---|---|
+| `DeviceList()` | `GET api2.mina.mi.com/admin/v2/device_list?master=0` |
+| `GetLatestAsk(since)` | `GET userprofile.mina.mi.com/device_profile/v2/conversation?source=dialogu&hardware=&timestamp=&limit=2`（M01 改用 ubus `mibrain/nlp_result_get`） |
+| `TextToSpeech(text)` | ubus `mibrain/text_to_speech {"text","save":0}`；可选 MIoT action（按型号 siid-aiid） |
+| `PlayByURL(url)` | ubus `mediaplayer/player_play_url`；音乐型号走 `player_play_music`（见型号表） |
+| `PlayerSetVolume(n)` | ubus `mediaplayer/player_set_volume`（6–100） |
+| `PlayerPause/Play/Stop()` | ubus `mediaplayer/player_play_operation {"action"}` |
+| `PlayerGetStatus()` | ubus `mediaplayer/player_get_play_status`（0 空闲/1 播放/2 暂停/3 停止） |
+
+#### 6.7.2 登录与令牌
+
+- 流程：`serviceLogin` → `serviceLoginAuth2`（`hash=MD5(pwd).upper`）→ `clientSign=b64(sha1("nonce=..&ssecurity"))` 换 `serviceToken`（sid `micoapi`；MIoT TTS 另需 sid `xiaomiio`）。
+- 令牌存 `/data/mi_token.json`（`deviceId,userId,passToken,micoapi:[ssecurity,serviceToken]`），0600；**密码不落盘**（仅登录时使用）。
+- 失效（401）：先用 `passToken` 静默重登；失败才置为「需要登录」并在 UI 提示。
+- **安全验证**：返回 `notificationUrl` 时进入「需要验证」状态，UI 显示可选方式（手机/邮箱），用户点「发送验证码」→ 输入验证码 → 后端完成 `verifyPhone/verifyEmail` 后重新 `serviceLogin`。备选：UI 给出 notificationUrl 链接，用户在浏览器完成验证后点「我已完成，重试」。
+- `70022` 限流：连续 5 次失败后冷却 2 小时，UI 显示剩余时间，不再自动重试。
+
+#### 6.7.3 Hook：接管小爱对话
+
+- 轮询间隔默认 1s（0.5–5s 可调），按设备 `time` 去重，启动时以当前时间为起点（不处理历史）。
+- **触发策略**（`speaker.hook.mode`）：
+  - `keyword`（默认）：提问以唤醒前缀开头才接管（默认 `["请", "你", "问问"]`，可编辑），其余交给小爱原生处理；
+  - `all`：接管全部提问；
+  - `off`：只播报不监听。
+- **打断原生回复**：命中后立即 `PlayerPause`，并在 `interrupt_window`（默认 3s）内每 300ms 查询状态，若在播放再次 pause/stop（小爱回复存在延迟起播）。随后才开始 TTS。
+- 本轮 Agent 的句子逐句 `TextToSpeech`；下一句等待上一句播完（按状态轮询，或按字数估时，默认 4.5 字/秒兜底）。
+- 用户在 Agent 播报中再次提问 → 取消当前轮（复用会话取消钩子），按新问题处理。
+- 每台设备对应一个固定会话（channel=`speaker`，标题为设备名），历史连续。
+
+#### 6.7.4 型号差异
+
+- `play_music` 型号（Yonsm 超集）：LX04 LX05 L05B L05C L06 L06A X08A X10A X08C X08E X8F X4B OH2 OH2P X6A；其余用 `play_url`。
+- MIoT TTS siid-aiid：LX06/LX01/LX05/L06A/LX04 `5-1`；OH2/L05B/L05C `5-3`；OH2P/X08E/X10A/X6A/L15A `7-3`；L09A `3-1`。
+- 设置项允许按设备覆盖：播放方式 `auto|url|music`、TTS 方式 `auto|mina|miot`、siid-aiid。
+
+#### 6.7.5 配置（`speaker` 段，均可在 Web 修改）
+
+`driver(mock|log|xiaomi)`、`public_base_url`、`url_ttl`、`xiaomi.devices[]{device_id,name,hardware,enabled,play_mode,tts_mode,miot_tts}`、`hook.mode/keywords/poll_interval/interrupt_window`、`volume_default`。账号状态与登录动作走独立接口 `/api/speaker/xiaomi/*`，不进配置文件。
+
+#### 6.7.6 风险
+
+登录风控与接口变化仍是最高风险；协议层独立包、有完整的模拟 HTTP 测试；失败时 UI 明确显示状态与下一步，Agent 的 Web/CLI 对话不受影响。
 
 ### 6.8 可观测性
 
