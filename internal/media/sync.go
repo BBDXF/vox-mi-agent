@@ -74,7 +74,7 @@ type Deps struct {
 
 // Syncer is the single-flight library sync job.
 type Syncer struct {
-	cfg     *config.Config
+	cfg     *config.Config // replaced (never mutated) by SetMedia; read via config()
 	runner  *toolrunner.Runner
 	store   Store
 	aliases AliasStore
@@ -83,6 +83,7 @@ type Syncer struct {
 
 	mu      sync.Mutex
 	flight  *flight
+	rerun   bool // a config change arrived mid-flight: sync again afterwards
 	status  Status
 	memSnap string // snapshot when no Store is configured
 }
@@ -116,6 +117,60 @@ func NewSyncer(cfg *config.Config, d Deps) *Syncer {
 		}
 	}
 	return s
+}
+
+// config returns the current effective config (safe for concurrent use; the
+// returned value must not be modified).
+func (s *Syncer) config() *config.Config {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg
+}
+
+// MediaConfig returns a copy of the current media settings.
+func (s *Syncer) MediaConfig() config.Media {
+	m := s.config().Media
+	m.Folders = append([]string(nil), m.Folders...)
+	m.Extensions = append([]string(nil), m.Extensions...)
+	return m
+}
+
+// SetMedia atomically swaps the media settings used by subsequent syncs. A
+// sync already in flight keeps the settings it started with.
+func (s *Syncer) SetMedia(m config.Media) {
+	m.Folders = append([]string(nil), m.Folders...)
+	m.Extensions = append([]string(nil), m.Extensions...)
+	s.mu.Lock()
+	c := *s.cfg
+	c.Media = m
+	s.cfg = &c
+	s.mu.Unlock()
+}
+
+// SetTools swaps the external tool paths used by subsequent syncs.
+func (s *Syncer) SetTools(t config.Tools) {
+	s.mu.Lock()
+	c := *s.cfg
+	c.Tools = t
+	s.cfg = &c
+	s.mu.Unlock()
+}
+
+// TriggerAsyncOrQueue starts a background sync. If one is already running
+// the request is remembered and a follow-up sync starts as soon as the
+// current one finishes (so it sees the latest settings); queued is then true.
+func (s *Syncer) TriggerAsyncOrQueue(source string) (queued bool) {
+	s.mu.Lock()
+	if s.flight != nil {
+		s.rerun = true
+		s.mu.Unlock()
+		return true
+	}
+	f := &flight{done: make(chan struct{})}
+	s.flight = f
+	s.mu.Unlock()
+	go s.lead(context.Background(), f, source) //nolint:errcheck
+	return false
 }
 
 // Library returns the library reloaded after each sync.
@@ -180,8 +235,13 @@ func (s *Syncer) lead(ctx context.Context, f *flight, source string) (Status, er
 	s.status = st
 	f.st, f.err = st, err
 	s.flight = nil
+	again := s.rerun
+	s.rerun = false
 	s.mu.Unlock()
-	close(f.done)
+	defer close(f.done) // joiners are released after status/audit are persisted
+	if again {
+		defer func() { _ = s.TriggerAsync("rerun") }()
+	}
 
 	if s.store != nil {
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -214,21 +274,8 @@ func checkFolder(folder string) error {
 		return fmt.Errorf("media folder %q is not an absolute path", folder)
 	}
 	clean := filepath.Clean(folder)
-	if env := os.Getenv("TRIM_DATA_ACCESSIBLE_PATHS"); env != "" {
-		ok := false
-		for _, p := range strings.Split(env, ":") {
-			if p = strings.TrimSpace(p); p == "" {
-				continue
-			}
-			rel, err := filepath.Rel(filepath.Clean(p), clean)
-			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				ok = true
-				break
-			}
-		}
-		if !ok {
-			return fmt.Errorf("media folder %q is outside TRIM_DATA_ACCESSIBLE_PATHS", folder)
-		}
+	if roots := AccessibleRoots(); len(roots) > 0 && !UnderRoots(roots, clean) {
+		return fmt.Errorf("media folder %q is outside TRIM_DATA_ACCESSIBLE_PATHS", folder)
 	}
 	fi, err := os.Stat(clean)
 	if err != nil {
@@ -349,10 +396,8 @@ func parseName(re *regexp.Regexp, rel string) (artist, title string) {
 
 func (s *Syncer) run(ctx context.Context) (Status, error) {
 	var st Status
-	mc := s.cfg.Media
-	if len(mc.Folders) == 0 {
-		return st, errors.New("media: no folders configured")
-	}
+	cfg := s.config()
+	mc := cfg.Media
 	for _, f := range mc.Folders {
 		if err := checkFolder(f); err != nil {
 			return st, err
@@ -382,7 +427,7 @@ func (s *Syncer) run(ctx context.Context) (Status, error) {
 		}
 	}
 	snap := snapshotHash(files, mc.FilenamePattern, aliases)
-	songs := SongsPath(s.cfg.DataDir)
+	songs := SongsPath(cfg.DataDir)
 	if s.store != nil {
 		old, gerr := s.store.GetSetting(ctx, SettingSnapshot)
 		if _, serr := os.Stat(songs); gerr == nil && old == snap && serr == nil {
@@ -426,8 +471,10 @@ func (s *Syncer) run(ctx context.Context) (Status, error) {
 	st.Tracks = len(tracks)
 
 	// 4. prebuild cache, 5. prune
-	if err := s.prebuild(ctx, songs); err != nil {
-		return st, err
+	if len(tracks) > 0 { // nothing to index for an empty library
+		if err := s.prebuild(ctx, cfg, songs); err != nil {
+			return st, err
+		}
 	}
 
 	// snapshot is saved only once everything succeeded
@@ -503,8 +550,8 @@ func writeSongs(dst string, tracks []Track) error {
 
 // prebuild runs fzq once with the exact query-time index args and an empty
 // query so the index cache exists, then prunes old cache files.
-func (s *Syncer) prebuild(ctx context.Context, songs string) error {
-	cache := CacheDir(s.cfg.DataDir)
+func (s *Syncer) prebuild(ctx context.Context, cfg *config.Config, songs string) error {
+	cache := CacheDir(cfg.DataDir)
 	if err := os.MkdirAll(cache, 0o700); err != nil {
 		return err
 	}
@@ -513,7 +560,7 @@ func (s *Syncer) prebuild(ctx context.Context, songs string) error {
 	args = append(args, IndexArgs(songs)...)
 	res, err := s.runner.Run(ctx, toolrunner.Spec{
 		Tool: "media_sync", Source: "media_library", Query: "(prebuild index cache)",
-		Path: fzqPath(s.cfg), Args: args, Timeout: prebuildTimeout,
+		Path: fzqPath(cfg), Args: args, Timeout: prebuildTimeout,
 	})
 	if err != nil {
 		return fmt.Errorf("media: prebuild cache: %w", err)

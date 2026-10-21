@@ -34,9 +34,11 @@ func cmdServe(ctx context.Context, args []string) error {
 		return err
 	}
 
-	log := logx.New(logLevel("info"), os.Stderr)
+	lv := new(slog.LevelVar)
+	lv.Set(logx.ParseLevel(logLevel(cfg.Logging.Level))) // VOX_LOG_LEVEL overrides the config file
+	log := logx.NewWithLevelVar(lv, os.Stderr)
 	slog.SetDefault(log)
-	a, err := app.Build(cfg, app.WithLogger(log))
+	a, err := app.Build(cfg, app.WithLogger(log), app.WithLevelVar(lv))
 	if err != nil {
 		return err
 	}

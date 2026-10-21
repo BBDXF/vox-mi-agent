@@ -26,7 +26,19 @@ const (
 type Deps struct {
 	Runner   *toolrunner.Runner // nil => toolrunner.New()
 	Sources  *Sources           // nil => no sources
+	Live     *SourceSet         // when set, takes precedence over Sources (swappable at runtime)
 	ToolsDir string             // dir holding fzq/jq/yq; "" => $VOX_TOOLS_DIR or /opt/tools
+	// BinPath, when set, returns the absolute path of "fzq"/"jq"/"yq"
+	// (per-tool configured paths); it takes precedence over ToolsDir.
+	BinPath func(name string) string
+}
+
+// sources returns the current source registry.
+func (d Deps) sources() *Sources {
+	if d.Live != nil {
+		return d.Live.Get()
+	}
+	return d.Sources
 }
 
 // All returns query_json, query_yaml and fuzzy_match.
@@ -51,7 +63,14 @@ func (d Deps) withDefaults() Deps {
 	return d
 }
 
-func (d Deps) bin(name string) string { return filepath.Join(d.ToolsDir, name) }
+func (d Deps) bin(name string) string {
+	if d.BinPath != nil {
+		if p := d.BinPath(name); p != "" {
+			return p
+		}
+	}
+	return filepath.Join(d.ToolsDir, name)
+}
 
 func errResult(format string, a ...any) map[string]any {
 	return map[string]any{"error": fmt.Sprintf(format, a...)}
@@ -88,9 +107,9 @@ func (d Deps) resolveInput(source, inline string) (input, error) {
 	case source != "" && inline != "":
 		return input{}, errors.New("provide exactly one of 'source' or 'input', not both")
 	case source == "" && inline == "":
-		return input{}, fmt.Errorf("provide exactly one of 'source' or 'input'; available sources: %s", availList(d.Sources))
+		return input{}, fmt.Errorf("provide exactly one of 'source' or 'input'; available sources: %s", availList(d.sources()))
 	case source != "":
-		src, err := d.Sources.Get(source)
+		src, err := d.sources().Get(source)
 		if err != nil {
 			return input{}, err
 		}

@@ -113,13 +113,172 @@ export interface SourceInfo {
 
 export interface MediaConfig {
   folders: string[];
-  sync_interval: string | number;
-  extensions?: string[];
+  sync_interval: string;
+  extensions: string[];
+  accessible_roots?: string[];
   max_files?: number;
+}
+
+export interface UpdateMediaSettingsRequest {
+  folders: string[];
+  extensions?: string[];
+  sync_interval?: string;
+}
+
+export interface UpdateMediaSettingsResponse {
+  sync_started: boolean;
+}
+
+export interface FsDirEntry {
+  name: string;
+  path: string;
+  symlink?: boolean;
+}
+
+export interface FsDirsResponse {
+  path: string;
+  parent: string | null;
+  entries: FsDirEntry[];
+  truncated?: boolean;
+}
+
+export interface ValidateFsPathResponse {
+  ok: boolean;
+  reason?: string;
+  audio_files_estimate?: number | string;
 }
 
 export interface SpeakerConfig {
   driver: string;
+}
+
+// ---------------- Schema-Driven Settings Types ----------------
+
+export type FieldType =
+  | 'string'
+  | 'int'
+  | 'float'
+  | 'bool'
+  | 'duration'
+  | 'bytesize'
+  | 'string[]'
+  | 'enum'
+  | 'object[]'
+  | 'map'
+  | 'object';
+
+export interface SchemaField {
+  key: string;
+  type: FieldType;
+  default: any;
+  enum?: string[];
+  secret?: boolean;
+  restart_required?: boolean;
+  description?: string;
+}
+
+export interface SchemaSection {
+  name: string; // 'llm' | 'media' | 'aliases' | 'search' | 'sources' | 'tools' | 'speaker' | 'server' | 'logging'
+  title?: string;
+  fields: SchemaField[];
+}
+
+export interface SettingsSchemaResponse {
+  sections: SchemaSection[];
+}
+
+export interface PutSectionSettingsResponse {
+  restart_required: boolean;
+}
+
+export interface AliasItem {
+  title: string;
+  artist?: string;
+  aliases: string[];
+}
+
+export interface AliasesSettingsResponse {
+  items: AliasItem[];
+}
+
+export interface SourceItem {
+  name: string;
+  file: string;
+  format: 'auto' | 'lines' | 'json' | 'jsonl' | 'yaml';
+  records?: string;
+  keys?: string[];
+  extract?: string;
+  strip?: string[];
+}
+
+// ---------------- Tracing Types ----------------
+
+export interface TraceStep {
+  id: string;
+  ts: string;
+  step: number;
+  kind: 'turn' | 'llm' | 'tool';
+  name: string;
+  status: 'ok' | 'error' | 'canceled' | string;
+  duration_ms: number;
+  first_token_ms?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  finish_reason?: string;
+  args?: any;
+  result_summary?: string;
+  error?: string;
+}
+
+export interface TraceTurn {
+  turn_id: string;
+  ts: string;
+  status: 'ok' | 'error' | 'canceled';
+  duration_ms: number;
+  first_token_ms: number;
+  steps: TraceStep[];
+}
+
+export interface ConversationTraceResponse {
+  turns: TraceTurn[];
+}
+
+export interface TraceItem extends TraceStep {
+  conversation_id: string;
+  turn_id: string;
+  channel?: string;
+}
+
+export interface GetTracesParams {
+  status?: string;
+  kind?: string;
+  name?: string;
+  since?: string;
+  until?: string;
+  conversation_id?: string;
+  limit?: number;
+  before_id?: string;
+}
+
+export interface TracesListResponse {
+  items: TraceItem[];
+  next_before_id?: string;
+}
+
+export interface TracePayloadStep {
+  ts: string;
+  step: number;
+  kind: 'llm' | 'tool';
+  request?: any;
+  response?: any;
+  tool?: string;
+  args?: any;
+  result?: any;
+}
+
+export interface TracePayloadResponse {
+  available: boolean;
+  items: TracePayloadStep[];
 }
 
 export interface SettingsResponse {
@@ -417,14 +576,598 @@ let mockSettings: SettingsResponse = {
   ],
   media: {
     folders: ['/vol1/1000/Music', '/vol2/Audio/Lossless'],
-    sync_interval: '6h0m0s',
+    sync_interval: '6h',
     extensions: ['mp3', 'flac', 'm4a', 'wav', 'ogg', 'ape'],
+    accessible_roots: ['/vol1/1000', '/vol2/Audio'],
     max_files: 100000,
   },
   speaker: {
     driver: 'xiaomi_miot',
   },
 };
+
+// ---------------- Mock Schema & Section Values ----------------
+
+export const mockSettingsSchema: SettingsSchemaResponse = {
+  sections: [
+    {
+      name: 'llm',
+      title: '大模型推理 (LLM)',
+      fields: [
+        { key: 'provider', type: 'string', default: 'opencode-zen', description: '模型服务商标识' },
+        { key: 'base_url', type: 'string', default: 'https://opencode.ai/zen/v1', description: 'API 接口基地址' },
+        { key: 'model', type: 'string', default: 'kimi-k1.5-free', description: '调用的模型版本名称' },
+        { key: 'api_key', type: 'string', secret: true, default: '', description: '服务商鉴权密钥 Token' },
+        { key: 'temperature', type: 'float', default: 0.3, description: '生成采样温度 (0.0 ~ 1.0)' },
+        { key: 'timeout_seconds', type: 'duration', default: '60s', restart_required: true, description: '单次推理请求超时限制' },
+      ],
+    },
+    {
+      name: 'media',
+      title: '本地曲库 (Media)',
+      fields: [
+        { key: 'folders', type: 'string[]', default: ['/vol1/1000/Music', '/vol2/Audio/Lossless'], description: '音频扫描根目录列表' },
+        { key: 'sync_interval', type: 'duration', default: '6h', description: '全量扫描与索引构建周期 (如 6h / 30m / 0)' },
+        { key: 'extensions', type: 'string[]', default: ['mp3', 'flac', 'm4a', 'wav', 'ogg', 'ape'], description: '音频解析文件后缀白名单' },
+        { key: 'max_files', type: 'int', default: 100000, description: '最大允许索引歌曲文件数量上限' },
+      ],
+    },
+    {
+      name: 'aliases',
+      title: '音乐别名 (Aliases)',
+      fields: [
+        { key: 'items', type: 'object[]', default: [], description: '歌曲简称、拼音及多语种别名映射字典' },
+      ],
+    },
+    {
+      name: 'search',
+      title: '拼音检索 (Search)',
+      fields: [
+        { key: 'pinyin.enabled', type: 'bool', default: true, description: '启用多音字全拼及首字母双向索引' },
+        { key: 'fuzzy.min_score', type: 'float', default: 60.0, description: '模糊匹配最低相似度分值阈值 (0-100)' },
+        { key: 'candidates.limit', type: 'int', default: 500, description: '拼音搜索引擎单次候选结果召回上限' },
+        { key: 'cache.ttl', type: 'duration', default: '24h', description: '搜索命中结果热点缓存时长 (如 24h / 30s)' },
+        { key: 'cache.max_memory', type: 'bytesize', default: '128MiB', restart_required: true, description: '模糊检索索引最大常驻内存限制' },
+      ],
+    },
+    {
+      name: 'sources',
+      title: '数据源 (Sources)',
+      fields: [
+        { key: 'items', type: 'object[]', default: [], description: '只读结构化数据源注册清单' },
+      ],
+    },
+    {
+      name: 'tools',
+      title: '系统工具 (Tools)',
+      fields: [
+        { key: 'shell.enabled', type: 'bool', default: false, restart_required: true, description: '允许 Agent 在受限白名单内调用宿主 Shell' },
+        { key: 'fzq.path', type: 'string', default: '/usr/local/bin/fzq', restart_required: true, description: 'fzq 高速拼音搜索引擎可执行文件路径' },
+        { key: 'jq.path', type: 'string', default: '/usr/bin/jq', restart_required: true, description: 'jq JSON 过滤器可执行文件路径' },
+        { key: 'timeout', type: 'duration', default: '15s', description: '外部命令行工具执行最大超时时长' },
+      ],
+    },
+    {
+      name: 'speaker',
+      title: '音箱驱动 (Speaker)',
+      fields: [
+        { key: 'driver', type: 'enum', enum: ['xiaomi_miot', 'mock', 'dlna'], default: 'xiaomi_miot', restart_required: true, description: '智能音箱硬件底层驱动协议通道' },
+        { key: 'device_did', type: 'string', default: 'miot.speaker.pro.01', description: '小米 MIoT 智能设备实体 DID 标识' },
+        { key: 'miot.token', type: 'string', secret: true, default: '', description: '米家局域网通信 Token 鉴权凭据' },
+        { key: 'default_volume', type: 'int', default: 45, description: '语音播报及默认音乐点播音量 (0-100)' },
+        { key: 'tts.rate', type: 'int', default: 100, description: '小爱 TTS 朗读语速百分比 (50-200)' },
+      ],
+    },
+    {
+      name: 'server',
+      title: '服务网络 (Server)',
+      fields: [
+        { key: 'http.port', type: 'int', default: 8080, restart_required: true, description: 'Web 控制台与 API 监听端口' },
+        { key: 'http.host', type: 'string', default: '0.0.0.0', restart_required: true, description: '系统网络监听绑定的 IP 地址' },
+        { key: 'auth.require_admin', type: 'bool', default: false, restart_required: true, description: '访问管理设置与调试功能需管理员身份验证' },
+        { key: 'admin.password', type: 'string', secret: true, default: '', description: '控制台管理员访问密码' },
+        { key: 'max_request_size', type: 'bytesize', default: '10MiB', restart_required: true, description: 'HTTP 请求体最大允许尺寸限制' },
+      ],
+    },
+    {
+      name: 'logging',
+      title: '日志调试 (Logging)',
+      fields: [
+        { key: 'level', type: 'enum', enum: ['debug', 'info', 'warn', 'error'], default: 'info', description: '标准输出控制台日志记录等级' },
+        { key: 'debug_mode', type: 'bool', default: true, description: '开启全量输入输出原始报文 Payload 调试存储' },
+        { key: 'retention', type: 'duration', default: '72h', description: '调用链追踪记录在本地磁盘的保留期限' },
+        { key: 'max_log_size', type: 'bytesize', default: '64MiB', restart_required: true, description: '单卷追踪日志文件轮转尺寸上限' },
+      ],
+    },
+  ],
+};
+
+let mockAliases: AliasItem[] = [
+  { title: '晴天', artist: '周杰伦', aliases: ['QingTian', 'Sunny Day', '周董晴天'] },
+  { title: '七里香', artist: '周杰伦', aliases: ['QiLiXiang', 'Common Jasmine Orange'] },
+  { title: '十年', artist: '陈奕迅', aliases: ['ShiNian', 'Ten Years'] },
+  { title: '富士山下', artist: '陈奕迅', aliases: ['FuShiShanXia', '爱情转移粤语版'] },
+  { title: '青花瓷', artist: '周杰伦', aliases: ['QingHuaCi', 'Blue and White Porcelain'] },
+];
+
+let mockSources: SourceItem[] = [
+  {
+    name: 'media_library',
+    file: '/data/media/songs.jsonl',
+    format: 'jsonl',
+    records: 'auto',
+    keys: ['title', 'artist', 'alias'],
+    extract: '',
+    strip: [],
+  },
+  {
+    name: 'devices',
+    file: '/data/sources/devices.json',
+    format: 'json',
+    records: 'items',
+    keys: ['name', 'room', 'type'],
+    extract: '',
+    strip: [],
+  },
+];
+
+let mockSectionValues: Record<string, Record<string, any>> = {
+  llm: {
+    provider: 'opencode-zen',
+    base_url: 'https://opencode.ai/zen/v1',
+    model: 'kimi-k1.5-free',
+    api_key: '****39df',
+    temperature: 0.3,
+    timeout_seconds: '60s',
+  },
+  media: {
+    folders: ['/vol1/1000/Music', '/vol2/Audio/Lossless'],
+    sync_interval: '6h',
+    extensions: ['mp3', 'flac', 'm4a', 'wav', 'ogg', 'ape'],
+    max_files: 100000,
+  },
+  aliases: {
+    items: mockAliases,
+  },
+  search: {
+    'pinyin.enabled': true,
+    'fuzzy.min_score': 60.0,
+    'candidates.limit': 500,
+    'cache.ttl': '24h',
+    'cache.max_memory': '128MiB',
+  },
+  sources: {
+    items: mockSources,
+  },
+  tools: {
+    'shell.enabled': false,
+    'fzq.path': '/usr/local/bin/fzq',
+    'jq.path': '/usr/bin/jq',
+    timeout: '15s',
+  },
+  speaker: {
+    driver: 'xiaomi_miot',
+    device_did: 'miot.speaker.pro.01',
+    'miot.token': '****9a8f',
+    default_volume: 45,
+    'tts.rate': 100,
+  },
+  server: {
+    'http.port': 8080,
+    'http.host': '0.0.0.0',
+    'auth.require_admin': false,
+    'admin.password': '****pass',
+    max_request_size: '10MiB',
+  },
+  logging: {
+    level: 'info',
+    debug_mode: true,
+    retention: '72h',
+    max_log_size: '64MiB',
+  },
+};
+
+// ---------------- Mock Tracing Data ----------------
+
+let mockConversationTraces: Record<string, ConversationTraceResponse> = {
+  conv_music_01: {
+    turns: [
+      {
+        turn_id: 'turn_music_01',
+        ts: new Date(Date.now() - 3600000 * 2).toISOString(),
+        status: 'ok',
+        duration_ms: 1240,
+        first_token_ms: 185,
+        steps: [
+          {
+            id: 'step_1_llm_01',
+            ts: new Date(Date.now() - 3600000 * 2).toISOString(),
+            step: 1,
+            kind: 'llm',
+            name: 'kimi-k1.5-free',
+            status: 'ok',
+            duration_ms: 320,
+            first_token_ms: 185,
+            prompt_tokens: 350,
+            completion_tokens: 42,
+            finish_reason: 'tool_calls',
+            args: { query: '小爱同学，播放周杰伦的晴天' },
+          },
+          {
+            id: 'step_2_tool_01',
+            ts: new Date(Date.now() - 3600000 * 2 + 1000).toISOString(),
+            step: 2,
+            kind: 'tool',
+            name: 'fzq',
+            status: 'ok',
+            duration_ms: 22,
+            args: { queries: '周杰伦 晴天', limit: 3, candidates: 500 },
+            result_summary: '找到 1 首匹配曲目: 《晴天》 (周杰伦, 得分 98.5)',
+          },
+          {
+            id: 'step_3_llm_02',
+            ts: new Date(Date.now() - 3600000 * 2 + 1500).toISOString(),
+            step: 3,
+            kind: 'llm',
+            name: 'kimi-k1.5-free',
+            status: 'ok',
+            duration_ms: 280,
+            first_token_ms: 110,
+            prompt_tokens: 412,
+            completion_tokens: 38,
+            finish_reason: 'tool_calls',
+          },
+          {
+            id: 'step_4_tool_02',
+            ts: new Date(Date.now() - 3600000 * 2 + 2000).toISOString(),
+            step: 4,
+            kind: 'tool',
+            name: 'speaker_play',
+            status: 'ok',
+            duration_ms: 140,
+            args: {
+              file: '/vol1/1000/Music/周杰伦 - 晴天.mp3',
+              title: '晴天',
+              artist: '周杰伦',
+            },
+            result_summary: '推送播放流成功 (device: 小爱音箱 Pro, volume: 45)',
+          },
+          {
+            id: 'step_5_llm_03',
+            ts: new Date(Date.now() - 3600000 * 2 + 2500).toISOString(),
+            step: 5,
+            kind: 'llm',
+            name: 'kimi-k1.5-free',
+            status: 'ok',
+            duration_ms: 478,
+            first_token_ms: 95,
+            prompt_tokens: 520,
+            completion_tokens: 65,
+            finish_reason: 'stop',
+          },
+        ],
+      },
+    ],
+  },
+  conv_weather_02: {
+    turns: [
+      {
+        turn_id: 'turn_weather_02',
+        ts: new Date(Date.now() - 3600000 * 5).toISOString(),
+        status: 'ok',
+        duration_ms: 820,
+        first_token_ms: 145,
+        steps: [
+          {
+            id: 'step_w1_llm',
+            ts: new Date(Date.now() - 3600000 * 5).toISOString(),
+            step: 1,
+            kind: 'llm',
+            name: 'kimi-k1.5-free',
+            status: 'ok',
+            duration_ms: 820,
+            first_token_ms: 145,
+            prompt_tokens: 280,
+            completion_tokens: 72,
+            finish_reason: 'stop',
+            args: { query: '明天出门需要带伞吗？' },
+          },
+        ],
+      },
+    ],
+  },
+  conv_debug_03: {
+    turns: [
+      {
+        turn_id: 'turn_debug_03',
+        ts: new Date(Date.now() - 86400000).toISOString(),
+        status: 'ok',
+        duration_ms: 950,
+        first_token_ms: 160,
+        steps: [
+          {
+            id: 'step_d1_llm',
+            ts: new Date(Date.now() - 86400000).toISOString(),
+            step: 1,
+            kind: 'llm',
+            name: 'kimi-k1.5-free',
+            status: 'ok',
+            duration_ms: 310,
+            first_token_ms: 160,
+            prompt_tokens: 190,
+            completion_tokens: 30,
+            finish_reason: 'tool_calls',
+          },
+          {
+            id: 'step_d2_tool',
+            ts: new Date(Date.now() - 86400000 + 400).toISOString(),
+            step: 2,
+            kind: 'tool',
+            name: 'system_check',
+            status: 'ok',
+            duration_ms: 45,
+            args: { check: 'tools' },
+            result_summary: 'fzq: v0.2.1, jq: v1.7.1, yq: v4.44.1 均正常',
+          },
+          {
+            id: 'step_d3_llm',
+            ts: new Date(Date.now() - 86400000 + 500).toISOString(),
+            step: 3,
+            kind: 'llm',
+            name: 'kimi-k1.5-free',
+            status: 'ok',
+            duration_ms: 595,
+            first_token_ms: 90,
+            prompt_tokens: 380,
+            completion_tokens: 88,
+            finish_reason: 'stop',
+          },
+        ],
+      },
+    ],
+  },
+};
+
+let mockTracePayloads: Record<string, TracePayloadResponse> = {
+  turn_music_01: {
+    available: true,
+    items: [
+      {
+        ts: new Date(Date.now() - 3600000 * 2).toISOString(),
+        step: 1,
+        kind: 'llm',
+        request: {
+          model: 'kimi-k1.5-free',
+          messages: [
+            { role: 'system', content: 'You are Vox MI companion agent on NAS.' },
+            { role: 'user', content: '小爱同学，播放周杰伦的晴天' },
+          ],
+          tools: [{ type: 'function', function: { name: 'fzq', description: 'fuzzy music search' } }],
+          temperature: 0.3,
+        },
+        response: {
+          id: 'chatcmpl-789a',
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call_fzq_101',
+                    type: 'function',
+                    function: { name: 'fzq', arguments: '{"queries":"周杰伦 晴天","limit":3}' },
+                  },
+                ],
+              },
+              finish_reason: 'tool_calls',
+            },
+          ],
+          usage: { prompt_tokens: 350, completion_tokens: 42, total_tokens: 392 },
+        },
+      },
+      {
+        ts: new Date(Date.now() - 3600000 * 2 + 1000).toISOString(),
+        step: 2,
+        kind: 'tool',
+        tool: 'fzq',
+        args: { queries: '周杰伦 晴天', limit: 3, candidates: 500 },
+        result: [
+          {
+            artist: '周杰伦',
+            title: '晴天',
+            file: '/vol1/1000/Music/周杰伦 - 晴天.mp3',
+            score: 98.5,
+            duration: '04:29',
+          },
+        ],
+      },
+      {
+        ts: new Date(Date.now() - 3600000 * 2 + 1500).toISOString(),
+        step: 3,
+        kind: 'llm',
+        request: {
+          model: 'kimi-k1.5-free',
+          messages: [
+            { role: 'tool', tool_call_id: 'call_fzq_101', content: '...' },
+          ],
+        },
+        response: {
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call_speaker_102',
+                    type: 'function',
+                    function: {
+                      name: 'speaker_play',
+                      arguments: '{"file":"/vol1/1000/Music/周杰伦 - 晴天.mp3","title":"晴天","artist":"周杰伦"}',
+                    },
+                  },
+                ],
+              },
+              finish_reason: 'tool_calls',
+            },
+          ],
+        },
+      },
+      {
+        ts: new Date(Date.now() - 3600000 * 2 + 2000).toISOString(),
+        step: 4,
+        kind: 'tool',
+        tool: 'speaker_play',
+        args: { file: '/vol1/1000/Music/周杰伦 - 晴天.mp3', title: '晴天', artist: '周杰伦' },
+        result: { status: 'playing', device: '小爱音箱 Pro', driver: 'xiaomi_miot', volume: 45 },
+      },
+    ],
+  },
+  turn_weather_02: {
+    available: true,
+    items: [
+      {
+        ts: new Date(Date.now() - 3600000 * 5).toISOString(),
+        step: 1,
+        kind: 'llm',
+        request: { model: 'kimi-k1.5-free', messages: [{ role: 'user', content: '明天出门需要带伞吗？' }] },
+        response: { choices: [{ message: { content: '明天多云转晴，降水概率仅 10%，无需带伞。' } }] },
+      },
+    ],
+  },
+  turn_debug_03: {
+    available: true,
+    items: [
+      {
+        ts: new Date(Date.now() - 86400000).toISOString(),
+        step: 1,
+        kind: 'llm',
+        request: { model: 'kimi-k1.5-free', messages: [{ role: 'user', content: '检查系统环境与工具链版本' }] },
+        response: { choices: [{ message: { content: '系统核心组件均正常就绪' } }] },
+      },
+    ],
+  },
+};
+
+let mockAllTraceItems: TraceItem[] = [
+  {
+    id: 'tr_turn_01',
+    ts: new Date(Date.now() - 3600000 * 2).toISOString(),
+    step: 0,
+    kind: 'turn',
+    name: '播放周杰伦《晴天》',
+    status: 'ok',
+    duration_ms: 1240,
+    first_token_ms: 185,
+    prompt_tokens: 1282,
+    completion_tokens: 145,
+    conversation_id: 'conv_music_01',
+    turn_id: 'turn_music_01',
+    channel: 'speaker',
+  },
+  {
+    id: 'tr_llm_01',
+    ts: new Date(Date.now() - 3600000 * 2).toISOString(),
+    step: 1,
+    kind: 'llm',
+    name: 'kimi-k1.5-free',
+    status: 'ok',
+    duration_ms: 320,
+    first_token_ms: 185,
+    prompt_tokens: 350,
+    completion_tokens: 42,
+    finish_reason: 'tool_calls',
+    conversation_id: 'conv_music_01',
+    turn_id: 'turn_music_01',
+    channel: 'speaker',
+  },
+  {
+    id: 'tr_tool_01',
+    ts: new Date(Date.now() - 3600000 * 2 + 1000).toISOString(),
+    step: 2,
+    kind: 'tool',
+    name: 'fzq',
+    status: 'ok',
+    duration_ms: 22,
+    args: { queries: '周杰伦 晴天', limit: 3 },
+    result_summary: '找到 1 首匹配曲目: 《晴天》 (周杰伦, 得分 98.5)',
+    conversation_id: 'conv_music_01',
+    turn_id: 'turn_music_01',
+    channel: 'speaker',
+  },
+  {
+    id: 'tr_tool_02',
+    ts: new Date(Date.now() - 3600000 * 2 + 2000).toISOString(),
+    step: 4,
+    kind: 'tool',
+    name: 'speaker_play',
+    status: 'ok',
+    duration_ms: 140,
+    args: { file: '/vol1/1000/Music/周杰伦 - 晴天.mp3', title: '晴天' },
+    result_summary: '已推送音频流到小爱音箱 Pro',
+    conversation_id: 'conv_music_01',
+    turn_id: 'turn_music_01',
+    channel: 'speaker',
+  },
+  {
+    id: 'tr_turn_02',
+    ts: new Date(Date.now() - 3600000 * 5).toISOString(),
+    step: 0,
+    kind: 'turn',
+    name: '明日天气查询与穿衣提醒',
+    status: 'ok',
+    duration_ms: 820,
+    first_token_ms: 145,
+    prompt_tokens: 280,
+    completion_tokens: 72,
+    conversation_id: 'conv_weather_02',
+    turn_id: 'turn_weather_02',
+    channel: 'speaker',
+  },
+  {
+    id: 'tr_err_01',
+    ts: new Date(Date.now() - 3600000 * 12).toISOString(),
+    step: 2,
+    kind: 'tool',
+    name: 'speaker_play',
+    status: 'error',
+    duration_ms: 5012,
+    args: { file: '/vol1/1000/Music/NotExist.mp3' },
+    error: 'MIoT 设备无响应 (504 Gateway Timeout)，音箱处于离线静音模式',
+    result_summary: '调用失败: 设备超时未应答',
+    conversation_id: 'conv_music_01',
+    turn_id: 'turn_music_01',
+    channel: 'speaker',
+  },
+  {
+    id: 'tr_turn_03',
+    ts: new Date(Date.now() - 86400000).toISOString(),
+    step: 0,
+    kind: 'turn',
+    name: 'NAS 本地曲库索引自检',
+    status: 'ok',
+    duration_ms: 950,
+    first_token_ms: 160,
+    prompt_tokens: 570,
+    completion_tokens: 118,
+    conversation_id: 'conv_debug_03',
+    turn_id: 'turn_debug_03',
+    channel: 'web',
+  },
+  {
+    id: 'tr_tool_03',
+    ts: new Date(Date.now() - 86400000 + 400).toISOString(),
+    step: 2,
+    kind: 'tool',
+    name: 'system_check',
+    status: 'ok',
+    duration_ms: 45,
+    args: { check: 'tools' },
+    result_summary: 'fzq: v0.2.1, jq: v1.7.1, yq: v4.44.1 正常',
+    conversation_id: 'conv_debug_03',
+    turn_id: 'turn_debug_03',
+    channel: 'web',
+  },
+];
 
 let mockMediaStatus: MediaStatus = {
   running: false,
@@ -433,6 +1176,322 @@ let mockMediaStatus: MediaStatus = {
   duration_ms: 1840,
   result: '已扫描 14,280 首曲目，无损格式占比 82%，模糊检索索引已更新',
 };
+
+// ---------------- Mock Filesystem Tree ----------------
+interface MockDirNode {
+  parent: string | null;
+  entries: FsDirEntry[];
+  truncated?: boolean;
+}
+
+const mockFsTree: Record<string, MockDirNode> = {
+  '/': {
+    parent: null,
+    entries: [
+      { name: 'vol1', path: '/vol1' },
+      { name: 'vol2', path: '/vol2' },
+      { name: 'home', path: '/home' },
+      { name: 'etc', path: '/etc' },
+      { name: 'var', path: '/var' },
+    ],
+  },
+  '/vol1': {
+    parent: '/',
+    entries: [
+      { name: '1000', path: '/vol1/1000' },
+      { name: 'public', path: '/vol1/public' },
+    ],
+  },
+  '/vol1/public': {
+    parent: '/vol1',
+    entries: [
+      { name: 'Shared_Audio', path: '/vol1/public/Shared_Audio' },
+    ],
+  },
+  '/vol1/1000': {
+    parent: '/vol1',
+    entries: [
+      { name: 'Music', path: '/vol1/1000/Music' },
+      { name: 'Audiobooks', path: '/vol1/1000/Audiobooks' },
+      { name: 'Media_Symlink', path: '/vol1/1000/Media_Symlink', symlink: true },
+      { name: 'Photos', path: '/vol1/1000/Photos' },
+      { name: 'Videos', path: '/vol1/1000/Videos' },
+      { name: 'Downloads', path: '/vol1/1000/Downloads' },
+    ],
+  },
+  '/vol1/1000/Music': {
+    parent: '/vol1/1000',
+    entries: [
+      { name: 'JayChou', path: '/vol1/1000/Music/JayChou' },
+      { name: 'EasonChan', path: '/vol1/1000/Music/EasonChan' },
+      { name: 'Classical', path: '/vol1/1000/Music/Classical' },
+      { name: 'Hi-Res Lossless', path: '/vol1/1000/Music/Hi-Res Lossless' },
+      { name: 'Soundtracks', path: '/vol1/1000/Music/Soundtracks' },
+    ],
+  },
+  '/vol1/1000/Music/JayChou': {
+    parent: '/vol1/1000/Music',
+    entries: [
+      { name: '2000 - Jay', path: '/vol1/1000/Music/JayChou/2000 - Jay' },
+      { name: '2001 - Fantasy', path: '/vol1/1000/Music/JayChou/2001 - Fantasy' },
+      { name: '2004 - Common Jasmine Orange', path: '/vol1/1000/Music/JayChou/2004 - Common Jasmine Orange' },
+    ],
+  },
+  '/vol1/1000/Music/EasonChan': {
+    parent: '/vol1/1000/Music',
+    entries: [
+      { name: 'U87', path: '/vol1/1000/Music/EasonChan/U87' },
+      { name: 'H3M', path: '/vol1/1000/Music/EasonChan/H3M' },
+    ],
+  },
+  '/vol1/1000/Music/Classical': {
+    parent: '/vol1/1000/Music',
+    entries: [
+      { name: 'Beethoven', path: '/vol1/1000/Music/Classical/Beethoven' },
+      { name: 'Bach', path: '/vol1/1000/Music/Classical/Bach' },
+      { name: 'Chopin', path: '/vol1/1000/Music/Classical/Chopin' },
+    ],
+  },
+  '/vol1/1000/Music/Soundtracks': {
+    parent: '/vol1/1000/Music',
+    entries: [
+      { name: 'Interstellar', path: '/vol1/1000/Music/Soundtracks/Interstellar' },
+      { name: 'Ghibli', path: '/vol1/1000/Music/Soundtracks/Ghibli' },
+    ],
+  },
+  '/vol1/1000/Music/Hi-Res Lossless': {
+    parent: '/vol1/1000/Music',
+    entries: [
+      { name: 'DSD-128', path: '/vol1/1000/Music/Hi-Res Lossless/DSD-128' },
+      { name: 'FLAC-24bit', path: '/vol1/1000/Music/Hi-Res Lossless/FLAC-24bit' },
+    ],
+  },
+  '/vol1/1000/Audiobooks': {
+    parent: '/vol1/1000',
+    entries: [
+      { name: 'ThreeBody', path: '/vol1/1000/Audiobooks/ThreeBody' },
+      { name: 'SciFi_Novels', path: '/vol1/1000/Audiobooks/SciFi_Novels' },
+    ],
+  },
+  '/vol2': {
+    parent: '/',
+    entries: [
+      { name: 'Audio', path: '/vol2/Audio' },
+      { name: 'Backups', path: '/vol2/Backups' },
+    ],
+  },
+  '/vol2/Audio': {
+    parent: '/vol2',
+    entries: [
+      { name: 'Lossless', path: '/vol2/Audio/Lossless' },
+      { name: 'Podcasts', path: '/vol2/Audio/Podcasts' },
+      { name: 'HiFi_DSD', path: '/vol2/Audio/HiFi_DSD' },
+    ],
+  },
+  '/vol2/Audio/Lossless': {
+    parent: '/vol2/Audio',
+    entries: [
+      { name: 'DSD_SACD', path: '/vol2/Audio/Lossless/DSD_SACD' },
+      { name: 'Jazz', path: '/vol2/Audio/Lossless/Jazz' },
+      { name: 'Pop', path: '/vol2/Audio/Lossless/Pop' },
+      { name: 'Rock', path: '/vol2/Audio/Lossless/Rock' },
+    ],
+  },
+  '/vol2/Audio/Lossless/Jazz': {
+    parent: '/vol2/Audio/Lossless',
+    entries: [
+      { name: 'Miles Davis', path: '/vol2/Audio/Lossless/Jazz/Miles Davis' },
+      { name: 'Bill Evans', path: '/vol2/Audio/Lossless/Jazz/Bill Evans' },
+    ],
+  },
+  '/vol2/Audio/Lossless/Pop': {
+    parent: '/vol2/Audio/Lossless',
+    entries: [
+      { name: 'Chinese', path: '/vol2/Audio/Lossless/Pop/Chinese' },
+      { name: 'Western', path: '/vol2/Audio/Lossless/Pop/Western' },
+    ],
+  },
+  '/vol2/Audio/Podcasts': {
+    parent: '/vol2/Audio',
+    entries: [
+      { name: 'TechTalk', path: '/vol2/Audio/Podcasts/TechTalk' },
+      { name: 'History', path: '/vol2/Audio/Podcasts/History' },
+    ],
+  },
+  '/vol2/Audio/HiFi_DSD': {
+    parent: '/vol2/Audio',
+    entries: [
+      { name: 'SACD_ISO', path: '/vol2/Audio/HiFi_DSD/SACD_ISO' },
+      { name: 'DFF', path: '/vol2/Audio/HiFi_DSD/DFF' },
+    ],
+  },
+  '/vol2/Backups': {
+    parent: '/vol2',
+    entries: [
+      { name: 'Snapshot_2026', path: '/vol2/Backups/Snapshot_2026' },
+    ],
+  },
+  '/etc': {
+    parent: '/',
+    entries: [
+      { name: 'nginx', path: '/etc/nginx' },
+      { name: 'ssl', path: '/etc/ssl' },
+    ],
+  },
+  '/home': {
+    parent: '/',
+    entries: [
+      { name: 'user', path: '/home/user' },
+    ],
+  },
+};
+
+async function mockGetFsDirs(path?: string): Promise<FsDirsResponse> {
+  await new Promise((r) => setTimeout(r, 120));
+  // If path is omitted, default to primary fnOS media folder
+  const targetPath = !path || !path.trim() ? '/vol1/1000' : path.trim().replace(/\/+$/, '') || '/';
+
+  if (targetPath === '/restricted' || targetPath === '/root') {
+    throw new ApiError('访问被拒绝：权限不足 (403 Forbidden)', 403);
+  }
+  if (targetPath.startsWith('/nonexistent') || targetPath.startsWith('/invalid')) {
+    throw new ApiError('目录未找到 (404 Not Found)', 404);
+  }
+
+  const node = mockFsTree[targetPath];
+  if (node) {
+    return {
+      path: targetPath,
+      parent: node.parent,
+      entries: [...node.entries],
+      truncated: node.truncated,
+    };
+  }
+
+  const lastSlash = targetPath.lastIndexOf('/');
+  const parent = lastSlash <= 0 ? '/' : targetPath.substring(0, lastSlash);
+  return {
+    path: targetPath,
+    parent: targetPath === '/' ? null : parent,
+    entries: [],
+  };
+}
+
+async function mockValidateFsPath(path: string): Promise<ValidateFsPathResponse> {
+  await new Promise((r) => setTimeout(r, 150));
+  const cleanPath = path.trim().replace(/\/+$/, '') || '/';
+
+  if (
+    cleanPath.startsWith('/etc') ||
+    cleanPath.startsWith('/var') ||
+    cleanPath === '/root' ||
+    cleanPath.includes('restricted')
+  ) {
+    return {
+      ok: false,
+      reason: '权限不足：该目录不在 fnOS 授权访问范围内',
+    };
+  }
+
+  if (cleanPath.startsWith('/nonexistent') || cleanPath.startsWith('/invalid')) {
+    return {
+      ok: false,
+      reason: '目录不存在或无法读取',
+    };
+  }
+
+  const knownEstimates: Record<string, number> = {
+    '/vol1/1000/Music': 8420,
+    '/vol2/Audio/Lossless': 5860,
+    '/vol1/1000/Music/JayChou': 320,
+    '/vol1/1000/Music/JayChou/2000 - Jay': 10,
+    '/vol1/1000/Music/JayChou/2001 - Fantasy': 10,
+    '/vol1/1000/Music/JayChou/2004 - Common Jasmine Orange': 10,
+    '/vol1/1000/Music/EasonChan': 215,
+    '/vol1/1000/Music/Classical': 1450,
+    '/vol1/1000/Music/Soundtracks': 380,
+    '/vol1/1000/Music/Hi-Res Lossless': 1120,
+    '/vol1/1000/Audiobooks': 48,
+    '/vol2/Audio/Lossless/DSD_SACD': 450,
+    '/vol2/Audio/Lossless/Jazz': 380,
+    '/vol2/Audio/Lossless/Pop': 2400,
+    '/vol2/Audio/Lossless/Rock': 960,
+    '/vol2/Audio/HiFi_DSD': 680,
+    '/vol2/Audio/Podcasts': 120,
+    '/vol1/1000': 8468,
+    '/vol2/Audio': 6540,
+  };
+
+  if (knownEstimates[cleanPath] !== undefined) {
+    return {
+      ok: true,
+      audio_files_estimate: knownEstimates[cleanPath],
+    };
+  }
+
+  if (
+    cleanPath.includes('Photo') ||
+    cleanPath.includes('Video') ||
+    cleanPath.includes('Download') ||
+    cleanPath.includes('Backup')
+  ) {
+    return {
+      ok: true,
+      audio_files_estimate: 0,
+      reason: '未检测到支持的音频文件',
+    };
+  }
+
+  return {
+    ok: true,
+    audio_files_estimate: Math.max(10, ((cleanPath.length * 37) % 650) + 15),
+  };
+}
+
+async function mockUpdateMediaSettings(
+  body: UpdateMediaSettingsRequest
+): Promise<UpdateMediaSettingsResponse> {
+  await new Promise((r) => setTimeout(r, 200));
+
+  const fieldErrors: Record<string, string> = {};
+  for (const folder of body.folders) {
+    if (
+      folder.includes('error') ||
+      folder.startsWith('/etc') ||
+      folder.startsWith('/var') ||
+      folder === '/root'
+    ) {
+      fieldErrors[folder] = '目录超出 fnOS 授权访问范围，请使用授权存储卷';
+    }
+  }
+
+  if (Object.keys(fieldErrors).length > 0) {
+    throw new ApiError('部分媒体目录校验失败，请修改后重试', 400, fieldErrors);
+  }
+
+  mockSettings.media.folders = [...body.folders];
+  if (body.extensions) {
+    mockSettings.media.extensions = [...body.extensions];
+  }
+  if (body.sync_interval !== undefined) {
+    mockSettings.media.sync_interval = body.sync_interval;
+  }
+
+  const syncStarted = true;
+  if (syncStarted) {
+    mockMediaStatus.running = true;
+    mockMediaStatus.result = '曲库配置已更新，正在执行全量文件重新扫描...';
+    setTimeout(() => {
+      mockMediaStatus.running = false;
+      mockMediaStatus.last_sync_at = new Date().toISOString();
+      mockMediaStatus.tracks = 14280 + body.folders.length * 15;
+      mockMediaStatus.duration_ms = 1520;
+      mockMediaStatus.result = `已扫描并同步完成，共 ${mockMediaStatus.tracks} 首曲目`;
+    }, 3000);
+  }
+
+  return { sync_started: syncStarted };
+}
 
 // ---------------- Mock Mode Utilities ----------------
 
@@ -456,18 +1515,34 @@ export function setMockMode(enabled: boolean): void {
 
 // ---------------- Helper API Client with Relative Paths ----------------
 
+export class ApiError extends Error {
+  status: number;
+  fields?: Record<string, string>;
+
+  constructor(message: string, status: number, fields?: Record<string, string>) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.fields = fields;
+  }
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let errMsg = `请求失败 (${res.status} ${res.statusText})`;
+    let fields: Record<string, string> | undefined;
     try {
       const json = await res.json();
       if (json?.error || json?.message) {
         errMsg = json.error || json.message;
       }
+      if (json?.fields) {
+        fields = json.fields;
+      }
     } catch {
       // ignore
     }
-    throw new Error(errMsg);
+    throw new ApiError(errMsg, res.status, fields);
   }
   if (res.status === 204) {
     return {} as T;
@@ -770,6 +1845,53 @@ export async function getMediaStatus(): Promise<MediaStatus> {
 }
 
 /**
+ * PUT api/settings/media {folders, extensions?, sync_interval?}
+ */
+export async function updateMediaSettings(
+  body: UpdateMediaSettingsRequest
+): Promise<UpdateMediaSettingsResponse> {
+  if (isMockMode()) {
+    return mockUpdateMediaSettings(body);
+  }
+
+  const res = await fetch('api/settings/media', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse<UpdateMediaSettingsResponse>(res);
+}
+
+/**
+ * GET api/fs/dirs?path=/abs
+ */
+export async function getFsDirs(path?: string): Promise<FsDirsResponse> {
+  if (isMockMode()) {
+    return mockGetFsDirs(path);
+  }
+
+  const query = path ? `?path=${encodeURIComponent(path)}` : '';
+  const res = await fetch(`api/fs/dirs${query}`);
+  return handleResponse<FsDirsResponse>(res);
+}
+
+/**
+ * POST api/fs/validate {path}
+ */
+export async function validateFsPath(path: string): Promise<ValidateFsPathResponse> {
+  if (isMockMode()) {
+    return mockValidateFsPath(path);
+  }
+
+  const res = await fetch('api/fs/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+  return handleResponse<ValidateFsPathResponse>(res);
+}
+
+/**
  * POST api/media/sync
  */
 export async function triggerMediaSync(): Promise<void> {
@@ -845,4 +1967,246 @@ export function appendMockAssistantMessage(conversationId: string, msg: Message)
     mockMessages[conversationId] = [];
   }
   mockMessages[conversationId].push(msg);
+}
+
+/**
+ * GET api/settings/schema
+ */
+export async function getSettingsSchema(): Promise<SettingsSchemaResponse> {
+  if (isMockMode()) {
+    return JSON.parse(JSON.stringify(mockSettingsSchema));
+  }
+
+  const res = await fetch('api/settings/schema');
+  return handleResponse<SettingsSchemaResponse>(res);
+}
+
+/**
+ * GET api/settings/{section}
+ */
+export async function getSectionSettings(section: string): Promise<Record<string, any>> {
+  if (isMockMode()) {
+    const val = mockSectionValues[section] || {};
+    return JSON.parse(JSON.stringify(val));
+  }
+
+  const res = await fetch(`api/settings/${encodeURIComponent(section)}`);
+  return handleResponse<Record<string, any>>(res);
+}
+
+/**
+ * PUT api/settings/{section}
+ */
+export async function updateSectionSettings(
+  section: string,
+  body: Record<string, any>
+): Promise<PutSectionSettingsResponse> {
+  if (isMockMode()) {
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Simulate validation error if any value contains __error__
+    const fieldErrors: Record<string, string> = {};
+    for (const [k, v] of Object.entries(body)) {
+      if (typeof v === 'string' && v.includes('__error__')) {
+        fieldErrors[k] = '配置值不符合安全规范';
+      }
+    }
+    if (Object.keys(fieldErrors).length > 0) {
+      throw new ApiError('部分设置项校验失败', 400, fieldErrors);
+    }
+
+    mockSectionValues[section] = {
+      ...(mockSectionValues[section] || {}),
+      ...body,
+    };
+
+    // Check if any updated key in schema has restart_required
+    const secSchema = mockSettingsSchema.sections.find((s) => s.name === section);
+    let restartRequired = false;
+    if (secSchema) {
+      for (const k of Object.keys(body)) {
+        const f = secSchema.fields.find((fld) => fld.key === k);
+        if (f?.restart_required) {
+          restartRequired = true;
+          break;
+        }
+      }
+    }
+
+    return { restart_required: restartRequired };
+  }
+
+  const res = await fetch(`api/settings/${encodeURIComponent(section)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse<PutSectionSettingsResponse>(res);
+}
+
+/**
+ * GET api/settings/aliases
+ */
+export async function getAliasesSettings(): Promise<AliasesSettingsResponse> {
+  if (isMockMode()) {
+    return { items: JSON.parse(JSON.stringify(mockAliases)) };
+  }
+
+  const res = await fetch('api/settings/aliases');
+  return handleResponse<AliasesSettingsResponse>(res);
+}
+
+/**
+ * PUT api/settings/aliases
+ */
+export async function updateAliasesSettings(
+  body: AliasesSettingsResponse
+): Promise<PutSectionSettingsResponse> {
+  if (isMockMode()) {
+    await new Promise((r) => setTimeout(r, 200));
+    mockAliases = JSON.parse(JSON.stringify(body.items || []));
+    mockSectionValues.aliases = { items: mockAliases };
+    return { restart_required: false };
+  }
+
+  const res = await fetch('api/settings/aliases', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse<PutSectionSettingsResponse>(res);
+}
+
+/**
+ * GET api/conversations/{id}/trace
+ */
+export async function getConversationTrace(
+  id: string
+): Promise<ConversationTraceResponse> {
+  if (isMockMode()) {
+    if (mockConversationTraces[id]) {
+      return JSON.parse(JSON.stringify(mockConversationTraces[id]));
+    }
+    // Fallback: generate a synthetic trace turn for other mock conversations
+    return {
+      turns: [
+        {
+          turn_id: 'turn_' + id,
+          ts: new Date().toISOString(),
+          status: 'ok',
+          duration_ms: 680,
+          first_token_ms: 120,
+          steps: [
+            {
+              id: 'st_1_' + id,
+              ts: new Date().toISOString(),
+              step: 1,
+              kind: 'llm',
+              name: 'kimi-k1.5-free',
+              status: 'ok',
+              duration_ms: 680,
+              first_token_ms: 120,
+              prompt_tokens: 220,
+              completion_tokens: 58,
+              finish_reason: 'stop',
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  const res = await fetch(`api/conversations/${encodeURIComponent(id)}/trace`);
+  return handleResponse<ConversationTraceResponse>(res);
+}
+
+/**
+ * GET api/traces?status=&kind=&name=&since=&until=&conversation_id=&limit=100&before_id=
+ */
+export async function getTraces(
+  params?: GetTracesParams
+): Promise<TracesListResponse> {
+  if (isMockMode()) {
+    await new Promise((r) => setTimeout(r, 150));
+    let items = [...mockAllTraceItems];
+
+    if (params?.status) {
+      items = items.filter((it) => it.status === params.status);
+    }
+    if (params?.kind) {
+      items = items.filter((it) => it.kind === params.kind);
+    }
+    if (params?.name) {
+      const q = params.name.toLowerCase();
+      items = items.filter((it) => it.name.toLowerCase().includes(q));
+    }
+    if (params?.conversation_id) {
+      items = items.filter((it) => it.conversation_id === params.conversation_id);
+    }
+    if (params?.before_id) {
+      const idx = items.findIndex((it) => it.id === params.before_id);
+      if (idx !== -1) {
+        items = items.slice(idx + 1);
+      }
+    }
+
+    const limit = params?.limit ?? 100;
+    const paged = items.slice(0, limit);
+    return {
+      items: paged,
+      next_before_id:
+        paged.length === limit && items.length > limit
+          ? paged[paged.length - 1].id
+          : undefined,
+    };
+  }
+
+  const query = new URLSearchParams();
+  if (params?.status) query.set('status', params.status);
+  if (params?.kind) query.set('kind', params.kind);
+  if (params?.name) query.set('name', params.name);
+  if (params?.since) query.set('since', params.since);
+  if (params?.until) query.set('until', params.until);
+  if (params?.conversation_id) query.set('conversation_id', params.conversation_id);
+  if (params?.limit) query.set('limit', String(params.limit));
+  if (params?.before_id) query.set('before_id', params.before_id);
+
+  const qStr = query.toString();
+  const url = `api/traces${qStr ? `?${qStr}` : ''}`;
+  const res = await fetch(url);
+  return handleResponse<TracesListResponse>(res);
+}
+
+/**
+ * GET api/traces/{turn_id}/payload
+ */
+export async function getTracePayload(
+  turnId: string
+): Promise<TracePayloadResponse> {
+  if (isMockMode()) {
+    await new Promise((r) => setTimeout(r, 150));
+    // If debug_mode is disabled in mock logging settings:
+    if (mockSectionValues.logging?.debug_mode === false) {
+      return { available: false, items: [] };
+    }
+    const payload = mockTracePayloads[turnId];
+    if (payload) {
+      return JSON.parse(JSON.stringify(payload));
+    }
+    return {
+      available: true,
+      items: [
+        {
+          ts: new Date().toISOString(),
+          step: 1,
+          kind: 'llm',
+          request: { turn_id: turnId, model: 'kimi-k1.5-free' },
+          response: { turn_id: turnId, reply: '模拟调试报文详情' },
+        },
+      ],
+    };
+  }
+
+  const res = await fetch(`api/traces/${encodeURIComponent(turnId)}/payload`);
+  return handleResponse<TracePayloadResponse>(res);
 }

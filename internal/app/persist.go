@@ -13,10 +13,58 @@ import (
 	"github.com/andy/vox-mi-agent/internal/config"
 )
 
-// persistLLM rewrites the llm section of <dataDir>/config.yaml (yaml.Node
-// round-trip, so comments and other sections are preserved). apiKey == nil
-// leaves the stored key untouched (a pointer to "" clears it). The write is atomic and keeps mode 0600.
-func persistLLM(dataDir, provider, baseURL, model string, temperature float64, apiKey *string) error {
+// yamlSet is one key to (re)write in config.yaml: Path is the nested key path
+// (e.g. ["tools","shell","timeout"]).
+type yamlSet struct {
+	Path []string
+	Node *yaml.Node
+}
+
+// persistSets rewrites the given keys of <dataDir>/config.yaml (yaml.Node
+// round-trip: comments and unrelated keys are preserved, the write is atomic
+// and keeps mode 0600). This is the single generic persistence primitive used
+// by every settings section.
+func persistSets(dataDir string, sets []yamlSet) error {
+	return editConfig(dataDir, func(root *yaml.Node) {
+		for _, s := range sets {
+			m := root
+			for _, k := range s.Path[:len(s.Path)-1] {
+				m = yamlSection(m, k)
+			}
+			mapSet(m, s.Path[len(s.Path)-1], s.Node)
+		}
+	})
+}
+
+// persistLLM rewrites the llm section keys. apiKey == nil leaves the stored
+// key untouched (a pointer to "" clears it).
+func persistLLM(dataDir, provider, baseURL, model string, temperature float64, apiKey *string, extra ...yamlSet) error {
+	sets := []yamlSet{
+		{[]string{"llm", "provider"}, strNode(provider)},
+		{[]string{"llm", "base_url"}, strNode(baseURL)},
+		{[]string{"llm", "model"}, strNode(model)},
+		{[]string{"llm", "temperature"}, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!float", Value: strconv.FormatFloat(temperature, 'g', -1, 64)}},
+	}
+	if apiKey != nil {
+		sets = append(sets, yamlSet{[]string{"llm", "api_key"}, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: *apiKey, Style: yaml.DoubleQuotedStyle}})
+	}
+	return persistSets(dataDir, append(sets, extra...))
+}
+
+// yamlSection returns the mapping root[key], creating it when missing/not a map.
+func yamlSection(root *yaml.Node, key string) *yaml.Node {
+	n := mapGet(root, key)
+	if n == nil || n.Kind != yaml.MappingNode {
+		n = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		mapSet(root, key, n)
+	}
+	return n
+}
+
+// editConfig round-trips <dataDir>/config.yaml through yaml.Node (keeping
+// comments and unrelated sections), applying mutate to the top-level mapping.
+// The write is atomic and keeps mode 0600.
+func editConfig(dataDir string, mutate func(root *yaml.Node)) error {
 	path := filepath.Join(dataDir, config.FileName)
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -36,18 +84,7 @@ func persistLLM(dataDir, provider, baseURL, model string, temperature float64, a
 	if root.Kind != yaml.MappingNode {
 		return fmt.Errorf("%s: top level is not a mapping", path)
 	}
-	llm := mapGet(root, "llm")
-	if llm == nil || llm.Kind != yaml.MappingNode {
-		llm = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		mapSet(root, "llm", llm)
-	}
-	mapSet(llm, "provider", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: provider, Style: yaml.DoubleQuotedStyle})
-	mapSet(llm, "base_url", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: baseURL, Style: yaml.DoubleQuotedStyle})
-	mapSet(llm, "model", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: model, Style: yaml.DoubleQuotedStyle})
-	mapSet(llm, "temperature", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!float", Value: strconv.FormatFloat(temperature, 'g', -1, 64)})
-	if apiKey != nil {
-		mapSet(llm, "api_key", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: *apiKey, Style: yaml.DoubleQuotedStyle})
-	}
+	mutate(root)
 
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)

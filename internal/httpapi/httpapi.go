@@ -64,7 +64,15 @@ func New(a *app.App, opts ...Option) *Server {
 	r.Get("/api/conversations/{id}/messages", s.listMessages)
 	r.Post("/sse/chat", s.chat)
 	r.Get("/api/settings", s.getSettings)
-	r.Put("/api/settings/llm", s.putLLM)
+	r.Get("/api/settings/schema", s.settingsSchema)
+	r.Put("/api/settings/llm", s.putLLM) // legacy: 204 No Content
+	r.Get("/api/settings/{section}", s.getSection)
+	r.Put("/api/settings/{section}", s.putSection)
+	r.Get("/api/conversations/{id}/trace", s.conversationTrace)
+	r.Get("/api/traces", s.listTraces)
+	r.Get("/api/traces/{turn_id}/payload", s.turnPayload)
+	r.Get("/api/fs/dirs", s.fsDirs)
+	r.Post("/api/fs/validate", s.fsValidate)
 	r.Get("/api/llm/providers", s.llmProviders)
 	r.Post("/api/llm/models", s.llmModels)
 	r.Post("/api/llm/test", s.llmTest)
@@ -149,7 +157,7 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
-		"tools":  s.app.Health,
+		"tools":  s.app.HealthStatus(),
 		"media":  s.app.Syncer.Status(),
 	})
 }
@@ -331,8 +339,8 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 // ---- settings ----
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
-	l := s.app.LLMConfig()
-	cfg := s.app.Cfg
+	cfg := s.app.Config()
+	l := cfg.LLM
 	type srcDTO struct {
 		Name   string `json:"name"`
 		Format string `json:"format"`
@@ -342,9 +350,17 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	for _, x := range cfg.Sources {
 		srcs = append(srcs, srcDTO{x.Name, x.Format, x.File})
 	}
-	folders := cfg.Media.Folders
+	mc := cfg.Media
+	folders, exts := mc.Folders, mc.Extensions
 	if folders == nil {
 		folders = []string{}
+	}
+	if exts == nil {
+		exts = []string{}
+	}
+	roots := media.AccessibleRoots()
+	if roots == nil {
+		roots = []string{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"llm": map[string]any{
@@ -352,10 +368,11 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 			"api_key_masked": maskKey(l.APIKey), "has_api_key": l.APIKey != "",
 			"temperature": l.Temperature,
 		},
-		"tools":   s.app.Health,
+		"tools":   s.app.HealthStatus(),
 		"sources": srcs,
 		"media": map[string]any{
-			"folders": folders, "sync_interval": fmtDuration(cfg.Media.SyncInterval),
+			"folders": folders, "extensions": exts, "accessible_roots": roots,
+			"sync_interval": fmtDuration(mc.SyncInterval),
 		},
 		"speaker": map[string]any{"driver": cfg.Speaker.Driver},
 	})
@@ -363,11 +380,13 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) putLLM(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Provider    string   `json:"provider"`
-		BaseURL     string   `json:"base_url"`
-		Model       string   `json:"model"`
-		APIKey      string   `json:"api_key"`
-		Temperature *float64 `json:"temperature"`
+		Provider    string          `json:"provider"`
+		BaseURL     string          `json:"base_url"`
+		Model       string          `json:"model"`
+		APIKey      string          `json:"api_key"`
+		Temperature *float64        `json:"temperature"`
+		Timeout     *string         `json:"timeout"`
+		ExtraBody   json.RawMessage `json:"extra_body"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -378,6 +397,22 @@ func (s *Server) putLLM(w http.ResponseWriter, r *http.Request) {
 		u.Temperature = *body.Temperature
 	} else {
 		u.Temperature = s.app.LLMConfig().Temperature
+	}
+	if body.Timeout != nil {
+		d, err := time.ParseDuration(strings.TrimSpace(*body.Timeout))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid settings: timeout is not a valid duration", "fields": map[string]string{"timeout": "not a valid duration (e.g. 30s, 2m)"}})
+			return
+		}
+		u.Timeout = &d
+	}
+	if len(body.ExtraBody) > 0 {
+		var eb map[string]any
+		if err := json.Unmarshal(body.ExtraBody, &eb); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid settings: extra_body must be an object", "fields": map[string]string{"extra_body": "must be a JSON object"}})
+			return
+		}
+		u.ExtraBody, u.SetExtraBody = eb, true
 	}
 	if err := s.app.UpdateLLM(u); err != nil {
 		if errors.Is(err, app.ErrInvalid) {
@@ -480,14 +515,4 @@ func maskKey(k string) string {
 	return (&config.Config{LLM: config.LLM{APIKey: k}}).Redacted().LLM.APIKey
 }
 
-// fmtDuration renders 6h0m0s as 6h (and 0 as "0s").
-func fmtDuration(d time.Duration) string {
-	s := d.String()
-	if strings.HasSuffix(s, "m0s") {
-		s = strings.TrimSuffix(s, "0s")
-	}
-	if strings.HasSuffix(s, "h0m") {
-		s = strings.TrimSuffix(s, "0m")
-	}
-	return s
-}
+func fmtDuration(d time.Duration) string { return app.FmtDuration(d) }

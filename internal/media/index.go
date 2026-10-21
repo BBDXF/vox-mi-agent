@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/andy/vox-mi-agent/internal/config"
@@ -32,6 +33,52 @@ type Index struct {
 	Candidates int
 	Timeout    time.Duration // 0 => SearchTimeout
 	Log        *slog.Logger  // nil => slog.Default()
+
+	mu sync.RWMutex // guards FzqPath, Strip, Candidates against Reconfigure
+}
+
+// Reconfigure swaps the live search parameters (safe during searches); an
+// empty fzqPath keeps the current one.
+func (ix *Index) Reconfigure(fzqPath string, strip []string, candidates int) {
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	if fzqPath != "" {
+		ix.FzqPath = fzqPath
+	}
+	ix.Strip = append([]string(nil), strip...)
+	ix.Candidates = candidates
+}
+
+// SearchParams is a snapshot of the live index settings.
+type SearchParams struct {
+	FzqPath    string
+	Strip      []string
+	Candidates int
+}
+
+// Params returns a copy of the live settings.
+func (ix *Index) Params() SearchParams {
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	return SearchParams{FzqPath: ix.FzqPath, Strip: append([]string(nil), ix.Strip...), Candidates: ix.Candidates}
+}
+
+// searchArgs builds the fzq argv for one query (everything but the binary).
+func (ix *Index) searchArgs(p SearchParams, topN, minScore int) []string {
+	cand := p.Candidates
+	if cand <= 0 {
+		cand = 500
+	}
+	// Index-affecting flags come from IndexArgs only; the file is its last
+	// element, so everything else goes before it.
+	args := []string{"--queries", "-"}
+	for _, s := range p.Strip {
+		args = append(args, "--strip", s)
+	}
+	args = append(args, "-o", "json", "-n", strconv.Itoa(topN),
+		"--min-score", strconv.Itoa(minScore), "--candidates", strconv.Itoa(cand),
+		"--index-cache", ix.CacheDir)
+	return append(args, IndexArgs(ix.SongsFile)...)
 }
 
 // NewIndex builds an Index from the effective config. r nil => toolrunner.New().
@@ -65,26 +112,18 @@ func (ix *Index) Search(ctx context.Context, query string, topN, minScore int) (
 	if minScore <= 0 {
 		minScore = 65
 	}
-	if _, err := os.Stat(ix.SongsFile); err != nil {
+	fi, err := os.Stat(ix.SongsFile)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, false, ErrNoLibrary
 		}
 		return nil, false, err
 	}
-	cand := ix.Candidates
-	if cand <= 0 {
-		cand = 500
+	if fi.Size() == 0 { // empty library (all folders removed)
+		return nil, false, nil
 	}
-	// Index-affecting flags come from IndexArgs only; the file is its last
-	// element, so everything else goes before it.
-	args := []string{"--queries", "-"}
-	for _, s := range ix.Strip {
-		args = append(args, "--strip", s)
-	}
-	args = append(args, "-o", "json", "-n", strconv.Itoa(topN),
-		"--min-score", strconv.Itoa(minScore), "--candidates", strconv.Itoa(cand),
-		"--index-cache", ix.CacheDir)
-	args = append(args, IndexArgs(ix.SongsFile)...)
+	p := ix.Params()
+	args := ix.searchArgs(p, topN, minScore)
 
 	timeout := ix.Timeout
 	if timeout <= 0 {
@@ -92,7 +131,7 @@ func (ix *Index) Search(ctx context.Context, query string, topN, minScore int) (
 	}
 	res, err := ix.Runner.Run(ctx, toolrunner.Spec{
 		Tool: "search_audio", Source: "media_library", Query: query,
-		Path: ix.FzqPath, Args: args, Stdin: []byte(query + "\n"), Timeout: timeout,
+		Path: p.FzqPath, Args: args, Stdin: []byte(query + "\n"), Timeout: timeout,
 	})
 	if err != nil {
 		return nil, false, err

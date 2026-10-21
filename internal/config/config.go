@@ -5,16 +5,11 @@
 //	built-in defaults -> <dataDir>/config.yaml -> VOX_* environment variables
 //	-> (future) DB settings layer.
 //
-// Authoritative source per key (MVP): the config file / environment is
-// authoritative for EVERY key below. The SQLite `settings` table is reserved
-// for runtime state (last media sync result, etc.) and for a future UI-edit
-// layer; until that layer exists no key is DB-authoritative. When it lands,
-// the intended split is:
-//
-//	file-authoritative (restart to change): server.*, tools.*, speaker.driver,
-//	                    llm.api_key (secret), media.folders (path authorisation)
-//	DB-authoritative (UI editable):         llm.model, llm.temperature,
-//	                    media.sync_interval, search.*, sources (UI is read-only)
+// config.yaml is authoritative for every key. All user-facing sections are
+// editable at runtime via /api/settings/{section}, which rewrites the file
+// (comments preserved) and applies the change live where possible (see
+// internal/app). The SQLite `settings` table holds runtime state only; the
+// alias table lives in its own DB table.
 package config
 
 import (
@@ -58,6 +53,20 @@ type Config struct {
 	Media   Media    `yaml:"media" json:"media"`
 	Search  Search   `yaml:"search" json:"search"`
 	Speaker Speaker  `yaml:"speaker" json:"speaker"`
+	Logging Logging  `yaml:"logging" json:"logging"`
+}
+
+// Logging configures runtime logging, tracing and the debug payload log.
+type Logging struct {
+	// Level is debug|info|warn|error (applies live).
+	Level string `yaml:"level" json:"level"`
+	// TraceRetentionDays / TraceMaxRows bound the traces table.
+	TraceRetentionDays int `yaml:"trace_retention_days" json:"trace_retention_days"`
+	TraceMaxRows       int `yaml:"trace_max_rows" json:"trace_max_rows"`
+	// DebugPayloads enables the full request/response payload log files.
+	DebugPayloads        bool     `yaml:"debug_payloads" json:"debug_payloads"`
+	PayloadRetentionDays int      `yaml:"payload_retention_days" json:"payload_retention_days"`
+	PayloadMaxBytes      ByteSize `yaml:"payload_max_bytes" json:"payload_max_bytes"`
 }
 
 type Server struct {
@@ -220,6 +229,13 @@ func Defaults() *Config {
 			Candidates: 500,
 		},
 		Speaker: Speaker{Driver: "mock"},
+		Logging: Logging{
+			Level:                "info",
+			TraceRetentionDays:   30,
+			TraceMaxRows:         100000,
+			PayloadRetentionDays: 7,
+			PayloadMaxBytes:      200 << 20,
+		},
 	}
 }
 
@@ -375,6 +391,11 @@ func (c *Config) Validate() error {
 	if c.Media.SyncInterval < 0 {
 		return errors.New("config: media.sync_interval must be >= 0")
 	}
+	switch c.Logging.Level {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("config: logging.level must be debug|info|warn|error, got %q", c.Logging.Level)
+	}
 	return nil
 }
 
@@ -423,11 +444,10 @@ func (c *Config) Source(name string) (Source, bool) {
 	return Source{}, false
 }
 
-// Redacted returns a deep copy safe to show in UIs/logs: api_key is masked,
-// only the last 4 characters remain visible.
-func (c *Config) Redacted() *Config {
+// Clone returns a deep copy (slices, maps and nested structs are not shared).
+func (c *Config) Clone() *Config {
 	cp := *c
-	cp.LLM.APIKey = maskSecret(c.LLM.APIKey)
+	cp.LLM.ExtraBody = cloneMap(c.LLM.ExtraBody)
 	cp.Tools.Shell.ReadablePaths = append([]string(nil), c.Tools.Shell.ReadablePaths...)
 	cp.Media.Folders = append([]string(nil), c.Media.Folders...)
 	cp.Media.Extensions = append([]string(nil), c.Media.Extensions...)
@@ -440,6 +460,42 @@ func (c *Config) Redacted() *Config {
 	}
 	return &cp
 }
+
+func cloneMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = cloneValue(v)
+	}
+	return out
+}
+
+func cloneValue(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		return cloneMap(x)
+	case []any:
+		out := make([]any, len(x))
+		for i := range x {
+			out[i] = cloneValue(x[i])
+		}
+		return out
+	}
+	return v
+}
+
+// Redacted returns a deep copy safe to show in UIs/logs: api_key is masked,
+// only the last 4 characters remain visible.
+func (c *Config) Redacted() *Config {
+	cp := c.Clone()
+	cp.LLM.APIKey = maskSecret(c.LLM.APIKey)
+	return cp
+}
+
+// MaskSecret masks a secret for display: only the last 4 characters remain.
+func MaskSecret(s string) string { return maskSecret(s) }
 
 func maskSecret(s string) string {
 	if s == "" {

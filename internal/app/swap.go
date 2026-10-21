@@ -49,3 +49,10 @@ func (s *SwapProvider) Stream(ctx context.Context, req llm.Request) (<-chan llm.
 	}
 	return inner.Stream(ctx, req)
 }
+
+// Model returns the current default model name.
+func (s *SwapProvider) Model() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.model
+}

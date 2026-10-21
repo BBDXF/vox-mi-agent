@@ -7,13 +7,14 @@ import {
   Moon,
   FlaskConical,
   Activity,
+  ScrollText,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { isMockMode, setMockMode } from '@/lib/api';
 
-export type NavTab = 'chat' | 'settings' | 'media';
+export type NavTab = 'chat' | 'settings' | 'media' | 'logs';
 
 interface SidebarProps {
   currentTab: NavTab;
@@ -63,6 +64,13 @@ export function Sidebar({
       id: 'media',
       label: '本地曲库',
       icon: Music,
+      badge: undefined,
+      disabled: false,
+    },
+    {
+      id: 'logs',
+      label: '日志',
+      icon: ScrollText,
       badge: undefined,
       disabled: false,
     },

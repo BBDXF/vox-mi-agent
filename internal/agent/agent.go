@@ -33,6 +33,8 @@ type Options struct {
 	Temperature  *float64
 	// ToolTimeout bounds each tool call (default 30s).
 	ToolTimeout time.Duration
+	// Tracer receives trace rows and debug payloads (optional).
+	Tracer Tracer
 }
 
 // Input is one user turn.
@@ -72,12 +74,23 @@ func New(opt Options) *Runtime {
 // Run executes one user turn, emitting events as they occur. It returns a
 // non-nil error on provider/store failure, ErrMaxSteps, or ctx cancellation.
 func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
+	ch := in.Channel
+	if ch == "" {
+		ch = store.ChannelCLI
+	}
+	ts := &turnState{id: logx.NewID(), channel: ch, userText: in.Text, convID: in.ConversationID, start: time.Now()}
+	ctx = logx.WithTurnID(ctx, ts.id)
+	err := r.run(ctx, in, emit, ts)
+	r.finishTurn(ctx, ts, err)
+	return err
+}
+
+func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnState) error {
 	if emit == nil {
 		emit = func(Event) {}
 	}
-	start := time.Now()
-	ctx = logx.WithTurnID(ctx, logx.NewID())
-	log := r.log.With("turn_id", logx.TurnID(ctx))
+	start := ts.start
+	log := r.log.With("turn_id", ts.id)
 	// persistence must survive cancellation
 	pctx := context.WithoutCancel(ctx)
 
@@ -90,6 +103,7 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 	if err != nil {
 		return fail(err)
 	}
+	ts.convID = convID
 	emit(Event{Type: EventConversation, Data: ConversationData{ID: convID}})
 
 	userMsg := llm.Message{Role: llm.RoleUser, Content: in.Text}
@@ -105,11 +119,7 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 		}
 	}
 
-	var (
-		tm        Timings
-		usage     llm.Usage
-		haveUsage bool
-	)
+	tm, usage := &ts.tm, &ts.usage
 	since := func() int64 { return time.Since(start).Milliseconds() }
 	markSentence := func() {
 		if tm.FirstSentenceMS == 0 {
@@ -121,13 +131,54 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		stepNo := step + 1
+		ts.steps = stepNo
 		msgs := make([]llm.Message, 0, len(history)+1)
 		msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: r.opt.SystemPrompt})
 		msgs = append(msgs, history...)
+		stepStart := time.Now()
+		var stepFirst int64 // ms from stepStart to the first visible token
+		var stepUsage *llm.Usage
+		var stepFinish string
+		var stepCalls []llm.ToolCall
+		model := r.model()
+		// recStep records the llm trace row (+ payload) of this step.
+		recStep := func(err error, text string) {
+			status := statusOf(err, ctx.Err())
+			row := store.TraceRow{
+				TS: stepStart, ConversationID: convID, TurnID: ts.id, Step: stepNo,
+				Kind: store.TraceLLM, Name: model, Status: status,
+				DurationMS: max(time.Since(stepStart).Milliseconds(), stepFirst), FirstTokenMS: stepFirst,
+				FinishReason: stepFinish, Channel: ts.channel,
+				Args:          fmt.Sprintf("messages=%d tools=%d", len(msgs), len(defs)),
+				ResultSummary: summarizeStep(text, stepCalls),
+			}
+			if stepUsage != nil {
+				row.PromptTokens, row.CompletionTokens = stepUsage.PromptTokens, stepUsage.CompletionTokens
+			}
+			if err != nil {
+				row.Error = err.Error()
+			}
+			r.trace(row)
+			log.Debug("llm step", "step", stepNo, "model", model, "status", status,
+				"duration_ms", row.DurationMS, "first_token_ms", stepFirst, "finish", stepFinish, "tool_calls", len(stepCalls))
+			if r.payloadOn() {
+				resp := &PayloadResponse{Text: text, ToolCalls: append([]llm.ToolCall(nil), stepCalls...), Usage: stepUsage, FinishReason: stepFinish}
+				if err != nil {
+					resp.Error = err.Error()
+				}
+				r.opt.Tracer.Payload(Payload{
+					TS: stepStart, TurnID: ts.id, Step: stepNo, Kind: "llm",
+					Request:  &PayloadRequest{Model: model, Temperature: r.opt.Temperature, Messages: msgs, Tools: defs},
+					Response: resp,
+				})
+			}
+		}
 		ch, err := r.opt.Provider.Stream(ctx, llm.Request{
 			Messages: msgs, Tools: defs, Temperature: r.opt.Temperature, Model: r.opt.Model,
 		})
 		if err != nil {
+			recStep(err, "")
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -153,6 +204,9 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 		pushText := func(vis string) {
 			if tm.FirstTokenMS == 0 {
 				tm.FirstTokenMS = max(since(), 1)
+			}
+			if stepFirst == 0 {
+				stepFirst = max(time.Since(stepStart).Milliseconds(), 1)
 			}
 			text.WriteString(vis)
 			emit(Event{Type: EventToken, Data: TokenData{Text: vis}})
@@ -182,8 +236,14 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 					}
 				case llm.EventDone:
 					finished = true
+					stepFinish = ev.FinishReason
+					ts.finish = ev.FinishReason
 					if ev.Usage != nil {
-						haveUsage = true
+						u := *ev.Usage
+						stepUsage = &u
+					}
+					if ev.Usage != nil {
+						ts.haveUsage = true
 						usage.PromptTokens += ev.Usage.PromptTokens
 						usage.CompletionTokens += ev.Usage.CompletionTokens
 						usage.TotalTokens += ev.Usage.TotalTokens
@@ -198,7 +258,9 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 			}
 		}
 
+		stepCalls = calls
 		if ctx.Err() != nil {
+			recStep(ctx.Err(), text.String())
 			// cancelled: keep what the user may already have heard
 			if text.Len() > 0 {
 				_ = r.persist(pctx, convID, llm.Message{Role: llm.RoleAssistant, Content: text.String()})
@@ -209,6 +271,7 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 			streamEr = errors.New("llm: stream ended without done event")
 		}
 		if streamEr != nil {
+			recStep(streamEr, text.String())
 			if text.Len() > 0 {
 				_ = r.persist(pctx, convID, llm.Message{Role: llm.RoleAssistant, Content: text.String()})
 			}
@@ -220,6 +283,8 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 		}
 		sendSentence(sp.Flush())
 
+		recStep(nil, text.String())
+		ts.lastText = text.String()
 		asst := llm.Message{Role: llm.RoleAssistant, Content: text.String()}
 		if len(calls) == 0 {
 			if asst.Content != "" {
@@ -228,9 +293,9 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 				}
 			}
 			tm.TotalMS = max(since(), tm.FirstTokenMS, tm.FirstSentenceMS)
-			d := DoneData{Timings: tm}
-			if haveUsage {
-				u := usage
+			d := DoneData{Timings: *tm}
+			if ts.haveUsage {
+				u := *usage
 				d.Usage = &u
 			}
 			emit(Event{Type: EventDone, Data: d})
@@ -261,6 +326,7 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 			emit(Event{Type: EventToolCall, Data: ToolCallData{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments}})
 			var res json.RawMessage
 			var callErr error
+			toolStart := time.Now()
 			switch {
 			case ctx.Err() != nil:
 				callErr = ctx.Err()
@@ -270,6 +336,8 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 				res, callErr = r.callTool(ctx, tc)
 			}
 			content := wrapResult(tc.Name, res, callErr)
+			ts.tools = append(ts.tools, tc.Name)
+			r.traceTool(ctx, ts, stepNo, tc, toolStart, res, callErr)
 			if callErr != nil {
 				log.Warn("tool error", "tool", tc.Name, "err", callErr)
 			}

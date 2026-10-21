@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Music,
   RefreshCw,
-  Folder,
   Clock,
   FileCheck,
   AlertCircle,
@@ -11,6 +10,7 @@ import {
   Search,
   Sparkles,
   Zap,
+  Info,
 } from 'lucide-react';
 import {
   Card,
@@ -30,6 +30,7 @@ import {
   type SettingsResponse,
 } from '@/lib/api';
 import { formatTime } from '@/lib/utils';
+import { MediaSettingsCard } from './MediaSettingsCard';
 
 export function MediaView() {
   const { success, error: toastError, info } = useToast();
@@ -102,7 +103,7 @@ export function MediaView() {
     };
   }, [isSyncing, success]);
 
-  // Handle immediate sync trigger
+  // Handle immediate manual sync trigger
   const handleTriggerSync = async () => {
     if (isSyncing) return;
     try {
@@ -113,6 +114,34 @@ export function MediaView() {
     } catch (err: any) {
       setIsSyncing(false);
       toastError(err.message || '发起同步失败');
+    }
+  };
+
+  // Refresh both status and settings
+  const handleRefreshAll = async () => {
+    setLoading(true);
+    try {
+      await Promise.all([
+        fetchStatus(),
+        getSettings().then((s) => setSettings(s)).catch(() => {}),
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Called when settings are saved from MediaSettingsCard
+  const handleSettingsSaved = async (syncStarted: boolean) => {
+    try {
+      const data = await getSettings();
+      setSettings(data);
+    } catch {
+      // ignore
+    }
+
+    if (syncStarted) {
+      setIsSyncing(true);
+      fetchStatus();
     }
   };
 
@@ -139,7 +168,7 @@ export function MediaView() {
           <Button
             variant="outline"
             size="sm"
-            onClick={fetchStatus}
+            onClick={handleRefreshAll}
             disabled={loading || isSyncing}
             className="gap-2"
           >
@@ -226,7 +255,7 @@ export function MediaView() {
             {status?.last_sync_at ? formatTime(status.last_sync_at) : '未记录'}
           </div>
           <div className="text-[11px] text-muted-foreground mt-2">
-            定时任务每 6 小时自动核对
+            定时任务每 {settings?.media?.sync_interval || '6h'} 自动核对
           </div>
         </Card>
       </div>
@@ -318,72 +347,48 @@ export function MediaView() {
         </CardContent>
       </Card>
 
-      {/* Directory & Configuration Spec */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card className="border shadow-xs">
-          <CardHeader className="pb-3">
-            <div className="flex items-center gap-2">
-              <Folder className="w-4 h-4 text-primary" />
-              <CardTitle>监控媒体目录 (Media Folders)</CardTitle>
-            </div>
-            <CardDescription>
-              仅允许访问配置授权的存储卷路径，防止跨目录越权
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2.5">
-            {settings?.media.folders?.map((folder, idx) => (
-              <div
-                key={idx}
-                className="flex items-center gap-2 p-2.5 rounded-lg border bg-muted/20 text-xs font-mono"
-              >
-                <Folder className="w-4 h-4 text-amber-500 shrink-0" />
-                <span className="truncate text-foreground">{folder}</span>
-              </div>
-            )) ?? (
-              <div className="text-xs text-muted-foreground">暂无目录配置</div>
-            )}
-          </CardContent>
-        </Card>
+      {/* Library Settings Card (曲库设置) */}
+      <MediaSettingsCard
+        mediaConfig={settings?.media}
+        onSaved={handleSettingsSaved}
+        isSyncing={isSyncing}
+      />
 
-        <Card className="border shadow-xs">
-          <CardHeader className="pb-3">
-            <div className="flex items-center gap-2">
-              <Search className="w-4 h-4 text-primary" />
-              <CardTitle>支持格式与匹配规则</CardTitle>
+      {/* Metadata & Scanning Reference Spec */}
+      <Card className="border shadow-xs bg-muted/10">
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Search className="w-4 h-4 text-primary" />
+            <CardTitle>元数据提取与文件匹配规则</CardTitle>
+          </div>
+          <CardDescription>
+            音箱端本地无损解码与文件过滤机制说明
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-muted-foreground">
+            <div className="p-3 rounded-lg border bg-background/60 space-y-1.5">
+              <div className="font-medium text-foreground flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5 text-primary" />
+                文件名与标签解析优先级
+              </div>
+              <p className="text-[11px] leading-relaxed">
+                优先从音频文件的 ID3v2 / FLAC Vorbis Comment / MP4 标签中读取歌手与歌曲标题；若元数据缺失，则按 <code>歌手 - 歌名.后缀</code> 模式从文件名提取。
+              </p>
             </div>
-            <CardDescription>
-              音箱端本地无损解码与文件过滤白名单
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex flex-wrap gap-1.5">
-              {(
-                settings?.media.extensions || [
-                  'mp3',
-                  'flac',
-                  'm4a',
-                  'wav',
-                  'ogg',
-                  'ape',
-                ]
-              ).map((ext) => (
-                <Badge
-                  key={ext}
-                  variant="secondary"
-                  className="font-mono text-xs uppercase"
-                >
-                  .{ext}
-                </Badge>
-              ))}
+
+            <div className="p-3 rounded-lg border bg-background/60 space-y-1.5">
+              <div className="font-medium text-foreground flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5 text-primary" />
+                单库规模上限与性能保障
+              </div>
+              <p className="text-[11px] leading-relaxed">
+                当前单实例最大索引曲目上限为 {settings?.media?.max_files?.toLocaleString() || '100,000'} 首。索引生成 songs.jsonl 快照后常驻内存，fzq 搜索平均延迟 &lt; 25ms。
+              </p>
             </div>
-            <div className="text-xs text-muted-foreground space-y-1 leading-relaxed">
-              <div>• 文件名模式：<code>歌手 - 歌名.后缀</code></div>
-              <div>• 自动提取 ID3 / FLAC Vorbis 注释标签与嵌入封面信息</div>
-              <div>• 最大允许索引文件数：{settings?.media.max_files?.toLocaleString() || '100,000'}</div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -17,12 +18,14 @@ import (
 	"github.com/andy/vox-mi-agent/internal/agent"
 	"github.com/andy/vox-mi-agent/internal/config"
 	"github.com/andy/vox-mi-agent/internal/llm"
+	"github.com/andy/vox-mi-agent/internal/logx"
 	"github.com/andy/vox-mi-agent/internal/media"
 	"github.com/andy/vox-mi-agent/internal/store"
 	"github.com/andy/vox-mi-agent/internal/toolrunner"
 	"github.com/andy/vox-mi-agent/internal/tools"
 	"github.com/andy/vox-mi-agent/internal/tools/audio"
 	"github.com/andy/vox-mi-agent/internal/tools/data"
+	"github.com/andy/vox-mi-agent/internal/trace"
 )
 
 // Option customises Build.
@@ -31,7 +34,12 @@ type Option func(*options)
 type options struct {
 	provider llm.Provider
 	logger   *slog.Logger
+	level    *slog.LevelVar
 }
+
+// WithLevelVar links the runtime log level to lv (the handler of the logger
+// passed via WithLogger must use the same LevelVar). Default: a private one.
+func WithLevelVar(lv *slog.LevelVar) Option { return func(o *options) { o.level = lv } }
 
 // WithProvider injects an LLM provider instead of the OpenAI client (tests).
 // It is still wrapped by the swappable provider; a settings update replaces it.
@@ -42,7 +50,7 @@ func WithLogger(l *slog.Logger) Option { return func(o *options) { o.logger = l 
 
 // App is the wired application.
 type App struct {
-	Cfg       *config.Config // effective config (paths made absolute); LLM section: use LLMConfig
+	Cfg       *config.Config // startup snapshot (paths made absolute); live values: Config()
 	Log       *slog.Logger
 	Store     *store.Store
 	Runner    *toolrunner.Runner
@@ -54,10 +62,18 @@ type App struct {
 	Tools     *tools.Registry
 	Agent     *agent.Runtime
 	Provider  *SwapProvider
-	Health    ToolStatuses
+	Health    ToolStatuses // startup self-check; live value: HealthStatus()
+	Tracer    *trace.Recorder
+	LevelVar  *slog.LevelVar // runtime log level (settings: logging.level)
 
-	mu  sync.Mutex // guards llmCfg and serialises UpdateLLM
-	llm config.LLM
+	cfgMu sync.RWMutex // guards cfg (the live configuration)
+	cfg   *config.Config
+	updMu sync.Mutex // the single settings lock: serialises all settings updates
+
+	healthMu sync.RWMutex
+	sources  *data.SourceSet
+	player   *driverPlayer
+	loud     *loggingPlayer
 }
 
 // Build constructs the application from cfg. Tool self-check failures are
@@ -81,9 +97,13 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &App{Cfg: c, Log: o.logger, Store: st, llm: c.LLM}
-	if a.llm.Provider == "" {
-		a.llm.Provider = llm.CustomPresetID
+	a := &App{Cfg: c, Log: o.logger, Store: st, cfg: c.Clone(), LevelVar: o.level}
+	if a.LevelVar == nil {
+		a.LevelVar = new(slog.LevelVar)
+		a.LevelVar.Set(logx.ParseLevel(c.Logging.Level))
+	}
+	if a.cfg.LLM.Provider == "" {
+		a.cfg.LLM.Provider = llm.CustomPresetID
 	}
 	ok := false
 	defer func() {
@@ -102,45 +122,46 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 	}
 
 	a.Runner = toolrunner.New()
+	// Tool timings are traced by the agent (traces table); the runner-level
+	// record only goes to the debug log, not to audit_log.
 	a.Runner.Auditor = func(rec toolrunner.Record) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := st.Audit(ctx, "tool", rec.Tool, map[string]any{
-			"source": rec.Source, "query": rec.Query, "exit_code": rec.ExitCode,
-			"duration_ms": rec.Duration.Milliseconds(), "output_bytes": rec.OutputBytes,
-			"truncated": rec.Truncated, "error": rec.Err,
-		}); err != nil {
-			a.Log.Warn("audit tool run", "err", err)
-		}
+		a.Log.Debug("tool run", "tool", rec.Tool, "source", rec.Source, "exit_code", rec.ExitCode,
+			"duration_ms", rec.Duration.Milliseconds(), "output_bytes", rec.OutputBytes,
+			"truncated", rec.Truncated, "error", rec.Err)
 	}
 
-	srcs := make([]data.Source, 0, len(c.Sources))
-	for _, s := range c.Sources {
-		srcs = append(srcs, data.Source{
-			Name: s.Name, File: c.SourcePath(s), Format: s.Format, Records: s.Records,
-			Keys: s.Keys, Extract: s.Extract, Strip: s.Strip,
-		})
-	}
-	sources, err := data.NewSources(srcs)
+	sources, err := buildSources(c)
 	if err != nil {
-		return nil, fmt.Errorf("app: sources: %w", err)
+		return nil, err
 	}
+	a.sources = data.NewSourceSet(sources)
 
 	a.Library = media.NewLibrary(media.SongsPath(c.DataDir))
-	a.Syncer = media.NewSyncer(c, media.Deps{Runner: a.Runner, Store: st, Library: a.Library, Log: a.Log})
+	a.Syncer = media.NewSyncer(c, media.Deps{Runner: a.Runner, Store: st, Aliases: st, Library: a.Library, Log: a.Log})
 	a.Index = media.NewIndex(c, a.Runner)
 	a.Index.Log = a.Log
 	a.Scheduler = media.NewScheduler(a.Syncer)
 
 	a.Player = &audio.LogPlayer{}
-	player := &loggingPlayer{LogPlayer: a.Player, log: a.Log}
+	a.loud = &loggingPlayer{LogPlayer: a.Player, log: a.Log}
+	a.player = &driverPlayer{}
+	a.setDriver(c.Speaker.Driver)
 	reg := tools.NewRegistry()
-	for _, t := range data.All(data.Deps{Runner: a.Runner, Sources: sources, ToolsDir: c.Tools.Dir}) {
+	for _, t := range data.All(data.Deps{Runner: a.Runner, Live: a.sources, ToolsDir: c.Tools.Dir,
+		BinPath: func(name string) string {
+			var p string
+			a.withConfig(func(c *config.Config) { p = toolPath(c, name) })
+			return p
+		}}) {
 		reg.Register(t)
 	}
 	for _, t := range audio.All(audio.Deps{
-		Searcher: a.Index, Library: a.Library, Player: player,
+		Searcher: a.Index, Library: a.Library, Player: a.player,
 		Limit: c.Search.Limit, MinScore: int(c.Search.MinScore),
+		Params: func() (limit, minScore int) {
+			a.withConfig(func(c *config.Config) { limit, minScore = c.Search.Limit, int(c.Search.MinScore) })
+			return
+		},
 	}) {
 		reg.Register(t)
 	}
@@ -151,8 +172,12 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 		inner = newOpenAI(c.LLM)
 	}
 	a.Provider = NewSwapProvider(inner, c.LLM.Model, c.LLM.Temperature)
+	a.Tracer = trace.NewRecorder(st, trace.PayloadDir(c.DataDir), a.Log, trace.WriterOptions{})
+	a.Tracer.Configure(c.Logging)
+	a.Tracer.P.SetSecrets(c.LLM.APIKey)
+	a.Tracer.Start()
 	a.Agent = agent.New(agent.Options{
-		Provider: a.Provider, Tools: reg, Store: st, Logger: a.Log,
+		Provider: a.Provider, Tools: reg, Store: st, Logger: a.Log, Tracer: a.Tracer,
 	})
 	ok = true
 	return a, nil
@@ -190,16 +215,56 @@ func normalize(cfg *config.Config) (*config.Config, error) {
 	return &c, nil
 }
 
-// Close releases resources.
-func (a *App) Close() error { return a.Store.Close() }
+// Close flushes the trace writers and releases resources.
+func (a *App) Close() error {
+	if a.Tracer != nil {
+		a.Tracer.Close()
+	}
+	return a.Store.Close()
+}
+
+// HealthStatus returns the latest tool self-check result.
+func (a *App) HealthStatus() ToolStatuses {
+	a.healthMu.RLock()
+	defer a.healthMu.RUnlock()
+	return a.Health
+}
+
+func (a *App) setHealth(h ToolStatuses) {
+	a.healthMu.Lock()
+	a.Health = h
+	a.healthMu.Unlock()
+}
+
+// driverPlayer routes to the player selected by speaker.driver.
+type driverPlayer struct {
+	mu sync.RWMutex
+	p  audio.Player
+}
+
+func (d *driverPlayer) cur() audio.Player { d.mu.RLock(); defer d.mu.RUnlock(); return d.p }
+func (d *driverPlayer) Play(ctx context.Context, t media.Track) error {
+	return d.cur().Play(ctx, t)
+}
+func (d *driverPlayer) SetVolume(ctx context.Context, v int) error {
+	return d.cur().SetVolume(ctx, v)
+}
+
+// setDriver selects the speaker driver: "log" logs every call, anything else
+// (mock) only records it.
+func (a *App) setDriver(driver string) {
+	var p audio.Player = a.Player
+	if driver == "log" {
+		p = a.loud
+	}
+	a.player.mu.Lock()
+	a.player.p = p
+	a.player.mu.Unlock()
+}
 
 // LLMConfig returns the current LLM settings (including the secret: never
 // serialise it).
-func (a *App) LLMConfig() config.LLM {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.llm
-}
+func (a *App) LLMConfig() config.LLM { return a.Config().LLM }
 
 // LLMUpdate is a runtime LLM reconfiguration. Provider "" = current
 // provider. APIKey "" keeps the stored key only when the provider is
@@ -210,6 +275,12 @@ type LLMUpdate struct {
 	Model       string
 	APIKey      string
 	Temperature float64
+	// Timeout nil = unchanged.
+	Timeout *time.Duration
+	// SetExtraBody replaces llm.extra_body with ExtraBody (nil/empty = clear,
+	// falling back to the provider preset default).
+	ExtraBody    map[string]any
+	SetExtraBody bool
 }
 
 // ErrInvalid marks a validation failure of user-supplied settings.
@@ -272,33 +343,75 @@ func (a *App) resolveLocked(cur config.LLM, provider, baseURL, apiKey string) (L
 // UpdateLLM validates u, persists it to <data>/config.yaml (the file is
 // authoritative) and then swaps the live provider.
 func (a *App) UpdateLLM(u LLMUpdate) error {
+	a.updMu.Lock()
+	defer a.updMu.Unlock()
+	_, err := a.updateLLMLocked(u)
+	return err
+}
+
+// updateLLMLocked is UpdateLLM with the settings lock held; it returns the
+// keys whose value changed.
+func (a *App) updateLLMLocked(u LLMUpdate) ([]string, error) {
 	u.Model = strings.TrimSpace(u.Model)
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	cur := a.llm
+	cur := a.Config().LLM
 	tgt, err := a.resolveLocked(cur, u.Provider, u.BaseURL, u.APIKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	switch {
 	case u.Model == "":
-		return fmt.Errorf("%w: model is required", ErrInvalid)
+		return nil, fmt.Errorf("%w: model is required", ErrInvalid)
 	case u.Temperature < 0 || u.Temperature > 2:
-		return fmt.Errorf("%w: temperature must be between 0 and 2", ErrInvalid)
+		return nil, fmt.Errorf("%w: temperature must be between 0 and 2", ErrInvalid)
 	case tgt.Preset.KeyRequired && tgt.APIKey == "":
-		return fmt.Errorf("%w: %s requires an API key", ErrInvalid, tgt.Preset.Name)
+		return nil, fmt.Errorf("%w: %s requires an API key", ErrInvalid, tgt.Preset.Name)
+	case u.Timeout != nil && (*u.Timeout < time.Second || *u.Timeout > 10*time.Minute):
+		return nil, fmt.Errorf("%w: timeout must be between 1s and 10m", ErrInvalid)
+	}
+	var extra []yamlSet
+	if u.Timeout != nil {
+		extra = append(extra, yamlSet{[]string{"llm", "timeout"}, strNode(u.Timeout.String())})
+	}
+	if u.SetExtraBody {
+		nd, err := mapNode(u.ExtraBody)
+		if err != nil {
+			return nil, fmt.Errorf("%w: extra_body: %v", ErrInvalid, err)
+		}
+		extra = append(extra, yamlSet{[]string{"llm", "extra_body"}, nd})
 	}
 	key := tgt.APIKey
-	if err := persistLLM(a.Cfg.DataDir, tgt.Provider, tgt.BaseURL, u.Model, u.Temperature, &key); err != nil {
-		return fmt.Errorf("persist config: %w", err)
+	if err := persistLLM(a.Cfg.DataDir, tgt.Provider, tgt.BaseURL, u.Model, u.Temperature, &key, extra...); err != nil {
+		return nil, fmt.Errorf("persist config: %w", err)
 	}
-	n := cur
-	n.Provider, n.BaseURL, n.APIKey = tgt.Provider, tgt.BaseURL, tgt.APIKey
-	n.Model, n.Temperature = u.Model, u.Temperature
-	a.llm = n
-	a.Provider.Set(newOpenAI(n), n.Model, n.Temperature)
-	a.Log.Info("llm reconfigured", "provider", n.Provider, "base_url", n.BaseURL, "model", n.Model, "temperature", n.Temperature)
-	return nil
+	n := a.Config()
+	nl := &n.LLM
+	nl.Provider, nl.BaseURL, nl.APIKey = tgt.Provider, tgt.BaseURL, tgt.APIKey
+	nl.Model, nl.Temperature = u.Model, u.Temperature
+	if u.Timeout != nil {
+		nl.Timeout = *u.Timeout
+	}
+	if u.SetExtraBody {
+		nl.ExtraBody = u.ExtraBody
+	}
+	var changed []string
+	add := func(k string, differs bool) {
+		if differs {
+			changed = append(changed, k)
+		}
+	}
+	add("provider", cur.Provider != nl.Provider)
+	add("base_url", cur.BaseURL != nl.BaseURL)
+	add("api_key", cur.APIKey != nl.APIKey)
+	add("model", cur.Model != nl.Model)
+	add("temperature", cur.Temperature != nl.Temperature)
+	add("timeout", cur.Timeout != nl.Timeout)
+	add("extra_body", u.SetExtraBody && !reflect.DeepEqual(cur.ExtraBody, nl.ExtraBody))
+	a.setConfig(n)
+	a.Provider.Set(newOpenAI(*nl), nl.Model, nl.Temperature)
+	a.Tracer.P.SetSecrets(nl.APIKey)
+	a.auditSettings("llm", changed)
+	a.Log.Info("llm reconfigured", "provider", nl.Provider, "base_url", nl.BaseURL, "model", nl.Model, "temperature", nl.Temperature)
+	return changed, nil
 }
 
 // loggingPlayer logs and records play/volume calls until a real speaker exists.

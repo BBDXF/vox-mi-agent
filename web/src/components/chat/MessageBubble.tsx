@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bot, User, Clock, Zap } from 'lucide-react';
+import { Bot, User, Clock, Zap, Activity, ChevronDown, ChevronUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { ToolCallCard } from './ToolCallCard';
+import { TurnTraceTimeline } from './TurnTraceTimeline';
 import { type Message, type ToolCall } from '@/lib/api';
 import { formatTime, cn } from '@/lib/utils';
 
@@ -10,13 +13,16 @@ export interface MessageBubbleProps {
   message: Message;
   toolResultsMap?: Record<string, { result?: unknown; error?: string }>;
   isStreaming?: boolean;
+  conversationId?: string;
 }
 
 export function MessageBubble({
   message,
   toolResultsMap = {},
   isStreaming = false,
+  conversationId,
 }: MessageBubbleProps) {
+  const [showTrace, setShowTrace] = useState(false);
   const isUser = message.role === 'user';
   const isTool = message.role === 'tool';
   const isAssistant = message.role === 'assistant';
@@ -115,24 +121,49 @@ export function MessageBubble({
         </div>
 
         {/* Timings & Stats Badge for Assistant */}
-        {isAssistant && message.timings && (
-          <div className="mt-1.5 flex items-center gap-2 select-none">
-            <Badge
-              variant="secondary"
-              className="h-5 text-[10px] gap-1 px-2 text-muted-foreground bg-muted/60 hover:bg-muted"
+        {isAssistant && (
+          <div className="mt-1.5 flex items-center gap-2 select-none flex-wrap">
+            {message.timings && (
+              <Badge
+                variant="secondary"
+                className="h-5 text-[10px] gap-1 px-2 text-muted-foreground bg-muted/60 hover:bg-muted"
+              >
+                <Zap className="w-3 h-3 text-amber-500" />
+                <span>首字 {message.timings.first_token_ms ?? 0}ms</span>
+                <span className="opacity-40">|</span>
+                <Clock className="w-3 h-3 text-primary" />
+                <span>
+                  耗时{' '}
+                  {message.timings.total_ms
+                    ? (message.timings.total_ms / 1000).toFixed(2) + 's'
+                    : '0s'}
+                </span>
+              </Badge>
+            )}
+
+            {/* 追踪 (Trace) Toggle Button */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowTrace((prev) => !prev)}
+              className="h-5 text-[10px] gap-1 px-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded"
+              title="查看该轮回复的执行追踪与耗时瀑布流"
             >
-              <Zap className="w-3 h-3 text-amber-500" />
-              <span>首字 {message.timings.first_token_ms ?? 0}ms</span>
-              <span className="opacity-40">|</span>
-              <Clock className="w-3 h-3 text-primary" />
-              <span>
-                耗时{' '}
-                {message.timings.total_ms
-                  ? (message.timings.total_ms / 1000).toFixed(2) + 's'
-                  : '0s'}
-              </span>
-            </Badge>
+              <Activity className="w-3 h-3 text-indigo-500" />
+              <span>追踪</span>
+              {showTrace ? (
+                <ChevronUp className="w-2.5 h-2.5" />
+              ) : (
+                <ChevronDown className="w-2.5 h-2.5" />
+              )}
+            </Button>
           </div>
+        )}
+
+        {/* Turn Trace Timeline & Waterfall */}
+        {isAssistant && showTrace && (
+          <TurnTraceTimeline conversationId={conversationId} />
         )}
       </div>
     </div>

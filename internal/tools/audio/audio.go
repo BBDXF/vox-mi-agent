@@ -41,6 +41,16 @@ type Deps struct {
 	Player   Player
 	Limit    int // default result count (config search.limit); 0 => 5
 	MinScore int // config search.min_score; 0 => 65
+	// Params, when set, supplies the current limit / min score on every call
+	// (live settings) and takes precedence over Limit / MinScore.
+	Params func() (limit, minScore int)
+}
+
+func (d Deps) searchParams() (limit, minScore int) {
+	if d.Params != nil {
+		return d.Params()
+	}
+	return d.Limit, d.MinScore
 }
 
 // All returns search_audio, play_audio and set_volume.
@@ -117,7 +127,7 @@ func (t *searchAudio) Call(ctx context.Context, raw json.RawMessage) (any, error
 	if utf8.RuneCountInString(q) > maxQueryRunes {
 		return errResult("query too long (max %d characters)", maxQueryRunes), nil
 	}
-	limit := t.d.Limit
+	limit, minScore := t.d.searchParams()
 	if limit <= 0 {
 		limit = 5
 	}
@@ -129,7 +139,7 @@ func (t *searchAudio) Call(ctx context.Context, raw json.RawMessage) (any, error
 	if t.d.Searcher == nil {
 		return errResult("media library is not available"), nil
 	}
-	hits, amb, err := t.d.Searcher.Search(ctx, q, limit, t.d.MinScore)
+	hits, amb, err := t.d.Searcher.Search(ctx, q, limit, minScore)
 	if err != nil {
 		if errors.Is(err, media.ErrNoLibrary) {
 			return errResult("the media library has not been synced yet"), nil

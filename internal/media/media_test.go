@@ -344,8 +344,8 @@ func TestFolderValidation(t *testing.T) {
 	if err := run(filepath.Join(e.music, "nope")); err == nil {
 		t.Fatal("missing folder accepted")
 	}
-	if err := run(); err == nil {
-		t.Fatal("no folders accepted")
+	if err := run(); err != nil { // no folders = empty library, not an error
+		t.Fatalf("no folders: %v", err)
 	}
 	// a failed sync must not wipe an existing library
 	if err := run(e.music); err != nil {
@@ -524,5 +524,81 @@ func TestSchedulerFromConfig(t *testing.T) {
 	cfg.Media.Folders = nil
 	if NewScheduler(NewSyncer(cfg, Deps{})).OnStart {
 		t.Fatal("no folders => no start sync")
+	}
+}
+
+func TestSetMediaAndEmptyLibrary(t *testing.T) {
+	e := newEnv(t, sampleFiles, nil)
+	e.trigger(t)
+	if e.lib.Len() == 0 {
+		t.Fatal("empty library")
+	}
+	m := e.sync.MediaConfig()
+	m.Folders = nil
+	e.sync.SetMedia(m)
+	if st, err := e.sync.Trigger(context.Background(), "t"); err != nil || st.Tracks != 0 {
+		t.Fatalf("%+v %v", st, err)
+	}
+	if e.lib.Len() != 0 {
+		t.Fatalf("library not cleared: %d", e.lib.Len())
+	}
+	if hits, _, err := e.index.Search(context.Background(), "anything", 3, 0); err != nil || len(hits) != 0 {
+		t.Fatalf("search on empty library: %v %v", hits, err)
+	}
+}
+
+func TestSchedulerSetInterval(t *testing.T) {
+	ft := &fakeTrigger{}
+	ctx, cancel := context.WithCancel(context.Background())
+	sc := &Scheduler{T: ft}
+	sc.Start(ctx)
+	sc.SetInterval(20 * time.Millisecond)
+	deadline := time.Now().Add(2 * time.Second)
+	for len(ft.snapshot()) < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(ft.snapshot()) < 2 {
+		t.Fatalf("no timer syncs after SetInterval: %v", ft.snapshot())
+	}
+	sc.SetInterval(0) // back to manual
+	time.Sleep(60 * time.Millisecond)
+	n := len(ft.snapshot())
+	time.Sleep(80 * time.Millisecond)
+	if len(ft.snapshot()) != n {
+		t.Fatal("scheduler still ticking after SetInterval(0)")
+	}
+	cancel()
+	sc.Wait()
+}
+
+func TestIndexReconfigureChangesNextQueryArgs(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.DataDir = t.TempDir()
+	cfg.Tools.Dir = "/x"
+	ix := NewIndex(cfg, nil)
+	join := func(topN, minScore int) string {
+		return strings.Join(ix.searchArgs(ix.Params(), topN, minScore), " ")
+	}
+	before := join(5, 65)
+	if !strings.Contains(before, "--candidates 500") || !strings.Contains(before, "--min-score 65") || !strings.Contains(before, "--strip ^(下一首") {
+		t.Fatalf("defaults: %s", before)
+	}
+	ix.Reconfigure("/other/fzq", []string{"^only$"}, 123)
+	after := join(2, 70)
+	if !strings.Contains(after, "--candidates 123") || !strings.Contains(after, "--min-score 70") || !strings.Contains(after, "-n 2") ||
+		strings.Count(after, "--strip") != 1 || !strings.Contains(after, "--strip ^only$") {
+		t.Fatalf("after: %s", after)
+	}
+	if ix.Params().FzqPath != "/other/fzq" {
+		t.Fatalf("%+v", ix.Params())
+	}
+	// the songs file stays the last argument (cache key invariant)
+	args := ix.searchArgs(ix.Params(), 1, 65)
+	if args[len(args)-1] != SongsPath(cfg.DataDir) {
+		t.Fatalf("songs file not last: %v", args)
+	}
+	ix.Reconfigure("", nil, 0) // empty fzq keeps the path; 0 candidates => default 500
+	if ix.Params().FzqPath != "/other/fzq" || !strings.Contains(join(1, 65), "--candidates 500") {
+		t.Fatal("reconfigure defaults")
 	}
 }

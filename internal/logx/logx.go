@@ -61,6 +61,12 @@ func New(level string, w io.Writer) *slog.Logger {
 	return slog.New(NewContextHandler(h))
 }
 
+// NewWithLevelVar is like New but the level can be changed at runtime via lv.
+func NewWithLevelVar(lv *slog.LevelVar, w io.Writer) *slog.Logger {
+	h := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lv})
+	return slog.New(NewContextHandler(h))
+}
+
 // NewContextHandler wraps h to add request_id/turn_id from the record ctx.
 func NewContextHandler(h slog.Handler) slog.Handler { return &ctxHandler{h} }
 

@@ -3,18 +3,20 @@ import { Sidebar, type NavTab } from '@/components/layout/Sidebar';
 import { ChatView } from '@/components/chat/ChatView';
 import { SettingsView } from '@/components/settings/SettingsView';
 import { MediaView } from '@/components/media/MediaView';
+import { LogsView } from '@/components/logs/LogsView';
 import { ToastProvider } from '@/components/ui/toast';
 import { getHealth, isMockMode } from '@/lib/api';
 import {
   MessageSquare,
   Settings as SettingsIcon,
   Music,
-  Radio,
+  ScrollText,
   FlaskConical,
 } from 'lucide-react';
 
 export function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('chat');
+  const [targetConversationId, setTargetConversationId] = useState<string | undefined>();
   const [isDark, setIsDark] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     const saved = localStorage.getItem('vox_theme');
@@ -95,9 +97,19 @@ export function App() {
 
           {/* Active Tab View */}
           <div className="flex-1 h-full min-w-0 overflow-hidden">
-            {currentTab === 'chat' && <ChatView />}
+            {currentTab === 'chat' && (
+              <ChatView targetConversationId={targetConversationId} />
+            )}
             {currentTab === 'settings' && <SettingsView />}
             {currentTab === 'media' && <MediaView />}
+            {currentTab === 'logs' && (
+              <LogsView
+                onNavigateToConversation={(convId) => {
+                  setTargetConversationId(convId);
+                  setCurrentTab('chat');
+                }}
+              />
+            )}
           </div>
 
           {/* Bottom Navigation for Mobile Screens (< 640px) */}
@@ -132,10 +144,16 @@ export function App() {
               <Music className="w-4 h-4" />
               <span>曲库</span>
             </button>
-            <div className="flex flex-col items-center gap-0.5 text-[10px] p-1.5 text-muted-foreground/40 cursor-not-allowed">
-              <Radio className="w-4 h-4" />
-              <span>音箱(待)</span>
-            </div>
+            <button
+              type="button"
+              onClick={() => setCurrentTab('logs')}
+              className={`flex flex-col items-center gap-0.5 text-[10px] p-1.5 rounded ${
+                currentTab === 'logs' ? 'text-primary font-semibold' : 'text-muted-foreground'
+              }`}
+            >
+              <ScrollText className="w-4 h-4" />
+              <span>日志</span>
+            </button>
           </div>
         </div>
       </div>

@@ -8,7 +8,31 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 )
+
+// SourceSet is a swappable holder of the current *Sources (settings changes
+// replace the registry without rebuilding the tools). The zero value holds
+// no sources and is ready to use.
+type SourceSet struct{ p atomic.Pointer[Sources] }
+
+// NewSourceSet returns a set holding s.
+func NewSourceSet(s *Sources) *SourceSet {
+	ss := &SourceSet{}
+	ss.Set(s)
+	return ss
+}
+
+// Get returns the current registry (nil = none).
+func (ss *SourceSet) Get() *Sources {
+	if ss == nil {
+		return nil
+	}
+	return ss.p.Load()
+}
+
+// Set atomically replaces the registry.
+func (ss *SourceSet) Set(s *Sources) { ss.p.Store(s) }
 
 // Source is a server-side registered data source (config.yaml `sources:`).
 type Source struct {

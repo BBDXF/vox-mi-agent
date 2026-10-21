@@ -30,14 +30,24 @@ import { streamChat } from '@/lib/sse';
 import { useToast } from '@/components/ui/toast';
 import { formatRelativeTime } from '@/lib/utils';
 
-export function ChatView() {
+export interface ChatViewProps {
+  targetConversationId?: string;
+}
+
+export function ChatView({ targetConversationId }: ChatViewProps = {}) {
   const { toast, error: toastError } = useToast();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const [activeConvId, setActiveConvId] = useState<string | null>(targetConversationId || null);
   const [nextBefore, setNextBefore] = useState<string | undefined>(undefined);
   const [loadingList, setLoadingList] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  useEffect(() => {
+    if (targetConversationId) {
+      setActiveConvId(targetConversationId);
+    }
+  }, [targetConversationId]);
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -542,6 +552,7 @@ export function ChatView() {
                   message={msg}
                   toolResultsMap={toolResults}
                   isStreaming={msg.streaming && isStreaming}
+                  conversationId={activeConvId || undefined}
                 />
               ))}
               <div ref={messagesEndRef} className="h-4" />

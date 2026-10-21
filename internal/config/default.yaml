@@ -62,3 +62,11 @@ search:
 
 speaker:
   driver: mock
+
+logging:
+  level: info                         # debug | info | warn | error
+  trace_retention_days: 30            # traces table (per-turn/LLM/tool timings)
+  trace_max_rows: 100000
+  debug_payloads: false               # write full LLM request/response + tool results to <data>/logs
+  payload_retention_days: 7
+  payload_max_bytes: 200MiB
