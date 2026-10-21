@@ -1,0 +1,8 @@
+# name version arch url sha256
+# Single source of truth for external tool binaries (consumed by scripts/fetch-tools.sh and Dockerfile).
+fzq v0.2.0 amd64 https://github.com/BBDXF/fzq/releases/download/v0.2.0/fzq_v0.2.0_linux_amd64.tar.gz 6d5d7232a47374c99eed696f14d78d54a520abfb262983c0e55ea2f9037655fa
+fzq v0.2.0 arm64 https://github.com/BBDXF/fzq/releases/download/v0.2.0/fzq_v0.2.0_linux_arm64.tar.gz 56e347466f4f8d9fd5afacc5b1588ac7d4c51d7fb58d46880a111fd1c453bec5
+jq 1.8.2 amd64 https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-amd64 b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+jq 1.8.2 arm64 https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-arm64 8b85c817833814ddca00a144c33705546355afccf0cf39b188f3cdb48b852309
+yq v4.54.1 amd64 https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_amd64 8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f
+yq v4.54.1 arm64 https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_arm64 189088da0c6429ec5178dfaab1a114805f6cab0b61b165ab236efedf1d57a71b

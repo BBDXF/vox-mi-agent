@@ -1,0 +1,16 @@
+# Container test run: `make test-docker`
+services:
+  test:
+    image: vox-mi-agent:test
+    working_dir: /src
+    volumes:
+      - .:/src
+      - gomod:/go/pkg/mod
+      - gocache:/root/.cache/go-build
+    environment:
+      VOX_TOOLS_DIR: /usr/local/bin
+      VOX_IN_CONTAINER: "1"
+    command: ["go", "test", "-count=1", "./..."]
+volumes:
+  gomod:
+  gocache:

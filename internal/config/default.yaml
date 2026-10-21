@@ -1,0 +1,61 @@
+# vox-mi-agent default configuration (generated on first start).
+# Priority: built-in defaults -> this file -> VOX_* environment variables.
+# Keys omitted here fall back to built-in defaults. This file is mode 0600
+# because it may contain llm.api_key; prefer VOX_LLM_API_KEY in compose.
+
+server:
+  listen: "tcp://127.0.0.1:8080"      # or "unix:///data/app.sock"
+  base_path: ""                       # reverse-proxy sub path, e.g. "/app/vox"
+  auth:
+    require_admin: false
+
+llm:
+  base_url: "https://api.openai.com/v1"
+  api_key: ""                         # prefer env VOX_LLM_API_KEY
+  model: "gpt-4o-mini"
+  temperature: 0.3
+  timeout: 60s
+
+tools:
+  # dir: /usr/local/bin               # VOX_TOOLS_DIR; fzq/jq/yq default to <dir>/<name>
+  # fzq_path: /usr/local/bin/fzq
+  # jq_path: /usr/local/bin/jq
+  # yq_path: /usr/local/bin/yq
+  shell:
+    enabled: false
+    isolation: landlock
+    expose_to: admin_console          # admin_console | all
+    timeout: 10s
+    max_output: 64KiB
+    readable_paths: []
+
+# Registered data sources for fuzzy_match / query_json / query_yaml.
+# file is relative to <dataDir>/sources unless absolute.
+sources: []
+#  - name: contacts
+#    file: contacts.json
+#    format: json                     # json | jsonl | yaml
+#    records: ".contacts"             # default records path
+#    keys: [name, nickname]
+#    extract: ""
+#    strip: []
+
+media:
+  folders: ["/vol1/1000/Music"]
+  extensions: [mp3, flac, m4a, aac, wav, ogg, ape]
+  sync_interval: 6h                   # 0 = manual only
+  sync_on_start: true
+  max_files: 100000
+  filename_pattern: '(?:(?P<artist>[^/]+?) - )?(?P<title>[^/]+)\.\w+$'
+
+search:
+  strip_patterns:
+    - '^(下一首|上一首|暂停|播放音乐)$'
+    - '^(小爱同学|小度)?[，, ]*(请|帮我)?(播放|放|来|我想听|我要听|想听|听)(一下|一首|首|点)?'
+    - '(的歌|吧|呀)$'
+  min_score: 65
+  limit: 5
+  candidates: 500
+
+speaker:
+  driver: mock

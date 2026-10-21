@@ -1,0 +1,18 @@
+# fnOS conventional path. Also usable standalone: docker compose -f app/docker/docker-compose.yaml up
+services:
+  app:
+    image: vox-mi-agent:dev
+    container_name: vox-mi-agent
+    restart: unless-stopped
+    user: "1000:1000"
+    mem_limit: 512m
+    cpus: 1.0
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: Asia/Shanghai
+      APP_BASE_PATH: ""
+    command: ["serve", "--listen", "tcp://0.0.0.0:8080", "--data", "/data"]
+    volumes:
+      - ${VOX_DATA:-./data}:/data
+      # - /vol1/1000/Music:/music:ro

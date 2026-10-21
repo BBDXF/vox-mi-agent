@@ -1,0 +1,74 @@
+package data
+
+import (
+	"context"
+	"encoding/json"
+	"github.com/andy/vox-mi-agent/internal/tools"
+)
+
+type queryYAML struct{ d Deps }
+
+// NewQueryYAML returns the yq-backed query_yaml tool (read-only).
+func NewQueryYAML(d Deps) tools.Tool { return &queryYAML{d: d.withDefaults()} }
+
+func (*queryYAML) Name() string { return "query_yaml" }
+
+func (*queryYAML) Description() string {
+	return "Run a yq (v4) expression over YAML data (read-only). Provide exactly one of 'source' " +
+		"(a registered data source name) or 'input' (inline YAML text, max 256 KiB). " +
+		"File access and environment access are disabled."
+}
+
+func (*queryYAML) Schema() json.RawMessage {
+	return json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "expr": {"type": "string", "minLength": 1, "maxLength": 1024, "description": "yq expression, e.g. '.devices[] | select(.room == \"kitchen\") | .name'"},
+    "source": {"type": "string", "description": "Registered data source name. Mutually exclusive with 'input': provide exactly one."},
+    "input": {"type": "string", "maxLength": 262144, "description": "Inline YAML text (max 256 KiB). Mutually exclusive with 'source': provide exactly one."},
+    "output_format": {"type": "string", "enum": ["yaml", "json"], "description": "Output format, default yaml."}
+  },
+  "required": ["expr"],
+  "additionalProperties": false
+}`)
+}
+
+type queryYAMLArgs struct {
+	Expr         string `json:"expr"`
+	Source       string `json:"source"`
+	Input        string `json:"input"`
+	OutputFormat string `json:"output_format"`
+}
+
+func (t *queryYAML) Call(ctx context.Context, raw json.RawMessage) (any, error) {
+	var a queryYAMLArgs
+	if err := decodeArgs(raw, &a); err != nil {
+		return errResult("invalid arguments: %v", err), nil
+	}
+	if a.Expr == "" {
+		return errResult("expr is required"), nil
+	}
+	if len(a.Expr) > maxFilterBytes {
+		return errResult("expr too long (%d > %d bytes)", len(a.Expr), maxFilterBytes), nil
+	}
+	if err := checkNoNUL("expr", a.Expr); err != nil {
+		return errResult("%v", err), nil
+	}
+	switch a.OutputFormat {
+	case "", "yaml", "json":
+	default:
+		return errResult("output_format must be 'yaml' or 'json'"), nil
+	}
+	in, err := t.d.resolveInput(a.Source, a.Input)
+	if err != nil {
+		return errResult("%v", err), nil
+	}
+	// Hard-coded flag table. Never -i, never --security-enable-system-operator.
+	args := []string{"--security-disable-file-ops", "--security-disable-env-ops"}
+	if a.OutputFormat == "json" {
+		args = append(args, "-o", "json")
+	}
+	args = append(args, "--", a.Expr)
+	args = append(args, fileArg(in)...)
+	return t.d.runText(ctx, t.Name(), "yq", args, a.Expr, in)
+}

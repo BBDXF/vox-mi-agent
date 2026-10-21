@@ -1,0 +1,59 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+
+	"github.com/andy/vox-mi-agent/internal/app"
+	"github.com/andy/vox-mi-agent/internal/config"
+	"github.com/andy/vox-mi-agent/internal/httpapi"
+	"github.com/andy/vox-mi-agent/internal/logx"
+)
+
+func cmdServe(ctx context.Context, args []string) error {
+	fs := newFlagSet("serve")
+	listen := fs.String("listen", "", "tcp://127.0.0.1:8080 or unix:///path/app.sock (overrides config)")
+	base := fs.String("base-path", "", "URL prefix to strip (overrides config; \"\" = none)")
+	dataDir := fs.String("data", "", "data directory (default $VOX_DATA_DIR or /data)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := config.Load(*dataDir)
+	if err != nil {
+		return err
+	}
+	if flagSet(fs, "listen") {
+		cfg.Server.Listen = *listen
+	}
+	if flagSet(fs, "base-path") {
+		cfg.Server.BasePath = *base
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	log := logx.New(logLevel("info"), os.Stderr)
+	slog.SetDefault(log)
+	a, err := app.Build(cfg, app.WithLogger(log))
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+
+	ln, err := httpapi.Listen(cfg.Server.Listen)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	log.Info("serving", "version", version, "listen", cfg.Server.Listen, "base_path", cfg.Server.BasePath, "data", a.Cfg.DataDir)
+
+	sctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	a.Scheduler.Start(sctx)
+	srv := httpapi.New(a)
+	err = httpapi.Serve(ctx, ln, srv.Handler(), log)
+	cancel()
+	a.Scheduler.Wait()
+	return err
+}

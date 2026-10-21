@@ -1,0 +1,399 @@
+// Package httpapi is the HTTP surface: JSON API, SSE chat and embedded SPA.
+package httpapi
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"path"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/andy/vox-mi-agent/internal/agent"
+	"github.com/andy/vox-mi-agent/internal/app"
+	"github.com/andy/vox-mi-agent/internal/config"
+	"github.com/andy/vox-mi-agent/internal/media"
+	"github.com/andy/vox-mi-agent/internal/store"
+	"github.com/andy/vox-mi-agent/internal/webui"
+)
+
+const maxBody = 1 << 20
+
+// Option customises New.
+type Option func(*Server)
+
+// WithStatic overrides the embedded frontend (tests).
+func WithStatic(f fs.FS) Option { return func(s *Server) { s.static = f } }
+
+// WithBasePath overrides cfg.Server.BasePath.
+func WithBasePath(p string) Option { return func(s *Server) { s.basePath = p } }
+
+// Server serves the API for an App.
+type Server struct {
+	app      *app.App
+	log      *slog.Logger
+	static   fs.FS
+	basePath string
+	handler  http.Handler
+}
+
+// New builds the HTTP handler tree.
+func New(a *app.App, opts ...Option) *Server {
+	s := &Server{app: a, log: a.Log, static: webui.FS(), basePath: a.Cfg.Server.BasePath}
+	for _, o := range opts {
+		o(s)
+	}
+
+	r := chi.NewRouter()
+	r.Use(requestID, recoverer(s.log), accessLog(s.log), adminOnly(a.Cfg.Server.Auth.RequireAdmin))
+	r.Get("/healthz", s.healthz)
+	r.Get("/api/conversations", s.listConversations)
+	r.Post("/api/conversations", s.createConversation)
+	r.Get("/api/conversations/{id}/messages", s.listMessages)
+	r.Post("/sse/chat", s.chat)
+	r.Get("/api/settings", s.getSettings)
+	r.Put("/api/settings/llm", s.putLLM)
+	r.Get("/api/media/status", s.mediaStatus)
+	r.Post("/api/media/sync", s.mediaSync)
+	r.NotFound(s.notFound)
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	})
+	s.handler = stripBase(s.basePath, r)
+	return s
+}
+
+// Handler returns the root handler (base path stripping included).
+func (s *Server) Handler() http.Handler { return s.handler }
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, code int, msg string) {
+	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	return json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(v)
+}
+
+// ---- static / fallback ----
+
+func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
+	if isAPIPath(r.URL.Path) {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+	if name == "" {
+		name = "index.html"
+	}
+	if st, err := fs.Stat(s.static, name); err != nil || st.IsDir() {
+		// SPA fallback, except for requests that look like missing assets.
+		if path.Ext(name) != "" && name != "index.html" {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		name = "index.html"
+	}
+	f, err := s.static.Open(name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "stat failed")
+		return
+	}
+	if name == "index.html" {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+	if rs, ok := f.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, name, st.ModTime(), rs)
+		return
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "read failed")
+		return
+	}
+	http.ServeContent(w, r, name, st.ModTime(), bytes.NewReader(b))
+}
+
+// ---- healthz / media ----
+
+func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"tools":  s.app.Health,
+		"media":  s.app.Syncer.Status(),
+	})
+}
+
+func (s *Server) mediaStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.app.Syncer.Status())
+}
+
+func (s *Server) mediaSync(w http.ResponseWriter, r *http.Request) {
+	if err := s.app.Syncer.TriggerAsync("manual"); err != nil {
+		if errors.Is(err, media.ErrRunning) {
+			writeError(w, http.StatusConflict, "sync already running")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
+// ---- conversations ----
+
+type conversationDTO struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Channel   string `json:"channel"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func toConv(c store.Conversation) conversationDTO {
+	return conversationDTO{c.ID, c.Title, c.Channel,
+		c.CreatedAt.UTC().Format(time.RFC3339), c.UpdatedAt.UTC().Format(time.RFC3339)}
+}
+
+func (s *Server) listConversations(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := 50
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 200 {
+			writeError(w, http.StatusBadRequest, "limit must be 1-200")
+			return
+		}
+		limit = n
+	}
+	var before time.Time
+	if id := q.Get("before"); id != "" {
+		c, err := s.app.Store.GetConversation(r.Context(), id)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusBadRequest, "unknown before id")
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		before = c.UpdatedAt
+	}
+	rows, err := s.app.Store.ListConversations(r.Context(), limit+1, before)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp := struct {
+		Items      []conversationDTO `json:"items"`
+		NextBefore string            `json:"next_before,omitempty"`
+	}{Items: []conversationDTO{}}
+	if len(rows) > limit {
+		rows = rows[:limit]
+		resp.NextBefore = rows[limit-1].ID
+	}
+	for _, c := range rows {
+		resp.Items = append(resp.Items, toConv(c))
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Title string `json:"title"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	c, err := s.app.Store.CreateConversation(r.Context(), strings.TrimSpace(body.Title), store.ChannelWeb)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, toConv(*c))
+}
+
+type messageDTO struct {
+	ID         int64           `json:"id"`
+	Role       string          `json:"role"`
+	Content    string          `json:"content"`
+	ToolCalls  json.RawMessage `json:"tool_calls,omitempty"`
+	ToolCallID string          `json:"tool_call_id,omitempty"`
+	Name       string          `json:"name,omitempty"`
+	CreatedAt  string          `json:"created_at"`
+}
+
+func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if _, err := s.app.Store.GetConversation(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "conversation not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rows, err := s.app.Store.ListMessages(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	items := make([]messageDTO, 0, len(rows))
+	for _, m := range rows {
+		items = append(items, messageDTO{m.ID, m.Role, m.Content, m.ToolCalls, m.ToolCallID, m.Name,
+			m.CreatedAt.UTC().Format(time.RFC3339)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// ---- SSE chat ----
+
+func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ConversationID string `json:"conversation_id"`
+		Message        string `json:"message"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(body.Message) == "" {
+		writeError(w, http.StatusBadRequest, "message is required")
+		return
+	}
+	if body.ConversationID != "" {
+		if _, err := s.app.Store.GetConversation(r.Context(), body.ConversationID); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "conversation not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	rc := http.NewResponseController(w)
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("X-Accel-Buffering", "no")
+	h.Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	_ = rc.Flush()
+
+	emit := func(ev agent.Event) {
+		b, err := json.Marshal(ev.Data)
+		if err != nil {
+			return
+		}
+		if _, err := w.Write([]byte("event: " + ev.Type + "\ndata: " + string(b) + "\n\n")); err != nil {
+			return
+		}
+		_ = rc.Flush()
+	}
+	err := s.app.Agent.Run(r.Context(), agent.Input{
+		ConversationID: body.ConversationID, Channel: store.ChannelWeb, Text: body.Message,
+	}, emit)
+	if err != nil && r.Context().Err() == nil {
+		s.log.WarnContext(r.Context(), "chat turn failed", "err", err)
+	}
+}
+
+// ---- settings ----
+
+func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
+	l := s.app.LLMConfig()
+	cfg := s.app.Cfg
+	type srcDTO struct {
+		Name   string `json:"name"`
+		Format string `json:"format"`
+		File   string `json:"file"`
+	}
+	srcs := make([]srcDTO, 0, len(cfg.Sources))
+	for _, x := range cfg.Sources {
+		srcs = append(srcs, srcDTO{x.Name, x.Format, x.File})
+	}
+	folders := cfg.Media.Folders
+	if folders == nil {
+		folders = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"llm": map[string]any{
+			"base_url": l.BaseURL, "model": l.Model,
+			"api_key_masked": maskKey(l.APIKey), "temperature": l.Temperature,
+		},
+		"tools":   s.app.Health,
+		"sources": srcs,
+		"media": map[string]any{
+			"folders": folders, "sync_interval": fmtDuration(cfg.Media.SyncInterval),
+		},
+		"speaker": map[string]any{"driver": cfg.Speaker.Driver},
+	})
+}
+
+func (s *Server) putLLM(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		BaseURL     string   `json:"base_url"`
+		Model       string   `json:"model"`
+		APIKey      string   `json:"api_key"`
+		Temperature *float64 `json:"temperature"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	u := app.LLMUpdate{BaseURL: body.BaseURL, Model: body.Model, APIKey: body.APIKey}
+	if body.Temperature != nil {
+		u.Temperature = *body.Temperature
+	} else {
+		u.Temperature = s.app.LLMConfig().Temperature
+	}
+	if err := s.app.UpdateLLM(u); err != nil {
+		if errors.Is(err, app.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.log.ErrorContext(r.Context(), "update llm settings", "err", err)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// maskKey masks an API key for display (never the plaintext).
+func maskKey(k string) string {
+	return (&config.Config{LLM: config.LLM{APIKey: k}}).Redacted().LLM.APIKey
+}
+
+// fmtDuration renders 6h0m0s as 6h (and 0 as "0s").
+func fmtDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
+}
