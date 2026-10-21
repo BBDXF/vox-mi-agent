@@ -134,6 +134,11 @@ export function SettingsView() {
 
         {/* Right Content Area */}
         <div className="md:col-span-9 lg:col-span-9 min-w-0 space-y-6">
+          {!currentSection ? (
+            <div className="text-sm text-muted-foreground py-12 text-center">
+              {loading ? '正在加载配置…' : '配置加载失败，请点击「刷新配置」重试'}
+            </div>
+          ) : (<>
           {/* Custom LLM Card */}
           {activeSection === 'llm' && (
             legacySettings?.llm ? (
@@ -157,6 +162,7 @@ export function SettingsView() {
               onSaved={loadAll}
             />
           )}
+          </>)}
         </div>
       </div>
     </div>
