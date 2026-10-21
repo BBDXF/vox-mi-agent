@@ -31,6 +31,7 @@ import {
 } from '@/lib/api';
 import { formatTime } from '@/lib/utils';
 import { MediaSettingsCard } from './MediaSettingsCard';
+import { AliasesTableEditor } from './AliasesTableEditor';
 
 export function MediaView() {
   const { success, error: toastError, info } = useToast();
@@ -160,7 +161,7 @@ export function MediaView() {
             家庭本地曲库与索引管理
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
-            监控 NAS 本地音乐文件扫描状态，维护 fzq 超高速拼音模糊检索索引
+            监控 NAS 本地音乐文件扫描状态，维护 fzq 超高速拼音模糊检索索引与歌曲别名映射
           </p>
         </div>
 
@@ -347,12 +348,15 @@ export function MediaView() {
         </CardContent>
       </Card>
 
-      {/* Library Settings Card (曲库设置) */}
+      {/* Library Settings Card (曲库设置: 目录、格式、同步间隔、高级配置) */}
       <MediaSettingsCard
         mediaConfig={settings?.media}
         onSaved={handleSettingsSaved}
         isSyncing={isSyncing}
       />
+
+      {/* Aliases Card (音乐别名映射) */}
+      <AliasesTableEditor />
 
       {/* Metadata & Scanning Reference Spec */}
       <Card className="border shadow-xs bg-muted/10">
@@ -373,7 +377,7 @@ export function MediaView() {
                 文件名与标签解析优先级
               </div>
               <p className="text-[11px] leading-relaxed">
-                优先从音频文件的 ID3v2 / FLAC Vorbis Comment / MP4 标签中读取歌手与歌曲标题；若元数据缺失，则按 <code>歌手 - 歌名.后缀</code> 模式从文件名提取。
+                优先从音频文件的 ID3v2 / FLAC Vorbis Comment / MP4 标签中读取歌手与歌曲标题；若元数据缺失，则按配置的正则模式从文件名提取。
               </p>
             </div>
 

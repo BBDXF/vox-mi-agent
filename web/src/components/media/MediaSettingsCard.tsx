@@ -13,6 +13,8 @@ import {
   X,
   Sliders,
   Check,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import {
   Card,
@@ -66,11 +68,24 @@ export function MediaSettingsCard({
   const [initialFolders, setInitialFolders] = useState<string[]>([]);
   const [initialExtensions, setInitialExtensions] = useState<string[]>([]);
   const [initialSyncInterval, setInitialSyncInterval] = useState<string>('6h');
+  const [initialFilenamePattern, setInitialFilenamePattern] = useState<string>(
+    '(?:(?P<artist>.+?) - )?(?P<title>.+)\\.\\w+$'
+  );
+  const [initialMaxFiles, setInitialMaxFiles] = useState<number>(100000);
+  const [initialSyncOnStart, setInitialSyncOnStart] = useState<boolean>(true);
 
   // Form editing state
   const [folders, setFolders] = useState<string[]>([]);
   const [extensions, setExtensions] = useState<string[]>([]);
   const [syncInterval, setSyncInterval] = useState<string>('6h');
+  const [filenamePattern, setFilenamePattern] = useState<string>(
+    '(?:(?P<artist>.+?) - )?(?P<title>.+)\\.\\w+$'
+  );
+  const [maxFiles, setMaxFiles] = useState<number>(100000);
+  const [syncOnStart, setSyncOnStart] = useState<boolean>(true);
+
+  // Collapsible Advanced section (collapsed by default)
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState<boolean>(false);
 
   // Per-folder validation cache
   const [validations, setValidations] = useState<Record<string, ValidationState>>({});
@@ -134,14 +149,24 @@ export function MediaSettingsCard({
       const rawFolders = mediaConfig.folders || [];
       const rawExtensions = mediaConfig.extensions || ['mp3', 'flac', 'm4a', 'wav', 'ogg', 'ape'];
       const rawInterval = String(mediaConfig.sync_interval || '6h');
+      const rawPattern =
+        mediaConfig.filename_pattern ?? '(?:(?P<artist>.+?) - )?(?P<title>.+)\\.\\w+$';
+      const rawMaxFiles = mediaConfig.max_files ?? 100000;
+      const rawSyncOnStart = mediaConfig.sync_on_start ?? true;
 
       setInitialFolders(rawFolders);
       setInitialExtensions(rawExtensions);
       setInitialSyncInterval(rawInterval);
+      setInitialFilenamePattern(rawPattern);
+      setInitialMaxFiles(rawMaxFiles);
+      setInitialSyncOnStart(rawSyncOnStart);
 
       setFolders(rawFolders);
       setExtensions(rawExtensions);
       setSyncInterval(rawInterval);
+      setFilenamePattern(rawPattern);
+      setMaxFiles(rawMaxFiles);
+      setSyncOnStart(rawSyncOnStart);
       setFieldErrors({});
 
       // Trigger validation for each existing folder
@@ -161,8 +186,17 @@ export function MediaSettingsCard({
     extensions.some((e, idx) => e !== initialExtensions[idx]);
 
   const isIntervalChanged = syncInterval !== initialSyncInterval;
+  const isPatternChanged = filenamePattern !== initialFilenamePattern;
+  const isMaxFilesChanged = maxFiles !== initialMaxFiles;
+  const isSyncOnStartChanged = syncOnStart !== initialSyncOnStart;
 
-  const isDirty = isFoldersChanged || isExtensionsChanged || isIntervalChanged;
+  const isDirty =
+    isFoldersChanged ||
+    isExtensionsChanged ||
+    isIntervalChanged ||
+    isPatternChanged ||
+    isMaxFilesChanged ||
+    isSyncOnStartChanged;
 
   // Compute interval dropdown options (preserve unknown current value)
   const isKnownInterval = STANDARD_INTERVALS.some((item) => item.value === syncInterval);
@@ -219,12 +253,18 @@ export function MediaSettingsCard({
         folders,
         extensions,
         sync_interval: syncInterval,
+        filename_pattern: filenamePattern,
+        max_files: maxFiles,
+        sync_on_start: syncOnStart,
       });
 
       // Update baseline to match saved state
       setInitialFolders([...folders]);
       setInitialExtensions([...extensions]);
       setInitialSyncInterval(syncInterval);
+      setInitialFilenamePattern(filenamePattern);
+      setInitialMaxFiles(maxFiles);
+      setInitialSyncOnStart(syncOnStart);
 
       if (res.sync_started) {
         success('已保存，正在同步');
@@ -252,7 +292,7 @@ export function MediaSettingsCard({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Sliders className="w-4 h-4 text-primary" />
-              <CardTitle>曲库设置</CardTitle>
+              <CardTitle>曲库设置 (Library Configuration)</CardTitle>
             </div>
             {isDirty && (
               <Badge variant="warning" className="w-fit text-[11px] gap-1 animate-pulse">
@@ -484,6 +524,120 @@ export function MediaSettingsCard({
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Section 4: 高级 (collapsed by default) */}
+          <div className="pt-2 border-t space-y-4">
+            <button
+              type="button"
+              onClick={() => setIsAdvancedOpen((prev) => !prev)}
+              className="flex items-center justify-between w-full py-1 text-left text-xs font-semibold text-foreground hover:text-primary transition-colors select-none"
+            >
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-primary" />
+                <span>高级设置 (Advanced)</span>
+                <span className="text-[11px] font-normal text-muted-foreground">
+                  文件名正则解析、索引规模上限、开机启动同步
+                </span>
+              </div>
+              {isAdvancedOpen ? (
+                <ChevronDown className="w-4 h-4 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              )}
+            </button>
+
+            {isAdvancedOpen && (
+              <div className="p-4 rounded-lg border bg-muted/20 space-y-4 text-xs animate-in fade-in duration-150">
+                {/* Field: filename_pattern */}
+                <div className="space-y-1.5">
+                  <label className="font-semibold text-foreground flex items-center justify-between">
+                    <span>文件名提取正则 (Filename Pattern)</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      正则分组支持
+                    </span>
+                  </label>
+                  <Input
+                    value={filenamePattern}
+                    onChange={(e) => setFilenamePattern(e.target.value)}
+                    placeholder="(?:(?P<artist>.+?) - )?(?P<title>.+)\.\w+$"
+                    className="font-mono text-xs bg-background"
+                  />
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    提示: 必须包含命名分组 <code>title</code>，可选 <code>artist</code>，例如{' '}
+                    <code>(?:(?P&lt;artist&gt;.+?) - )?(?P&lt;title&gt;.+)\.\w+$</code>
+                  </p>
+                  {fieldErrors['filename_pattern'] && (
+                    <div className="text-[11px] text-destructive flex items-center gap-1 font-sans bg-destructive/10 border border-destructive/20 rounded px-2 py-1 mt-1">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{fieldErrors['filename_pattern']}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Field: max_files */}
+                <div className="space-y-1.5 max-w-sm">
+                  <label className="font-semibold text-foreground">
+                    最大允许索引文件数 (Max Files)
+                  </label>
+                  <Input
+                    type="number"
+                    step="1000"
+                    min="1"
+                    value={maxFiles}
+                    onChange={(e) => setMaxFiles(parseInt(e.target.value, 10) || 100000)}
+                    className="font-mono text-xs bg-background"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    控制单实例内存索引快照文件数上限（默认 100,000）
+                  </p>
+                  {fieldErrors['max_files'] && (
+                    <div className="text-[11px] text-destructive flex items-center gap-1 font-sans bg-destructive/10 border border-destructive/20 rounded px-2 py-1 mt-1">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{fieldErrors['max_files']}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Field: sync_on_start */}
+                <div className="space-y-1.5 pt-2 border-t border-border/60">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-foreground">
+                          系统启动时自动同步 (Sync On Start)
+                        </span>
+                        <Badge
+                          variant="warning"
+                          className="text-[10px] py-0 px-1.5 font-sans"
+                        >
+                          下次启动生效
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        在服务或守护进程重启时，自动全量比对媒体目录更新 songs.jsonl
+                      </p>
+                    </div>
+
+                    <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={syncOnStart}
+                        onChange={(e) => setSyncOnStart(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary border border-border" />
+                    </label>
+                  </div>
+                  {fieldErrors['sync_on_start'] && (
+                    <div className="text-[11px] text-destructive flex items-center gap-1 font-sans bg-destructive/10 border border-destructive/20 rounded px-2 py-1 mt-1">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{fieldErrors['sync_on_start']}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
 

@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   Cpu,
-  Music,
-  ListMusic,
   Search,
   Database,
   Wrench,
@@ -22,19 +20,15 @@ import {
   type SettingsResponse,
 } from '@/lib/api';
 import { LLMProviderCard } from './LLMProviderCard';
-import { MediaSettingsCard } from '@/components/media/MediaSettingsCard';
-import { AliasesTableEditor } from './AliasesTableEditor';
 import { SourcesTableEditor } from './SourcesTableEditor';
 import { GenericSectionForm } from './GenericSectionForm';
 
-// Mapping section keys to display names and icons
+// Mapping section keys to display names and icons (曲库 and 别名 are now on the dedicated 曲库 page)
 const SECTION_METADATA: Record<
   string,
   { label: string; icon: React.ComponentType<{ className?: string }> }
 > = {
   llm: { label: 'LLM', icon: Cpu },
-  media: { label: '曲库', icon: Music },
-  aliases: { label: '别名', icon: ListMusic },
   search: { label: '检索', icon: Search },
   sources: { label: '数据源', icon: Database },
   tools: { label: '工具', icon: Wrench },
@@ -42,6 +36,8 @@ const SECTION_METADATA: Record<
   server: { label: '服务', icon: Server },
   logging: { label: '日志', icon: ScrollText },
 };
+
+const EXCLUDED_SECTIONS = new Set(['media', 'aliases']);
 
 export function SettingsView() {
   const { error: toastError } = useToast();
@@ -75,8 +71,11 @@ export function SettingsView() {
     loadAll();
   }, []);
 
-  const sectionsList = schema.sections || mockSettingsSchema.sections;
-  const currentSection = sectionsList.find((s) => s.name === activeSection) || sectionsList[0];
+  // Filter out media and aliases from settings tabs (they live on the 曲库 page)
+  const rawSections = schema.sections || mockSettingsSchema.sections;
+  const sectionsList = rawSections.filter((s) => !EXCLUDED_SECTIONS.has(s.name));
+  const currentSection =
+    sectionsList.find((s) => s.name === activeSection) || sectionsList[0];
 
   return (
     <div className="h-full overflow-y-auto p-4 md:p-8 space-y-6 max-w-6xl mx-auto">
@@ -88,7 +87,7 @@ export function SettingsView() {
             系统配置与参数规范
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
-            动态参数架构驱动：大模型、NAS 曲库、拼音别名、音箱驱动与调用链审计策略
+            动态参数架构驱动：大模型、拼音检索、数据源、音箱驱动与调用链审计策略
           </p>
         </div>
 
@@ -148,31 +147,17 @@ export function SettingsView() {
             )
           )}
 
-          {/* Custom Media Card */}
-          {activeSection === 'media' && (
-            <MediaSettingsCard
-              mediaConfig={legacySettings?.media}
-              onSaved={() => loadAll()}
-            />
-          )}
-
-          {/* Dedicated Aliases Table Editor */}
-          {activeSection === 'aliases' && <AliasesTableEditor />}
-
           {/* Dedicated Sources Table Editor */}
           {activeSection === 'sources' && <SourcesTableEditor />}
 
           {/* Generic Schema-Driven Section Form for search, tools, speaker, server, logging */}
-          {activeSection !== 'llm' &&
-            activeSection !== 'media' &&
-            activeSection !== 'aliases' &&
-            activeSection !== 'sources' && (
-              <GenericSectionForm
-                key={activeSection}
-                section={currentSection}
-                onSaved={loadAll}
-              />
-            )}
+          {activeSection !== 'llm' && activeSection !== 'sources' && (
+            <GenericSectionForm
+              key={activeSection}
+              section={currentSection}
+              onSaved={loadAll}
+            />
+          )}
         </div>
       </div>
     </div>

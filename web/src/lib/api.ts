@@ -117,12 +117,17 @@ export interface MediaConfig {
   extensions: string[];
   accessible_roots?: string[];
   max_files?: number;
+  filename_pattern?: string;
+  sync_on_start?: boolean;
 }
 
 export interface UpdateMediaSettingsRequest {
-  folders: string[];
+  folders?: string[];
   extensions?: string[];
   sync_interval?: string;
+  filename_pattern?: string;
+  max_files?: number;
+  sync_on_start?: boolean;
 }
 
 export interface UpdateMediaSettingsResponse {
@@ -580,6 +585,8 @@ let mockSettings: SettingsResponse = {
     extensions: ['mp3', 'flac', 'm4a', 'wav', 'ogg', 'ape'],
     accessible_roots: ['/vol1/1000', '/vol2/Audio'],
     max_files: 100000,
+    filename_pattern: '(?:(?P<artist>.+?) - )?(?P<title>.+)\\.\\w+$',
+    sync_on_start: true,
   },
   speaker: {
     driver: 'xiaomi_miot',
@@ -609,7 +616,9 @@ export const mockSettingsSchema: SettingsSchemaResponse = {
         { key: 'folders', type: 'string[]', default: ['/vol1/1000/Music', '/vol2/Audio/Lossless'], description: '音频扫描根目录列表' },
         { key: 'sync_interval', type: 'duration', default: '6h', description: '全量扫描与索引构建周期 (如 6h / 30m / 0)' },
         { key: 'extensions', type: 'string[]', default: ['mp3', 'flac', 'm4a', 'wav', 'ogg', 'ape'], description: '音频解析文件后缀白名单' },
+        { key: 'filename_pattern', type: 'string', default: '(?:(?P<artist>.+?) - )?(?P<title>.+)\\.\\w+$', description: '从文件名提取元数据的正则表达式 (命名分组: title, artist)' },
         { key: 'max_files', type: 'int', default: 100000, description: '最大允许索引歌曲文件数量上限' },
+        { key: 'sync_on_start', type: 'bool', default: true, restart_required: true, description: '服务启动时自动触发一次本地曲库索引同步' },
       ],
     },
     {
@@ -725,6 +734,8 @@ let mockSectionValues: Record<string, Record<string, any>> = {
     sync_interval: '6h',
     extensions: ['mp3', 'flac', 'm4a', 'wav', 'ogg', 'ape'],
     max_files: 100000,
+    filename_pattern: '(?:(?P<artist>.+?) - )?(?P<title>.+)\\.\\w+$',
+    sync_on_start: true,
   },
   aliases: {
     items: mockAliases,
@@ -1454,27 +1465,58 @@ async function mockUpdateMediaSettings(
   await new Promise((r) => setTimeout(r, 200));
 
   const fieldErrors: Record<string, string> = {};
-  for (const folder of body.folders) {
-    if (
-      folder.includes('error') ||
-      folder.startsWith('/etc') ||
-      folder.startsWith('/var') ||
-      folder === '/root'
-    ) {
-      fieldErrors[folder] = '目录超出 fnOS 授权访问范围，请使用授权存储卷';
+  if (body.folders) {
+    for (const folder of body.folders) {
+      if (
+        folder.includes('error') ||
+        folder.startsWith('/etc') ||
+        folder.startsWith('/var') ||
+        folder === '/root'
+      ) {
+        fieldErrors[folder] = '目录超出 fnOS 授权访问范围，请使用授权存储卷';
+      }
+    }
+  }
+
+  if (body.filename_pattern !== undefined && body.filename_pattern.trim().length > 0) {
+    if (!body.filename_pattern.includes('?P<title>') && !body.filename_pattern.includes('(?P<title>')) {
+      fieldErrors['filename_pattern'] = '正则表达式必须包含命名分组 title，例如 (?P<title>.+)';
+    }
+  }
+
+  if (body.max_files !== undefined) {
+    if (body.max_files <= 0) {
+      fieldErrors['max_files'] = '最大文件数必须大于 0';
     }
   }
 
   if (Object.keys(fieldErrors).length > 0) {
-    throw new ApiError('部分媒体目录校验失败，请修改后重试', 400, fieldErrors);
+    throw new ApiError('部分媒体设置项校验失败，请修改后重试', 400, fieldErrors);
   }
 
-  mockSettings.media.folders = [...body.folders];
-  if (body.extensions) {
+  if (body.folders !== undefined) {
+    mockSettings.media.folders = [...body.folders];
+    mockSectionValues.media.folders = [...body.folders];
+  }
+  if (body.extensions !== undefined) {
     mockSettings.media.extensions = [...body.extensions];
+    mockSectionValues.media.extensions = [...body.extensions];
   }
   if (body.sync_interval !== undefined) {
     mockSettings.media.sync_interval = body.sync_interval;
+    mockSectionValues.media.sync_interval = body.sync_interval;
+  }
+  if (body.filename_pattern !== undefined) {
+    mockSettings.media.filename_pattern = body.filename_pattern;
+    mockSectionValues.media.filename_pattern = body.filename_pattern;
+  }
+  if (body.max_files !== undefined) {
+    mockSettings.media.max_files = body.max_files;
+    mockSectionValues.media.max_files = body.max_files;
+  }
+  if (body.sync_on_start !== undefined) {
+    mockSettings.media.sync_on_start = body.sync_on_start;
+    mockSectionValues.media.sync_on_start = body.sync_on_start;
   }
 
   const syncStarted = true;
@@ -1484,7 +1526,7 @@ async function mockUpdateMediaSettings(
     setTimeout(() => {
       mockMediaStatus.running = false;
       mockMediaStatus.last_sync_at = new Date().toISOString();
-      mockMediaStatus.tracks = 14280 + body.folders.length * 15;
+      mockMediaStatus.tracks = 14280 + (mockSettings.media.folders?.length || 0) * 15;
       mockMediaStatus.duration_ms = 1520;
       mockMediaStatus.result = `已扫描并同步完成，共 ${mockMediaStatus.tracks} 首曲目`;
     }, 3000);
@@ -1842,6 +1884,18 @@ export async function getMediaStatus(): Promise<MediaStatus> {
 
   const res = await fetch('api/media/status');
   return handleResponse<MediaStatus>(res);
+}
+
+/**
+ * GET api/settings/media
+ */
+export async function getMediaSettings(): Promise<MediaConfig> {
+  if (isMockMode()) {
+    return { ...mockSettings.media };
+  }
+
+  const res = await fetch('api/settings/media');
+  return handleResponse<MediaConfig>(res);
 }
 
 /**
