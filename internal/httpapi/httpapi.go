@@ -59,6 +59,8 @@ func New(a *app.App, opts ...Option) *Server {
 	r := chi.NewRouter()
 	r.Use(requestID, recoverer(s.log), accessLog(s.log), adminOnly(a.Cfg.Server.Auth.RequireAdmin))
 	r.Get("/healthz", s.healthz)
+	r.Get("/audio/{file}", s.serveAudio)
+	r.Head("/audio/{file}", s.serveAudio)
 	r.Get("/api/conversations", s.listConversations)
 	r.Post("/api/conversations", s.createConversation)
 	r.Delete("/api/conversations", s.deleteAllConversations)

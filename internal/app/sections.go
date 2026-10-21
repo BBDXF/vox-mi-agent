@@ -15,6 +15,7 @@ import (
 	"github.com/andy/vox-mi-agent/internal/llm"
 	"github.com/andy/vox-mi-agent/internal/logx"
 	"github.com/andy/vox-mi-agent/internal/media"
+	"github.com/andy/vox-mi-agent/internal/mediaurl"
 	"github.com/andy/vox-mi-agent/internal/store"
 	"github.com/andy/vox-mi-agent/internal/tools/data"
 )
@@ -664,7 +665,19 @@ func speakerSection() *section {
 		Description: "播放输出驱动（xiaomi 小爱音箱驱动后续支持）。修改后立即生效。",
 		fields: []*fieldDef{
 			enumField("driver", "驱动：mock（静默记录）、log（记录并输出日志）", []string{"mock", "log"}, func(c *config.Config) *string { return &c.Speaker.Driver }),
+			strField("public_base_url", "音箱访问本服务的地址，如 http://192.168.1.10:8081（无结尾斜杠）；留空则自动取本机首个非回环 IPv4 + 服务端口（Docker 桥接模式下通常不可达，请显式设置）", func(c *config.Config) *string { return &c.Speaker.PublicBaseURL }),
+			durField("url_ttl", "签名媒体 URL 有效期（如 1h，最小 1m）", func(c *config.Config) *time.Duration { return &c.Speaker.URLTTL }),
 		},
+	}
+	s.validate = func(a *App, old, n *config.Config, provided, changed keySet, fe fieldErrs) {
+		if provided["public_base_url"] {
+			if err := mediaurl.ValidateBase(n.Speaker.PublicBaseURL); err != nil {
+				fe["public_base_url"] = err.Error()
+			}
+		}
+		if provided["url_ttl"] && n.Speaker.URLTTL < time.Minute {
+			fe["url_ttl"] = "must be at least 1m"
+		}
 	}
 	s.apply = func(ctx context.Context, a *App, old, n *config.Config, changed keySet) (map[string]any, *bool, error) {
 		a.setDriver(n.Speaker.Driver)

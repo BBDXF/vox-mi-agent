@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"github.com/andy/vox-mi-agent/internal/llm"
 	"github.com/andy/vox-mi-agent/internal/logx"
 	"github.com/andy/vox-mi-agent/internal/media"
+	"github.com/andy/vox-mi-agent/internal/mediaurl"
 	"github.com/andy/vox-mi-agent/internal/store"
 	"github.com/andy/vox-mi-agent/internal/toolrunner"
 	"github.com/andy/vox-mi-agent/internal/tools"
@@ -74,6 +76,10 @@ type App struct {
 	sources  *data.SourceSet
 	player   *driverPlayer
 	loud     *loggingPlayer
+
+	secret   []byte
+	baseOnce sync.Once
+	autoBase string
 }
 
 // Build constructs the application from cfg. Tool self-check failures are
@@ -142,6 +148,9 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 	a.Index.Log = a.Log
 	a.Scheduler = media.NewScheduler(a.Syncer)
 
+	if a.secret, err = mediaurl.LoadSecret(c.DataDir); err != nil {
+		return nil, fmt.Errorf("app: server secret: %w", err)
+	}
 	a.Player = &audio.LogPlayer{}
 	a.loud = &loggingPlayer{LogPlayer: a.Player, log: a.Log}
 	a.player = &driverPlayer{}
@@ -156,7 +165,7 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 		reg.Register(t)
 	}
 	for _, t := range audio.All(audio.Deps{
-		Searcher: a.Index, Library: a.Library, Player: a.player,
+		Searcher: a.Index, Library: a.Library, Player: a.player, URLFor: a.TrackURL,
 		Limit: c.Search.Limit, MinScore: int(c.Search.MinScore),
 		Params: func() (limit, minScore int) {
 			a.withConfig(func(c *config.Config) { limit, minScore = c.Search.Limit, int(c.Search.MinScore) })
@@ -247,8 +256,8 @@ type driverPlayer struct {
 }
 
 func (d *driverPlayer) cur() audio.Player { d.mu.RLock(); defer d.mu.RUnlock(); return d.p }
-func (d *driverPlayer) Play(ctx context.Context, t media.Track) error {
-	return d.cur().Play(ctx, t)
+func (d *driverPlayer) Play(ctx context.Context, r audio.PlayRequest) error {
+	return d.cur().Play(ctx, r)
 }
 func (d *driverPlayer) SetVolume(ctx context.Context, v int) error {
 	return d.cur().SetVolume(ctx, v)
@@ -424,12 +433,65 @@ type loggingPlayer struct {
 	log *slog.Logger
 }
 
-func (p *loggingPlayer) Play(ctx context.Context, t media.Track) error {
-	p.log.Info("speaker(log): play", "id", t.ID, "title", t.Title, "artist", t.Artist)
-	return p.LogPlayer.Play(ctx, t)
+func (p *loggingPlayer) Play(ctx context.Context, r audio.PlayRequest) error {
+	p.log.Info("speaker(log): play", "url", r.URL, "track_id", r.TrackID, "title", r.Title, "artist", r.Artist)
+	return p.LogPlayer.Play(ctx, r)
 }
 
 func (p *loggingPlayer) SetVolume(ctx context.Context, v int) error {
 	p.log.Info("speaker(log): set volume", "volume", v)
 	return p.LogPlayer.SetVolume(ctx, v)
+}
+
+// Secret returns the server secret used to sign media URLs.
+func (a *App) Secret() []byte { return a.secret }
+
+// publicBase returns the configured or auto-detected public base URL.
+func (a *App) publicBase() (string, error) {
+	cfg := a.Config()
+	if b := cfg.Speaker.PublicBaseURL; b != "" {
+		return b, nil
+	}
+	_, addr, err := config.ParseListen(a.Cfg.Server.Listen)
+	if err != nil {
+		return "", err
+	}
+	if network, _, _ := config.ParseListen(a.Cfg.Server.Listen); network != "tcp" {
+		return "", errors.New("speaker.public_base_url must be set when listening on a unix socket")
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", err
+	}
+	a.baseOnce.Do(func() {
+		b, err := mediaurl.AutoBase(port)
+		if err != nil {
+			a.Log.Warn("media url: auto-detect failed", "err", err)
+			return
+		}
+		a.autoBase = b
+		a.Log.Warn("speaker.public_base_url is empty; using auto-detected address. "+
+			"In Docker bridge mode this is likely unreachable by the speaker: set speaker.public_base_url",
+			"base_url", b)
+	})
+	if a.autoBase == "" {
+		return "", errors.New("cannot determine public base URL; set speaker.public_base_url")
+	}
+	return a.autoBase, nil
+}
+
+// TrackURL builds a signed, expiring media URL for t.
+func (a *App) TrackURL(t media.Track) (string, error) {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(t.Path)), ".")
+	if ext == "" {
+		return "", errors.New("track has no file extension")
+	}
+	base, err := a.publicBase()
+	if err != nil {
+		return "", err
+	}
+	if bp := a.Cfg.Server.BasePath; bp != "" && !strings.HasSuffix(base, bp) {
+		base += strings.TrimRight(bp, "/")
+	}
+	return mediaurl.Sign(a.secret, base, t.ID, ext, time.Now().Add(a.Config().Speaker.URLTTL)), nil
 }

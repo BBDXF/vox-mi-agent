@@ -240,6 +240,8 @@ desktop_applaunchname=fnos-ai-agent.main
   - 形如 `{PUBLIC_MEDIA_BASE_URL}/audio/{track_id}.{ext}?exp={unix}&sig={HMAC}`；`ext` 取原文件扩展名（音箱可按扩展名判断格式）
   - `sig = HMAC-SHA256(server_secret, track_id + "." + ext + "|" + exp)` 截断 16 字节、base64url；`server_secret` 首次启动随机生成存于 `/data`；无需服务端状态表
   - 服务端校验签名与过期 → 用 `track_id` 在曲库中查回绝对路径 → 流式返回（支持 Range）；ID 不存在或已被重扫移除 → 404
+  - 配置：`speaker.public_base_url`（空=自动取首个非回环 IPv4+服务端口并告警，Docker 桥接模式下需显式设置）、`speaker.url_ttl`（默认 1h）；密钥文件 `<data>/secret`（0600）；`/audio` 仅凭签名访问（不走管理员校验）
+  - `play_audio` 参数 `id` 与 `url`（http/https，非曲库音频）二选一，结果含 `url`
   - 追踪中 `play_audio` 记录 `track_id`，媒体端口访问日志也记录 `track_id`，二者可直接关联
 - **防御清单**（应用层自保）：
   - URL 形如上；不再使用一次性 UUID 映射表（v5.1 的 `/audio/{UUID}?name={Base64}` 方案由签名 URL 取代）

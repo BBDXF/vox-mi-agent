@@ -105,7 +105,7 @@ func TestSearchAudioFake(t *testing.T) {
 func TestPlayAudioAndVolume(t *testing.T) {
 	lp := &LogPlayer{}
 	lib := fakeLib{"a": {ID: "a", Title: "晴天", Artist: "周杰伦", Path: "/secret/path.mp3"}}
-	d := Deps{Library: lib, Player: lp}
+	d := Deps{Library: lib, Player: lp, URLFor: func(tr media.Track) (string, error) { return "http://h/audio/" + tr.ID + ".mp3?sig=x", nil }}
 	pl := NewPlayAudio(d)
 	m := call(t, pl, `{"id":"a"}`)
 	if m["status"] != "playing" || m["title"] != "晴天" {
@@ -115,15 +115,22 @@ func TestPlayAudioAndVolume(t *testing.T) {
 	if strings.Contains(string(b), "secret") {
 		t.Fatal("path leaked")
 	}
-	if p := lp.Played(); len(p) != 1 || p[0].Path != "/secret/path.mp3" {
+	if p := lp.Played(); len(p) != 1 || p[0].URL != "http://h/audio/a.mp3?sig=x" || p[0].TrackID != "a" || m["url"] != p[0].URL {
 		t.Fatalf("%v", p)
 	}
-	for _, bad := range []string{`{"id":"zzz"}`, `{}`, `{"id":"a","path":"/x"}`} {
+	if m := call(t, pl, `{"url":"https://x.example/a.mp3","title":"T"}`); m["status"] != "playing" || m["url"] != "https://x.example/a.mp3" {
+		t.Fatalf("%v", m)
+	}
+	if p := lp.Played(); len(p) != 2 || p[1].TrackID != "" || p[1].Title != "T" {
+		t.Fatalf("%v", p)
+	}
+	for _, bad := range []string{`{"id":"zzz"}`, `{}`, `{"id":"a","path":"/x"}`, `{"id":"a","url":"http://x/y"}`,
+		`{"url":"file:///etc/passwd"}`, `{"url":"ftp://x/y"}`, `{"url":"notaurl"}`} {
 		if m := call(t, pl, bad); m["error"] == nil {
 			t.Errorf("%s accepted", bad)
 		}
 	}
-	if len(lp.Played()) != 1 {
+	if len(lp.Played()) != 2 {
 		t.Fatal("played on error")
 	}
 
@@ -172,7 +179,7 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	lp := &LogPlayer{}
-	ts := All(Deps{Searcher: media.NewIndex(cfg, r), Library: s.Library(), Player: lp, Limit: cfg.Search.Limit, MinScore: int(cfg.Search.MinScore)})
+	ts := All(Deps{Searcher: media.NewIndex(cfg, r), Library: s.Library(), Player: lp, URLFor: func(tr media.Track) (string, error) { return "http://h/audio/" + tr.ID + ".mp3", nil }, Limit: cfg.Search.Limit, MinScore: int(cfg.Search.MinScore)})
 	m := call(t, ts[0], `{"query":"播放周杰伦的晴天"}`)
 	res, _ := m["results"].([]any)
 	if len(res) == 0 {

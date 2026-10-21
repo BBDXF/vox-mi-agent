@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -18,9 +19,17 @@ import (
 
 const maxQueryRunes = 200
 
+// PlayRequest is what the speaker is asked to play.
+type PlayRequest struct {
+	URL     string // http(s) URL the speaker fetches
+	TrackID string // library id, empty for external URLs
+	Title   string
+	Artist  string
+}
+
 // Player is implemented by the speaker adapter.
 type Player interface {
-	Play(ctx context.Context, t media.Track) error
+	Play(ctx context.Context, r PlayRequest) error
 	SetVolume(ctx context.Context, volume int) error
 }
 
@@ -39,6 +48,8 @@ type Deps struct {
 	Searcher Searcher
 	Library  Lookuper
 	Player   Player
+	// URLFor builds the signed media URL of a library track.
+	URLFor   func(media.Track) (string, error)
 	Limit    int // default result count (config search.limit); 0 => 5
 	MinScore int // config search.min_score; 0 => 65
 	// Params, when set, supplies the current limit / min score on every call
@@ -162,43 +173,68 @@ func NewPlayAudio(d Deps) tools.Tool { return &playAudio{d: d} }
 
 func (*playAudio) Name() string { return "play_audio" }
 func (*playAudio) Description() string {
-	return "Play a song from the local music library by the id returned by search_audio."
+	return "Play audio on the speaker. For library songs pass 'id' from search_audio. " +
+		"Pass 'url' (http/https) only for non-library audio. Provide exactly one of id or url."
 }
 func (*playAudio) Schema() json.RawMessage {
 	return json.RawMessage(`{
   "type": "object",
   "properties": {
-    "id": {"type": "string", "minLength": 1, "maxLength": 64, "description": "Audio id from search_audio."}
+    "id": {"type": "string", "minLength": 1, "maxLength": 64, "description": "Audio id from search_audio."},
+    "url": {"type": "string", "maxLength": 2048, "description": "http(s) URL of non-library audio. Not for library songs."},
+    "title": {"type": "string", "maxLength": 200, "description": "Optional display title (with url)."}
   },
-  "required": ["id"],
   "additionalProperties": false
 }`)
 }
 
 func (t *playAudio) Call(ctx context.Context, raw json.RawMessage) (any, error) {
 	var a struct {
-		ID string `json:"id"`
+		ID    string `json:"id"`
+		URL   string `json:"url"`
+		Title string `json:"title"`
 	}
 	if err := decodeArgs(raw, &a); err != nil {
 		return errResult("invalid arguments: %v", err), nil
 	}
-	if a.ID == "" {
-		return errResult("id is required"), nil
+	if (a.ID == "") == (a.URL == "") {
+		return errResult("provide exactly one of id or url"), nil
 	}
-	if t.d.Library == nil {
-		return errResult("media library is not available"), nil
-	}
-	tr, ok := t.d.Library.Lookup(a.ID)
-	if !ok {
-		return errResult("unknown audio id %q; use search_audio to find a valid id", a.ID), nil
+	var req PlayRequest
+	if a.ID != "" {
+		if t.d.Library == nil {
+			return errResult("media library is not available"), nil
+		}
+		tr, ok := t.d.Library.Lookup(a.ID)
+		if !ok {
+			return errResult("unknown audio id %q; use search_audio to find a valid id", a.ID), nil
+		}
+		if t.d.URLFor == nil {
+			return errResult("media URLs are not available"), nil
+		}
+		u, err := t.d.URLFor(tr)
+		if err != nil {
+			return errResult("cannot build media url: %v", err), nil
+		}
+		req = PlayRequest{URL: u, TrackID: tr.ID, Title: tr.Title, Artist: tr.Artist}
+	} else {
+		u, err := url.Parse(a.URL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return errResult("url must be an http or https URL"), nil
+		}
+		req = PlayRequest{URL: a.URL, Title: strings.TrimSpace(a.Title)}
 	}
 	if t.d.Player == nil {
 		return errResult("no speaker is configured"), nil
 	}
-	if err := t.d.Player.Play(ctx, tr); err != nil {
+	if err := t.d.Player.Play(ctx, req); err != nil {
 		return errResult("playback failed: %v", err), nil
 	}
-	return map[string]any{"status": "playing", "id": tr.ID, "title": tr.Title, "artist": tr.Artist}, nil
+	res := map[string]any{"status": "playing", "url": req.URL, "title": req.Title}
+	if req.TrackID != "" {
+		res["id"], res["track_id"], res["artist"] = req.TrackID, req.TrackID, req.Artist
+	}
+	return res, nil
 }
 
 // ---- set_volume ----
@@ -248,15 +284,15 @@ func (t *setVolume) Call(ctx context.Context, raw json.RawMessage) (any, error) 
 // LogPlayer is a Player that only records calls (used until a speaker exists).
 type LogPlayer struct {
 	mu      sync.Mutex
-	played  []media.Track
+	played  []PlayRequest
 	volumes []int
 }
 
 // Play implements Player.
-func (p *LogPlayer) Play(_ context.Context, t media.Track) error {
+func (p *LogPlayer) Play(_ context.Context, r PlayRequest) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.played = append(p.played, t)
+	p.played = append(p.played, r)
 	return nil
 }
 
@@ -269,10 +305,10 @@ func (p *LogPlayer) SetVolume(_ context.Context, v int) error {
 }
 
 // Played returns a copy of the tracks played so far.
-func (p *LogPlayer) Played() []media.Track {
+func (p *LogPlayer) Played() []PlayRequest {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return append([]media.Track(nil), p.played...)
+	return append([]PlayRequest(nil), p.played...)
 }
 
 // Volumes returns a copy of the volumes set so far.

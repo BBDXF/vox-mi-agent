@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/andy/vox-mi-agent/internal/mediaurl"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -190,6 +191,11 @@ type Search struct {
 
 type Speaker struct {
 	Driver string `yaml:"driver" json:"driver"`
+	// PublicBaseURL is the address the speaker uses to fetch /audio URLs
+	// (e.g. http://192.168.1.10:8081). Empty = auto-detect host IPv4 + port.
+	PublicBaseURL string `yaml:"public_base_url" json:"public_base_url"`
+	// URLTTL is the lifetime of a signed media URL.
+	URLTTL time.Duration `yaml:"url_ttl" json:"url_ttl"`
 }
 
 // Defaults returns the built-in defaults (before file/env). Tool paths are
@@ -235,7 +241,7 @@ func Defaults() *Config {
 			Limit:      5,
 			Candidates: 500,
 		},
-		Speaker: Speaker{Driver: "mock"},
+		Speaker: Speaker{Driver: "mock", URLTTL: time.Hour},
 		Logging: Logging{
 			Level:                "info",
 			TraceRetentionDays:   30,
@@ -344,6 +350,7 @@ func applyEnv(c *Config, lookup func(string) (string, bool)) error {
 	str("VOX_YQ_PATH", &c.Tools.YqPath)
 	boolean("VOX_SHELL_ENABLED", &c.Tools.Shell.Enabled)
 	str("VOX_SPEAKER_DRIVER", &c.Speaker.Driver)
+	str("VOX_PUBLIC_BASE_URL", &c.Speaker.PublicBaseURL)
 	return errors.Join(errs...)
 }
 
@@ -376,6 +383,12 @@ func (c *Config) Validate() error {
 	}
 	if _, _, err := ParseListen(c.Server.Listen); err != nil {
 		return err
+	}
+	if err := mediaurl.ValidateBase(c.Speaker.PublicBaseURL); err != nil {
+		return fmt.Errorf("config: speaker.public_base_url: %w", err)
+	}
+	if c.Speaker.URLTTL <= 0 {
+		return errors.New("config: speaker.url_ttl must be > 0")
 	}
 	switch c.Tools.Shell.ExposeTo {
 	case "admin_console", "all":
