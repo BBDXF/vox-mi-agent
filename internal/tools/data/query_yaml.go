@@ -13,10 +13,10 @@ func NewQueryYAML(d Deps) tools.Tool { return &queryYAML{d: d.withDefaults()} }
 
 func (*queryYAML) Name() string { return "query_yaml" }
 
-func (*queryYAML) Description() string {
-	return "Run a yq (v4) expression over YAML data (read-only). Provide exactly one of 'source' " +
-		"(a registered data source name) or 'input' (inline YAML text, max 256 KiB). " +
-		"File access and environment access are disabled."
+func (t *queryYAML) Description() string {
+	return sourcesHint(t.d, "Run a yq (v4) expression over YAML data (read-only). Provide exactly one of 'source' "+
+		"(a registered data source name) or 'input' (inline YAML text, max 256 KiB). "+
+		"File access and environment access are disabled.")
 }
 
 func (*queryYAML) Schema() json.RawMessage {

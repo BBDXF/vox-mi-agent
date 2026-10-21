@@ -223,6 +223,10 @@ func (a *App) Close() error {
 	return a.Store.Close()
 }
 
+// Sources returns the live data-source registry (built-in media_library
+// included, merged with the user sources).
+func (a *App) Sources() *data.Sources { return a.sources.Get() }
+
 // HealthStatus returns the latest tool self-check result.
 func (a *App) HealthStatus() ToolStatuses {
 	a.healthMu.RLock()

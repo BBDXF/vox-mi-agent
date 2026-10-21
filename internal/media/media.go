@@ -6,8 +6,11 @@ package media
 import (
 	"crypto/sha1"
 	"encoding/hex"
-	"golang.org/x/text/unicode/norm"
 	"path/filepath"
+	"regexp"
+	"strings"
+
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/andy/vox-mi-agent/internal/config"
 )
@@ -15,12 +18,15 @@ import (
 // Track is one song of the library. Path is server-side only: it is never
 // returned to the LLM.
 type Track struct {
-	ID     string   `json:"id"`
-	Title  string   `json:"title"`
-	Artist string   `json:"artist"`
-	Album  string   `json:"album"`
-	Alias  []string `json:"alias"`
-	Path   string   `json:"path"`
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Artist string `json:"artist"` // original joined string, for display
+	// Artists is Artist split on the multi-artist separators (SplitArtists);
+	// fzq matches any of them.
+	Artists []string `json:"artists"`
+	Album   string   `json:"album"`
+	Alias   []string `json:"alias"`
+	Path    string   `json:"path"`
 }
 
 // Hit is one search result as exposed to the agent (no path).
@@ -65,7 +71,7 @@ func uniqueTrackID(absPath string, taken map[string]string) string {
 // query path use it, so the cache always hits. The songs file is the last
 // element (positional argument) and must stay last.
 func IndexArgs(songsFile string) []string {
-	return []string{"-f", "jsonl", "-k", "title", "-k", "artist", "-k", "alias", songsFile}
+	return []string{"-f", "jsonl", "-k", "title", "-k", "artist", "-k", "artists[]", "-k", "alias", songsFile}
 }
 
 // SongsPath is <data>/media/songs.jsonl.
@@ -83,4 +89,27 @@ func fzqPath(cfg *config.Config) string {
 		dir = config.DefaultToolsDir
 	}
 	return filepath.Join(dir, "fzq")
+}
+
+// artistSep matches the separators between several artists of one track:
+// " _ ", "、", "&" (spaces optional), " / ", "," / "，" (spaces optional),
+// " feat. ", " feat ", " ft. ", " ft ", and a standalone " x " (feat/ft/x are
+// case-insensitive; "x" inside a word never splits).
+var artistSep = regexp.MustCompile(`(?i)\s+_\s+|\s*、\s*|\s*&\s*|\s+/\s+|\s*[,，]\s*|\s+(?:feat|ft)\.?\s+|\s+x\s+`)
+
+// SplitArtists splits a joined artist string into its individual artists
+// (trimmed, empty and duplicate parts dropped, order kept). An empty input
+// yields an empty (non-nil) slice.
+func SplitArtists(artist string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, p := range artistSep.Split(artist, -1) {
+		p = strings.TrimSpace(p)
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
 }

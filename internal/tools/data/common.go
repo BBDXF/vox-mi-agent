@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andy/vox-mi-agent/internal/config"
 	"github.com/andy/vox-mi-agent/internal/toolrunner"
 	"github.com/andy/vox-mi-agent/internal/tools"
 )
@@ -113,6 +114,12 @@ func (d Deps) resolveInput(source, inline string) (input, error) {
 		if err != nil {
 			return input{}, err
 		}
+		if _, err := os.Stat(src.File); errors.Is(err, os.ErrNotExist) {
+			if src.Builtin {
+				return input{}, fmt.Errorf("source %q: %s not available yet — the media library has not been synced (add a music folder and run a sync first)", source, src.Description)
+			}
+			return input{}, fmt.Errorf("source %q: its data file does not exist", source)
+		}
 		return input{src: src, name: source}, nil
 	}
 	if len(inline) > maxInputBytes {
@@ -190,4 +197,38 @@ func fileArg(in input) []string {
 		return []string{in.src.File}
 	}
 	return nil
+}
+
+// sourcesHint appends the live list of registered data sources to a tool
+// description so the LLM uses real source names.
+func sourcesHint(d Deps, desc string) string {
+	srcs := d.sources()
+	if srcs == nil || len(srcs.Names()) == 0 {
+		return desc + " No data sources are registered; use 'input'."
+	}
+	var b strings.Builder
+	b.WriteString(desc)
+	b.WriteString(" Registered sources:")
+	for _, s := range srcs.List() {
+		b.WriteString(" '")
+		b.WriteString(s.Name)
+		b.WriteString("'")
+		var parts []string
+		if s.Description != "" {
+			parts = append(parts, s.Description)
+		}
+		if s.Format != "" {
+			parts = append(parts, s.Format)
+		}
+		if s.Name == config.MediaLibrarySource {
+			parts = append(parts, "one record per song: id,title,artist,artists[],album,alias[],path")
+		} else if len(s.Keys) > 0 {
+			parts = append(parts, "keys "+strings.Join(s.Keys, ","))
+		}
+		if len(parts) > 0 {
+			b.WriteString(" (" + strings.Join(parts, "; ") + ")")
+		}
+		b.WriteString(";")
+	}
+	return b.String()
 }

@@ -31,7 +31,7 @@ var sampleFiles = []string{
 
 func TestIndexArgs(t *testing.T) {
 	got := IndexArgs("/d/songs.jsonl")
-	want := []string{"-f", "jsonl", "-k", "title", "-k", "artist", "-k", "alias", "/d/songs.jsonl"}
+	want := []string{"-f", "jsonl", "-k", "title", "-k", "artist", "-k", "artists[]", "-k", "alias", "/d/songs.jsonl"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v", got)
 	}

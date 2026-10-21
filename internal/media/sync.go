@@ -354,7 +354,7 @@ func scan(folders, exts []string, max int) (files []fileEntry, truncated bool, e
 
 // songsSchema versions the songs-file format and the track-id algorithm; bump
 // it whenever either changes so existing libraries are regenerated.
-const songsSchema = "v2-abs-path-id"
+const songsSchema = "v3-artists"
 
 // snapshotHash covers every input of the songs file: schema version, absolute
 // path+size+mtime of all files, the filename pattern, and the alias table.
@@ -468,7 +468,7 @@ func (s *Syncer) run(ctx context.Context) (Status, error) {
 		byID[id] = f.abs
 		artist, title := parseName(re, f.rel)
 		t := Track{
-			ID: id, Title: title, Artist: artist,
+			ID: id, Title: title, Artist: artist, Artists: SplitArtists(artist),
 			Alias: []string{}, Path: f.abs,
 		}
 		if a := aliases[title]; len(a) > 0 {

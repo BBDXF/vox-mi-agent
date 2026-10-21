@@ -28,11 +28,11 @@ func NewFuzzyMatch(d Deps) tools.Tool { return &fuzzyMatch{d: d.withDefaults()} 
 
 func (*fuzzyMatch) Name() string { return "fuzzy_match" }
 
-func (*fuzzyMatch) Description() string {
-	return "Fuzzy-match a spoken/voice-style query (Chinese homophones, pinyin, typos, partial input) against the records of " +
-		"a data source and return the closest records with scores. Provide exactly one of 'source' " +
-		"(a registered data source name) or 'input' (inline data, max 256 KiB; set 'format' for it). " +
-		"'ambiguous' is true when the top two scores are close. count 0 means no match."
+func (t *fuzzyMatch) Description() string {
+	return sourcesHint(t.d, "Fuzzy-match a spoken/voice-style query (Chinese homophones, pinyin, typos, partial input) against the records of "+
+		"a data source and return the closest records with scores. Provide exactly one of 'source' "+
+		"(a registered data source name) or 'input' (inline data, max 256 KiB; set 'format' for it). "+
+		"'ambiguous' is true when the top two scores are close. count 0 means no match.")
 }
 
 func (*fuzzyMatch) Schema() json.RawMessage {

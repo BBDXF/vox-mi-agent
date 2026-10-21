@@ -78,6 +78,11 @@ func New(a *app.App, opts ...Option) *Server {
 	r.Post("/api/llm/test", s.llmTest)
 	r.Get("/api/media/status", s.mediaStatus)
 	r.Post("/api/media/sync", s.mediaSync)
+	r.Get("/api/media/tracks", s.mediaTracks)
+	r.Get("/api/media/artists", s.mediaArtists)
+	r.Get("/api/sources", s.listSources)
+	r.Get("/api/sources/{name}/preview", s.previewSource)
+	r.Post("/api/sources/{name}/test", s.testSource)
 	r.NotFound(s.notFound)
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")

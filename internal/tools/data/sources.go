@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+
+	"github.com/andy/vox-mi-agent/internal/config"
 )
 
 // SourceSet is a swappable holder of the current *Sources (settings changes
@@ -43,6 +45,20 @@ type Source struct {
 	Keys    []string // default fzq -k
 	Extract string   // fzq -x REGEX (server config only)
 	Strip   []string // fzq --strip REGEX (server config only)
+
+	Builtin     bool   // registered by the server itself, read-only
+	Description string // human description (built-in sources)
+}
+
+// MediaLibrary is the built-in read-only source over the synced song list
+// (<data>/media/songs.jsonl). It exists in the registry even before the first
+// sync; the tools then report that the library is not synced yet.
+func MediaLibrary(songsFile string) Source {
+	return Source{
+		Name: config.MediaLibrarySource, File: songsFile, Format: "jsonl",
+		Keys: []string{"title", "artist", "alias"}, Builtin: true,
+		Description: "本地曲库（同步生成）",
+	}
 }
 
 // Sources is the immutable registry.
@@ -66,6 +82,9 @@ func NewSources(srcs []Source) (*Sources, error) {
 		if !validFormats[src.Format] {
 			return nil, fmt.Errorf("source %q: invalid format %q", src.Name, src.Format)
 		}
+		if src.Name == config.MediaLibrarySource && !src.Builtin {
+			return nil, fmt.Errorf("source name %q is reserved for the built-in media library", src.Name)
+		}
 		if _, dup := s.m[src.Name]; dup {
 			return nil, fmt.Errorf("duplicate source %q", src.Name)
 		}
@@ -82,6 +101,18 @@ func (s *Sources) Names() []string {
 		return nil
 	}
 	return append([]string(nil), s.names...)
+}
+
+// List returns the sources sorted by name. Safe on a nil receiver.
+func (s *Sources) List() []Source {
+	if s == nil {
+		return nil
+	}
+	out := make([]Source, 0, len(s.names))
+	for _, n := range s.names {
+		out = append(out, s.m[n])
+	}
+	return out
 }
 
 // Get looks a source up; the error lists the available names.

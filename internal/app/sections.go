@@ -463,6 +463,8 @@ func sourcesSection() *section {
 			pre := fmt.Sprintf("items[%d].", i)
 			src.Name, src.File = strings.TrimSpace(src.Name), strings.TrimSpace(src.File)
 			switch {
+			case src.Name == config.MediaLibrarySource:
+				fe[pre+"name"] = "reserved: media_library is the built-in read-only media library source"
 			case !sourceNameRe.MatchString(src.Name):
 				fe[pre+"name"] = "must match ^[a-z][a-z0-9_]{0,31}$"
 			case seen[src.Name]:
@@ -524,8 +526,12 @@ func sourcesSection() *section {
 
 // buildSources converts the configured sources to the tools' registry.
 func buildSources(c *config.Config) (*data.Sources, error) {
-	srcs := make([]data.Source, 0, len(c.Sources))
+	srcs := make([]data.Source, 0, len(c.Sources)+1)
+	srcs = append(srcs, data.MediaLibrary(media.SongsPath(c.DataDir)))
 	for _, s := range c.Sources {
+		if s.Name == config.MediaLibrarySource {
+			return nil, fmt.Errorf("app: sources: name %q is reserved for the built-in media library source", s.Name)
+		}
 		srcs = append(srcs, data.Source{
 			Name: s.Name, File: c.SourcePath(s), Format: s.Format, Records: s.Records,
 			Keys: s.Keys, Extract: s.Extract, Strip: s.Strip,

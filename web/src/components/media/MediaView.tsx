@@ -32,6 +32,7 @@ import {
 import { formatTime } from '@/lib/utils';
 import { MediaSettingsCard } from './MediaSettingsCard';
 import { AliasesTableEditor } from './AliasesTableEditor';
+import { TracksCard } from './TracksCard';
 
 export function MediaView() {
   const { success, error: toastError, info } = useToast();
@@ -347,6 +348,9 @@ export function MediaView() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Tracks Card (曲目列表与检索) */}
+      <TracksCard />
 
       {/* Library Settings Card (曲库设置: 目录、格式、同步间隔、高级配置) */}
       <MediaSettingsCard

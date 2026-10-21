@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"sort"
 	"sync"
 )
 
@@ -49,6 +50,9 @@ func (l *Library) Reload() error {
 		if err := json.Unmarshal(sc.Bytes(), &t); err != nil {
 			return fmt.Errorf("media: %s line %d: %w", l.path, n, err)
 		}
+		if t.Artists == nil {
+			t.Artists = SplitArtists(t.Artist)
+		}
 		m[t.ID] = t
 	}
 	if err := sc.Err(); err != nil {
@@ -73,4 +77,16 @@ func (l *Library) Len() int {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return len(l.byID)
+}
+
+// Tracks returns a copy of all loaded tracks ordered by path.
+func (l *Library) Tracks() []Track {
+	l.mu.RLock()
+	out := make([]Track, 0, len(l.byID))
+	for _, t := range l.byID {
+		out = append(out, t)
+	}
+	l.mu.RUnlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
 }

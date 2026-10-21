@@ -13,10 +13,10 @@ func NewQueryJSON(d Deps) tools.Tool { return &queryJSON{d: d.withDefaults()} }
 
 func (*queryJSON) Name() string { return "query_json" }
 
-func (*queryJSON) Description() string {
-	return "Run a jq filter over JSON/JSONL data. Provide exactly one of 'source' (a registered data source name) " +
-		"or 'input' (inline JSON text, max 256 KiB). Use 'slurp' to read a JSONL stream into one array, " +
-		"'raw' to print strings without quotes. Output is compact JSON, one result per line."
+func (t *queryJSON) Description() string {
+	return sourcesHint(t.d, "Run a jq filter over JSON/JSONL data. Provide exactly one of 'source' (a registered data source name) "+
+		"or 'input' (inline JSON text, max 256 KiB). Use 'slurp' to read a JSONL stream into one array, "+
+		"'raw' to print strings without quotes. Output is compact JSON, one result per line.")
 }
 
 func (*queryJSON) Schema() json.RawMessage {

@@ -137,6 +137,10 @@ type Shell struct {
 	ReadablePaths []string      `yaml:"readable_paths" json:"readable_paths"`
 }
 
+// MediaLibrarySource is the reserved name of the built-in, read-only data
+// source over the synced song list; user sources may not use it.
+const MediaLibrarySource = "media_library"
+
 // Source is a registered data source (§6.3). The LLM only ever sees Name.
 type Source struct {
 	Name    string   `yaml:"name" json:"name"`
@@ -382,6 +386,9 @@ func (c *Config) Validate() error {
 	for i, s := range c.Sources {
 		if s.Name == "" || s.File == "" {
 			return fmt.Errorf("config: sources[%d]: name and file are required", i)
+		}
+		if s.Name == MediaLibrarySource {
+			return fmt.Errorf("config: sources[%d]: name %q is reserved for the built-in media library source", i, s.Name)
 		}
 		if seen[s.Name] {
 			return fmt.Errorf("config: duplicate source name %q", s.Name)
