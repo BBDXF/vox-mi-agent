@@ -671,3 +671,224 @@ func TestHealthcheckTCP(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// fakeOpenAI is a tiny OpenAI-compatible server recording the last auth header.
+type fakeOpenAI struct {
+	srv      *httptest.Server
+	lastAuth string
+	lastBody string
+}
+
+func newFakeOpenAI(t *testing.T) *fakeOpenAI {
+	t.Helper()
+	f := &fakeOpenAI{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		f.lastAuth = r.Header.Get("Authorization")
+		if f.lastAuth == "Bearer bad" {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		io.WriteString(w, `{"data":[{"id":"zeta"},{"id":"alpha"}]}`)
+	})
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		f.lastAuth = r.Header.Get("Authorization")
+		b, _ := io.ReadAll(r.Body)
+		f.lastBody = string(b)
+		if f.lastAuth == "Bearer bad" {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n")
+		io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		io.WriteString(w, "data: [DONE]\n\n")
+	})
+	f.srv = httptest.NewServer(mux)
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+func TestLLMProvidersEndpoint(t *testing.T) {
+	e := newEnv(t, llm.NewFake(), nil)
+	resp, b := e.do(t, "GET", "/api/llm/providers", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("%d %s", resp.StatusCode, b)
+	}
+	var r struct {
+		Items []struct {
+			ID              string `json:"id"`
+			Name            string `json:"name"`
+			BaseURL         string `json:"base_url"`
+			DefaultModel    string `json:"default_model"`
+			KeyRequired     bool   `json:"key_required"`
+			BaseURLEditable bool   `json:"base_url_editable"`
+			DocsURL         string `json:"docs_url"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(b, &r); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Items) != 8 || r.Items[0].ID != "opencode-zen" || r.Items[0].DocsURL != "https://opencode.ai/docs/zen" ||
+		r.Items[6].ID != "ollama" || r.Items[6].KeyRequired || !r.Items[6].BaseURLEditable {
+		t.Errorf("providers = %s", b)
+	}
+}
+
+func TestSettingsProviderAndKeySemantics(t *testing.T) {
+	e := newEnv(t, llm.NewFake(), nil) // provider custom, key sk-secret-1234567890
+	type settings struct {
+		LLM struct {
+			Provider string `json:"provider"`
+			BaseURL  string `json:"base_url"`
+			HasKey   bool   `json:"has_api_key"`
+			Masked   string `json:"api_key_masked"`
+		} `json:"llm"`
+	}
+	get := func() settings {
+		_, b := e.do(t, "GET", "/api/settings", "")
+		if strings.Contains(string(b), "sk-secret-1234567890") {
+			t.Fatalf("key leaked: %s", b)
+		}
+		var s settings
+		json.Unmarshal(b, &s)
+		return s
+	}
+	if s := get(); s.LLM.Provider != "custom" || !s.LLM.HasKey {
+		t.Fatalf("initial: %+v", s)
+	}
+	// switching to a key-required preset without key -> 400, nothing changed
+	resp, b := e.do(t, "PUT", "/api/settings/llm", `{"provider":"deepseek","model":"deepseek-chat","temperature":0.3}`)
+	if resp.StatusCode != 400 || !strings.Contains(string(b), "API key") {
+		t.Fatalf("expected 400 key required: %d %s", resp.StatusCode, b)
+	}
+	if s := get(); s.LLM.Provider != "custom" || !s.LLM.HasKey {
+		t.Fatalf("state changed after failed put: %+v", s)
+	}
+	// unknown provider
+	if resp, _ := e.do(t, "PUT", "/api/settings/llm", `{"provider":"nope","base_url":"http://x/v1","model":"m"}`); resp.StatusCode != 400 {
+		t.Errorf("unknown provider: %d", resp.StatusCode)
+	}
+	// switch to ollama (key optional) without key -> old vendor's key cleared; base_url editable
+	resp, b = e.do(t, "PUT", "/api/settings/llm", `{"provider":"ollama","base_url":"http://nas:11434/v1","model":"qwen2.5","temperature":0.3}`)
+	if resp.StatusCode != 204 {
+		t.Fatalf("ollama: %d %s", resp.StatusCode, b)
+	}
+	if s := get(); s.LLM.Provider != "ollama" || s.LLM.HasKey || s.LLM.Masked != "" || s.LLM.BaseURL != "http://nas:11434/v1" {
+		t.Fatalf("after ollama: %+v", s)
+	}
+	// deepseek with a key: base_url forced to preset
+	resp, b = e.do(t, "PUT", "/api/settings/llm", `{"provider":"deepseek","base_url":"http://evil/v1","model":"deepseek-chat","api_key":"sk-ds-abcd1234","temperature":0.3}`)
+	if resp.StatusCode != 204 {
+		t.Fatalf("deepseek: %d %s", resp.StatusCode, b)
+	}
+	if s := get(); s.LLM.Provider != "deepseek" || !s.LLM.HasKey || s.LLM.BaseURL != "https://api.deepseek.com/v1" {
+		t.Fatalf("after deepseek: %+v", s)
+	}
+	// same provider, empty key keeps it
+	if resp, _ = e.do(t, "PUT", "/api/settings/llm", `{"provider":"deepseek","model":"deepseek-reasoner","temperature":0.5}`); resp.StatusCode != 204 {
+		t.Fatalf("keep: %d", resp.StatusCode)
+	}
+	if s := get(); !s.LLM.HasKey || s.LLM.Masked != "****1234" {
+		t.Fatalf("key not kept: %+v", s)
+	}
+	// persisted & reloadable; file has provider, base_url is the preset's
+	t.Setenv("VOX_LLM_API_KEY", "")
+	cfg, err := config.Load(e.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LLM.Provider != "deepseek" || cfg.LLM.APIKey != "sk-ds-abcd1234" || cfg.LLM.Model != "deepseek-reasoner" {
+		t.Errorf("reloaded = %+v", cfg.LLM)
+	}
+	// switching away with an empty key clears the stored key on disk too
+	if resp, _ = e.do(t, "PUT", "/api/settings/llm", `{"provider":"custom","base_url":"http://x/v1","model":"m","temperature":0.3}`); resp.StatusCode != 204 {
+		t.Fatalf("custom: %d", resp.StatusCode)
+	}
+	cfg, _ = config.Load(e.dir)
+	if cfg.LLM.Provider != "custom" || cfg.LLM.APIKey != "" {
+		t.Errorf("reloaded after switch = %+v", cfg.LLM)
+	}
+}
+
+func TestLLMModelsEndpoint(t *testing.T) {
+	f := newFakeOpenAI(t)
+	e := newEnv(t, llm.NewFake(), func(c *config.Config) { c.LLM.BaseURL = f.srv.URL + "/v1" })
+	base := f.srv.URL + "/v1"
+
+	// same provider + empty key -> stored key
+	resp, b := e.do(t, "POST", "/api/llm/models", `{"provider":"custom","base_url":"`+base+`"}`)
+	if resp.StatusCode != 200 || strings.TrimSpace(string(b)) != `{"items":[{"id":"alpha"},{"id":"zeta"}]}` {
+		t.Fatalf("models: %d %s", resp.StatusCode, b)
+	}
+	if f.lastAuth != "Bearer sk-secret-1234567890" {
+		t.Errorf("auth = %q", f.lastAuth)
+	}
+	// different provider + empty key -> stored key NOT reused
+	resp, _ = e.do(t, "POST", "/api/llm/models", `{"provider":"ollama","base_url":"`+base+`"}`)
+	if resp.StatusCode != 200 || f.lastAuth != "" {
+		t.Errorf("ollama: %d auth=%q", resp.StatusCode, f.lastAuth)
+	}
+	// explicit key wins
+	e.do(t, "POST", "/api/llm/models", `{"provider":"custom","base_url":"`+base+`","api_key":"mine"}`)
+	if f.lastAuth != "Bearer mine" {
+		t.Errorf("auth = %q", f.lastAuth)
+	}
+	// upstream failure -> 502 {error}
+	resp, b = e.do(t, "POST", "/api/llm/models", `{"provider":"custom","base_url":"`+base+`","api_key":"bad"}`)
+	if resp.StatusCode != 502 || !strings.Contains(string(b), `"error"`) || !strings.Contains(string(b), "401") {
+		t.Errorf("bad key: %d %s", resp.StatusCode, b)
+	}
+	// validation
+	if resp, _ = e.do(t, "POST", "/api/llm/models", `{"provider":"nope"}`); resp.StatusCode != 400 {
+		t.Errorf("unknown provider: %d", resp.StatusCode)
+	}
+	if resp, _ = e.do(t, "POST", "/api/llm/models", `{"provider":"custom","base_url":"ftp://x"}`); resp.StatusCode != 400 {
+		t.Errorf("bad url: %d", resp.StatusCode)
+	}
+}
+
+func TestLLMTestEndpoint(t *testing.T) {
+	f := newFakeOpenAI(t)
+	e := newEnv(t, llm.NewFake(), func(c *config.Config) { c.LLM.BaseURL = f.srv.URL + "/v1" })
+	base := f.srv.URL + "/v1"
+
+	resp, b := e.do(t, "POST", "/api/llm/test", `{"provider":"custom","base_url":"`+base+`","model":"m1"}`)
+	var r struct {
+		OK        bool   `json:"ok"`
+		LatencyMS *int64 `json:"latency_ms"`
+		Reply     string `json:"reply"`
+		Error     string `json:"error"`
+	}
+	json.Unmarshal(b, &r)
+	if resp.StatusCode != 200 || !r.OK || r.Reply != "ok" || r.LatencyMS == nil {
+		t.Fatalf("test: %d %s", resp.StatusCode, b)
+	}
+	if f.lastAuth != "Bearer sk-secret-1234567890" {
+		t.Errorf("auth = %q", f.lastAuth)
+	}
+	if !strings.Contains(f.lastBody, `"max_tokens":20`) || strings.Contains(f.lastBody, `"tools"`) {
+		t.Errorf("body = %s", f.lastBody)
+	}
+	// upstream error
+	_, b = e.do(t, "POST", "/api/llm/test", `{"provider":"custom","base_url":"`+base+`","model":"m1","api_key":"bad"}`)
+	r.OK, r.Error = true, ""
+	json.Unmarshal(b, &r)
+	if r.OK || !strings.Contains(r.Error, "401") {
+		t.Errorf("bad key: %s", b)
+	}
+	// missing model / missing required key (preset base_url is not contacted)
+	_, b = e.do(t, "POST", "/api/llm/test", `{"provider":"custom","base_url":"`+base+`","model":""}`)
+	if strings.Contains(string(b), `"ok":true`) || !strings.Contains(string(b), "model") {
+		t.Errorf("no model: %s", b)
+	}
+	_, b = e.do(t, "POST", "/api/llm/test", `{"provider":"deepseek","model":"deepseek-chat"}`)
+	if !strings.Contains(string(b), `"ok":false`) || !strings.Contains(string(b), "API key") {
+		t.Errorf("key required: %s", b)
+	}
+	// test must not change live settings
+	_, b = e.do(t, "GET", "/api/settings", "")
+	if !strings.Contains(string(b), `"provider":"custom"`) {
+		t.Errorf("settings changed: %s", b)
+	}
+}

@@ -81,6 +81,7 @@ type wireRequest struct {
 	Messages      []wireMessage `json:"messages"`
 	Tools         []wireTool    `json:"tools,omitempty"`
 	Temperature   *float64      `json:"temperature,omitempty"`
+	MaxTokens     int           `json:"max_tokens,omitempty"`
 	Stream        bool          `json:"stream"`
 	StreamOptions *struct {
 		IncludeUsage bool `json:"include_usage"`
@@ -88,7 +89,7 @@ type wireRequest struct {
 }
 
 func buildBody(model string, req Request) ([]byte, error) {
-	wr := wireRequest{Model: model, Temperature: req.Temperature, Stream: true}
+	wr := wireRequest{Model: model, Temperature: req.Temperature, MaxTokens: req.MaxTokens, Stream: true}
 	wr.StreamOptions = &struct {
 		IncludeUsage bool `json:"include_usage"`
 	}{true}

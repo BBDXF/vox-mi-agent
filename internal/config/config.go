@@ -31,6 +31,8 @@ import (
 	_ "embed"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/andy/vox-mi-agent/internal/llm"
 )
 
 //go:embed default.yaml
@@ -70,11 +72,27 @@ type Auth struct {
 }
 
 type LLM struct {
+	// Provider is a preset id (see llm.Presets) or "custom".
+	Provider    string        `yaml:"provider" json:"provider"`
 	BaseURL     string        `yaml:"base_url" json:"base_url"`
 	APIKey      string        `yaml:"api_key" json:"api_key"`
 	Model       string        `yaml:"model" json:"model"`
 	Temperature float64       `yaml:"temperature" json:"temperature"`
 	Timeout     time.Duration `yaml:"timeout" json:"timeout"`
+}
+
+// EffectiveBaseURL returns the base URL actually used: a preset whose base URL
+// is not editable always wins over the stored (file/env) value; an editable
+// preset falls back to its default when none is stored.
+func (l LLM) EffectiveBaseURL() string {
+	p, ok := llm.PresetByID(l.Provider)
+	if !ok || p.ID == llm.CustomPresetID {
+		return l.BaseURL
+	}
+	if !p.BaseURLEditable || strings.TrimSpace(l.BaseURL) == "" {
+		return p.BaseURL
+	}
+	return l.BaseURL
 }
 
 type Tools struct {
@@ -153,6 +171,7 @@ func Defaults() *Config {
 			Listen: "tcp://127.0.0.1:8080",
 		},
 		LLM: LLM{
+			Provider:    llm.CustomPresetID,
 			BaseURL:     "https://api.openai.com/v1",
 			Model:       "gpt-4o-mini",
 			Temperature: 0.3,
@@ -268,6 +287,7 @@ func applyEnv(c *Config, lookup func(string) (string, bool)) error {
 	str("VOX_LISTEN", &c.Server.Listen)
 	str("VOX_BASE_PATH", &c.Server.BasePath)
 	boolean("VOX_REQUIRE_ADMIN", &c.Server.Auth.RequireAdmin)
+	str("VOX_LLM_PROVIDER", &c.LLM.Provider)
 	str("VOX_LLM_BASE_URL", &c.LLM.BaseURL)
 	str("VOX_LLM_API_KEY", &c.LLM.APIKey)
 	str("VOX_LLM_MODEL", &c.LLM.Model)
@@ -291,6 +311,12 @@ func applyEnv(c *Config, lookup func(string) (string, bool)) error {
 
 // resolve fills derived defaults (tool paths from Tools.Dir).
 func (c *Config) resolve(_ func(string) (string, bool)) {
+	if c.LLM.Provider == "" {
+		c.LLM.Provider = llm.CustomPresetID
+	}
+	if _, ok := llm.PresetByID(c.LLM.Provider); ok {
+		c.LLM.BaseURL = c.LLM.EffectiveBaseURL()
+	}
 	if c.Tools.Dir == "" {
 		c.Tools.Dir = DefaultToolsDir
 	}
@@ -307,6 +333,9 @@ func (c *Config) resolve(_ func(string) (string, bool)) {
 
 // Validate checks structural invariants.
 func (c *Config) Validate() error {
+	if _, ok := llm.PresetByID(c.LLM.Provider); !ok {
+		return fmt.Errorf("config: llm.provider %q is not a known provider", c.LLM.Provider)
+	}
 	if _, _, err := ParseListen(c.Server.Listen); err != nil {
 		return err
 	}

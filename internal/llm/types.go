@@ -46,6 +46,7 @@ type Request struct {
 	Tools       []ToolDef
 	Temperature *float64
 	Model       string // overrides the provider default when non-empty
+	MaxTokens   int    // 0 = backend default
 }
 
 // Usage reports token accounting, when the backend provides it.

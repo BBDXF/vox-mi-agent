@@ -19,6 +19,7 @@ import (
 	"github.com/andy/vox-mi-agent/internal/agent"
 	"github.com/andy/vox-mi-agent/internal/app"
 	"github.com/andy/vox-mi-agent/internal/config"
+	"github.com/andy/vox-mi-agent/internal/llm"
 	"github.com/andy/vox-mi-agent/internal/media"
 	"github.com/andy/vox-mi-agent/internal/store"
 	"github.com/andy/vox-mi-agent/internal/webui"
@@ -35,9 +36,13 @@ func WithStatic(f fs.FS) Option { return func(s *Server) { s.static = f } }
 // WithBasePath overrides cfg.Server.BasePath.
 func WithBasePath(p string) Option { return func(s *Server) { s.basePath = p } }
 
+// WithHTTPClient overrides the outbound HTTP client used to reach LLM vendors.
+func WithHTTPClient(c *http.Client) Option { return func(s *Server) { s.hc = c } }
+
 // Server serves the API for an App.
 type Server struct {
 	app      *app.App
+	hc       *http.Client // outbound client for model listing / connection tests
 	log      *slog.Logger
 	static   fs.FS
 	basePath string
@@ -46,7 +51,7 @@ type Server struct {
 
 // New builds the HTTP handler tree.
 func New(a *app.App, opts ...Option) *Server {
-	s := &Server{app: a, log: a.Log, static: webui.FS(), basePath: a.Cfg.Server.BasePath}
+	s := &Server{app: a, hc: &http.Client{}, log: a.Log, static: webui.FS(), basePath: a.Cfg.Server.BasePath}
 	for _, o := range opts {
 		o(s)
 	}
@@ -60,6 +65,9 @@ func New(a *app.App, opts ...Option) *Server {
 	r.Post("/sse/chat", s.chat)
 	r.Get("/api/settings", s.getSettings)
 	r.Put("/api/settings/llm", s.putLLM)
+	r.Get("/api/llm/providers", s.llmProviders)
+	r.Post("/api/llm/models", s.llmModels)
+	r.Post("/api/llm/test", s.llmTest)
 	r.Get("/api/media/status", s.mediaStatus)
 	r.Post("/api/media/sync", s.mediaSync)
 	r.NotFound(s.notFound)
@@ -340,8 +348,9 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"llm": map[string]any{
-			"base_url": l.BaseURL, "model": l.Model,
-			"api_key_masked": maskKey(l.APIKey), "temperature": l.Temperature,
+			"provider": l.Provider, "base_url": l.BaseURL, "model": l.Model,
+			"api_key_masked": maskKey(l.APIKey), "has_api_key": l.APIKey != "",
+			"temperature": l.Temperature,
 		},
 		"tools":   s.app.Health,
 		"sources": srcs,
@@ -354,6 +363,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) putLLM(w http.ResponseWriter, r *http.Request) {
 	var body struct {
+		Provider    string   `json:"provider"`
 		BaseURL     string   `json:"base_url"`
 		Model       string   `json:"model"`
 		APIKey      string   `json:"api_key"`
@@ -363,7 +373,7 @@ func (s *Server) putLLM(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	u := app.LLMUpdate{BaseURL: body.BaseURL, Model: body.Model, APIKey: body.APIKey}
+	u := app.LLMUpdate{Provider: body.Provider, BaseURL: body.BaseURL, Model: body.Model, APIKey: body.APIKey}
 	if body.Temperature != nil {
 		u.Temperature = *body.Temperature
 	} else {
@@ -379,6 +389,90 @@ func (s *Server) putLLM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---- LLM providers / models / test ----
+
+func (s *Server) llmProviders(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"items": llm.Presets()})
+}
+
+type llmProbeBody struct {
+	Provider string `json:"provider"`
+	BaseURL  string `json:"base_url"`
+	APIKey   string `json:"api_key"`
+	Model    string `json:"model"`
+}
+
+func (s *Server) llmModels(w http.ResponseWriter, r *http.Request) {
+	var body llmProbeBody
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	t, err := s.app.ResolveLLM(body.Provider, body.BaseURL, body.APIKey)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ids, err := llm.ListModels(r.Context(), t.BaseURL, t.APIKey, s.hc)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, truncateMsg(err.Error(), 300))
+		return
+	}
+	items := make([]map[string]string, 0, len(ids))
+	for _, id := range ids {
+		items = append(items, map[string]string{"id": id})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) llmTest(w http.ResponseWriter, r *http.Request) {
+	var body llmProbeBody
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	fail := func(msg string) {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": truncateMsg(msg, 300)})
+	}
+	t, err := s.app.ResolveLLM(body.Provider, body.BaseURL, body.APIKey)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	model := strings.TrimSpace(body.Model)
+	switch {
+	case model == "":
+		fail("model is required")
+		return
+	case t.Preset.KeyRequired && t.APIKey == "":
+		fail(t.Preset.Name + " requires an API key")
+		return
+	}
+	p := llm.NewOpenAI(llm.Config{BaseURL: t.BaseURL, APIKey: t.APIKey, Model: model,
+		Timeout: 20 * time.Second, HTTPClient: s.hc})
+	temp := 0.0
+	start := time.Now()
+	msg, err := llm.Complete(r.Context(), p, llm.Request{
+		Messages:    []llm.Message{{Role: llm.RoleUser, Content: "回复：ok"}},
+		Temperature: &temp, MaxTokens: 20, Model: model,
+	})
+	if err != nil {
+		fail(err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "latency_ms": time.Since(start).Milliseconds(),
+		"reply": truncateMsg(strings.TrimSpace(msg.Content), 200),
+	})
+}
+
+func truncateMsg(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "..."
+	}
+	return s
 }
 
 // maskKey masks an API key for display (never the plaintext).

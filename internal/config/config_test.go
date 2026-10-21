@@ -211,3 +211,46 @@ func TestParseListen(t *testing.T) {
 		t.Errorf("%s %s %v", n, a, err)
 	}
 }
+
+func TestLLMProvider(t *testing.T) {
+	load1 := func(file string, env map[string]string) (*Config, error) {
+		dir := t.TempDir()
+		if file != "" {
+			if err := os.WriteFile(filepath.Join(dir, FileName), []byte(file), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return load(dir, envMap(env))
+	}
+	c, err := load1("", nil)
+	if err != nil || c.LLM.Provider != "custom" || c.LLM.BaseURL != "https://api.openai.com/v1" {
+		t.Fatalf("default: %+v %v", c.LLM, err)
+	}
+	// legacy file without provider stays custom with its base_url
+	c, err = load1("llm:\n  base_url: http://x/v1\n", nil)
+	if err != nil || c.LLM.Provider != "custom" || c.LLM.EffectiveBaseURL() != "http://x/v1" {
+		t.Fatalf("legacy: %+v %v", c.LLM, err)
+	}
+	// non-editable preset ignores file value
+	c, err = load1("llm:\n  provider: deepseek\n  base_url: http://evil/v1\n", nil)
+	if err != nil || c.LLM.EffectiveBaseURL() != "https://api.deepseek.com/v1" || c.LLM.BaseURL != "https://api.deepseek.com/v1" {
+		t.Fatalf("deepseek: %+v %v", c.LLM, err)
+	}
+	// editable preset keeps file value, defaults when empty
+	c, err = load1("llm:\n  provider: ollama\n  base_url: http://nas:11434/v1\n", nil)
+	if err != nil || c.LLM.EffectiveBaseURL() != "http://nas:11434/v1" {
+		t.Fatalf("ollama: %+v %v", c.LLM, err)
+	}
+	c, err = load1("llm:\n  provider: ollama\n  base_url: \"\"\n", nil)
+	if err != nil || c.LLM.EffectiveBaseURL() != "http://127.0.0.1:11434/v1" {
+		t.Fatalf("ollama default: %+v %v", c.LLM, err)
+	}
+	// env provider
+	c, err = load1("", map[string]string{"VOX_LLM_PROVIDER": "openai"})
+	if err != nil || c.LLM.Provider != "openai" || c.LLM.BaseURL != "https://api.openai.com/v1" {
+		t.Fatalf("env: %+v %v", c.LLM, err)
+	}
+	if _, err = load1("llm:\n  provider: bogus\n", nil); err == nil {
+		t.Error("unknown provider accepted")
+	}
+}

@@ -10,6 +10,7 @@ server:
     require_admin: false
 
 llm:
+  provider: "custom"                  # opencode-zen|deepseek|dashscope|openai|ollama|custom
   base_url: "https://api.openai.com/v1"
   api_key: ""                         # prefer env VOX_LLM_API_KEY
   model: "gpt-4o-mini"

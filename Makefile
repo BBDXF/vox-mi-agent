@@ -1,3 +1,7 @@
+# Local, gitignored overrides (e.g. VOX_LLM_API_KEY) for make dev / chat
+-include .env
+export
+
 # Host compiles, containers test.
 ARCHES   ?= amd64 arm64
 IMAGE    ?= vox-mi-agent

@@ -36,10 +36,60 @@ export interface MessageListResponse {
   items: Message[];
 }
 
+export interface LLMProvider {
+  id: string; // 'opencode-zen' | 'deepseek' | 'dashscope' | 'openai' | 'ollama' | 'custom'
+  name: string;
+  base_url: string;
+  default_model: string;
+  key_required: boolean;
+  base_url_editable: boolean;
+  docs_url?: string;
+}
+
+export interface LLMProvidersResponse {
+  items: LLMProvider[];
+}
+
+export interface LLMModelItem {
+  id: string;
+}
+
+export interface LLMModelsResponse {
+  items: LLMModelItem[];
+}
+
+export interface GetLLMModelsRequest {
+  provider: string;
+  base_url?: string;
+  api_key?: string;
+}
+
+export interface TestLLMRequest {
+  provider: string;
+  base_url?: string;
+  api_key?: string;
+  model: string;
+}
+
+export interface TestLLMSuccessResponse {
+  ok: true;
+  latency_ms: number;
+  reply: string;
+}
+
+export interface TestLLMFailureResponse {
+  ok: false;
+  error: string;
+}
+
+export type TestLLMResponse = TestLLMSuccessResponse | TestLLMFailureResponse;
+
 export interface LLMSettings {
+  provider?: string;
   base_url: string;
   model: string;
   api_key_masked: string;
+  has_api_key?: boolean;
   temperature: number;
   timeout_seconds?: number;
 }
@@ -81,8 +131,9 @@ export interface SettingsResponse {
 }
 
 export interface UpdateLLMRequest {
+  provider: string;
   base_url?: string;
-  model?: string;
+  model: string;
   api_key?: string;
   temperature?: number;
 }
@@ -246,11 +297,88 @@ let mockMessages: Record<string, Message[]> = {
   ],
 };
 
+export const mockProviders: LLMProvider[] = [
+  {
+    id: 'opencode-zen',
+    name: 'OpenCode Zen',
+    base_url: 'https://opencode.ai/zen/v1',
+    default_model: 'kimi-k1.5-free',
+    key_required: true,
+    base_url_editable: false,
+    docs_url: 'https://opencode.ai/docs/zen',
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    base_url: 'https://api.deepseek.com/v1',
+    default_model: 'deepseek-chat',
+    key_required: true,
+    base_url_editable: false,
+    docs_url: 'https://platform.deepseek.com',
+  },
+  {
+    id: 'dashscope',
+    name: '阿里百炼 (DashScope)',
+    base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    default_model: 'qwen-plus',
+    key_required: true,
+    base_url_editable: false,
+    docs_url: 'https://help.aliyun.com/dashscope',
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    base_url: 'https://api.openai.com/v1',
+    default_model: 'gpt-4o-mini',
+    key_required: true,
+    base_url_editable: false,
+    docs_url: 'https://platform.openai.com',
+  },
+  {
+    id: 'siliconflow',
+    name: '硅基流动',
+    base_url: 'https://api.siliconflow.cn/v1',
+    default_model: 'Qwen/Qwen2.5-7B-Instruct',
+    key_required: true,
+    base_url_editable: false,
+    docs_url: 'https://docs.siliconflow.cn',
+  },
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    base_url: 'https://openrouter.ai/api/v1',
+    default_model: '',
+    key_required: true,
+    base_url_editable: false,
+    docs_url: 'https://openrouter.ai/docs',
+  },
+  {
+    id: 'ollama',
+    name: 'Ollama (本地私有化)',
+    base_url: 'http://localhost:11434/v1',
+    default_model: 'qwen2.5:7b',
+    key_required: false,
+    base_url_editable: true,
+    docs_url: 'https://ollama.com',
+  },
+  {
+    id: 'custom',
+    name: '自定义端点 (Custom)',
+    base_url: 'http://127.0.0.1:8000/v1',
+    default_model: 'custom-model',
+    key_required: false,
+    base_url_editable: true,
+    docs_url: '',
+  },
+];
+
 let mockSettings: SettingsResponse = {
   llm: {
-    base_url: 'https://api.openai.com/v1',
-    model: 'gpt-4o-mini',
-    api_key_masked: 'sk-proj-****************************39df',
+    provider: 'opencode-zen',
+    base_url: 'https://opencode.ai/zen/v1',
+    model: 'kimi-k1.5-free',
+    api_key_masked: 'zen-****************************39df',
+    has_api_key: true,
     temperature: 0.3,
     timeout_seconds: 60,
   },
@@ -430,6 +558,151 @@ export async function getMessages(conversationId: string): Promise<MessageListRe
 }
 
 /**
+ * GET api/llm/providers
+ */
+export async function getLLMProviders(): Promise<LLMProvidersResponse> {
+  if (isMockMode()) {
+    return { items: JSON.parse(JSON.stringify(mockProviders)) };
+  }
+
+  const res = await fetch('api/llm/providers');
+  return handleResponse<LLMProvidersResponse>(res);
+}
+
+/**
+ * POST api/llm/models {provider, base_url?, api_key?}
+ */
+export async function getLLMModels(body: GetLLMModelsRequest): Promise<LLMModelsResponse> {
+  if (isMockMode()) {
+    await new Promise((r) => setTimeout(r, 350));
+    const modelsByProvider: Record<string, string[]> = {
+      'opencode-zen': [
+        'kimi-k1.5-free',
+        'minimax-01-free',
+        'glm-4-flash-free',
+        'qwen-2.5-coder-free',
+        'deepseek-v3',
+        'deepseek-r1',
+        'claude-3-5-sonnet',
+      ],
+      'deepseek': [
+        'deepseek-chat',
+        'deepseek-reasoner',
+      ],
+      'dashscope': [
+        'qwen-plus',
+        'qwen-max',
+        'qwen-turbo',
+        'qwen-2.5-72b-instruct',
+        'qwen-2.5-coder-32b-instruct',
+      ],
+      'openai': [
+        'gpt-4o-mini',
+        'gpt-4o',
+        'o3-mini',
+        'gpt-3.5-turbo',
+      ],
+      'siliconflow': [
+        'Qwen/Qwen2.5-7B-Instruct',
+        'deepseek-ai/DeepSeek-V3',
+        'deepseek-ai/DeepSeek-R1',
+        'THUDM/glm-4-9b-chat',
+        'Pro/deepseek-ai/DeepSeek-V3',
+        'BAAI/bge-m3',
+      ],
+      'openrouter': [
+        'deepseek/deepseek-r1:free',
+        'meta-llama/llama-3.3-70b-instruct:free',
+        'google/gemini-2.0-flash-exp:free',
+        'mistralai/mistral-7b-instruct:free',
+        'anthropic/claude-3.5-sonnet',
+        'openai/gpt-4o-mini',
+        'deepseek/deepseek-chat',
+      ],
+      'ollama': [
+        'qwen2.5:7b',
+        'llama3.2:3b',
+        'deepseek-r1:8b',
+        'mistral:7b',
+        'nomic-embed-text',
+      ],
+      'custom': [
+        'custom-model',
+        'vllm-model',
+        'llama-3.1',
+      ],
+    };
+    const list = modelsByProvider[body.provider] || ['custom-model'];
+    return {
+      items: list.map((id) => ({ id })),
+    };
+  }
+
+  const res = await fetch('api/llm/models', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse<LLMModelsResponse>(res);
+}
+
+/**
+ * POST api/llm/test {provider, base_url?, api_key?, model}
+ */
+export async function testLLM(body: TestLLMRequest): Promise<TestLLMResponse> {
+  if (isMockMode()) {
+    await new Promise((r) => setTimeout(r, 450));
+    const preset = mockProviders.find((p) => p.id === body.provider);
+    const keyRequired = preset ? preset.key_required : true;
+    const hasKey =
+      (body.api_key && body.api_key.trim().length > 0) ||
+      (mockSettings.llm.provider === body.provider && mockSettings.llm.has_api_key);
+
+    if (keyRequired && !hasKey) {
+      return {
+        ok: false,
+        error: `服务商 [${preset?.name || body.provider}] 需要 API Key 鉴权，但当前未提供密钥 (401 Unauthorized)`,
+      };
+    }
+
+    if (!body.model || !body.model.trim()) {
+      return {
+        ok: false,
+        error: '未指定模型名称 (Model 不能为空)',
+      };
+    }
+
+    return {
+      ok: true,
+      latency_ms: Math.floor(Math.random() * 85) + 160,
+      reply: `你好！来自 ${preset?.name || body.provider}（模型: ${body.model}）的响应测试正常，意图识别通道就绪。`,
+    };
+  }
+
+  try {
+    const res = await fetch('api/llm/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: data?.error || data?.message || `测试请求失败 (${res.status} ${res.statusText})`,
+      };
+    }
+    return data as TestLLMResponse;
+  } catch (err: any) {
+    return {
+      ok: false,
+      error: err.message || '网络通信故障，无法连接至后端测试服务',
+    };
+  }
+}
+
+/**
  * GET api/settings
  */
 export async function getSettings(): Promise<SettingsResponse> {
@@ -446,12 +719,32 @@ export async function getSettings(): Promise<SettingsResponse> {
  */
 export async function updateLLMSettings(body: UpdateLLMRequest): Promise<void> {
   if (isMockMode()) {
-    if (body.base_url !== undefined) mockSettings.llm.base_url = body.base_url;
-    if (body.model !== undefined) mockSettings.llm.model = body.model;
+    await new Promise((r) => setTimeout(r, 200));
+    if (!body.provider) {
+      throw new Error('未选择模型服务商 (Provider 不能为空)');
+    }
+    if (!body.model || !body.model.trim()) {
+      throw new Error('模型名称不能为空 (Model 不能为空)');
+    }
+    const preset = mockProviders.find((p) => p.id === body.provider);
+    if (preset?.key_required) {
+      const isSwitching = mockSettings.llm.provider !== body.provider;
+      if (isSwitching && (!body.api_key || !body.api_key.trim())) {
+        throw new Error(`服务商 [${preset.name}] 需要 API Key，切换后请填入有效密钥`);
+      }
+    }
+
+    mockSettings.llm.provider = body.provider;
+    mockSettings.llm.model = body.model.trim();
+    if (body.base_url !== undefined) mockSettings.llm.base_url = body.base_url.trim();
     if (body.temperature !== undefined) mockSettings.llm.temperature = body.temperature;
     if (body.api_key && body.api_key.trim().length > 0) {
       const k = body.api_key.trim();
+      mockSettings.llm.has_api_key = true;
       mockSettings.llm.api_key_masked = `${k.slice(0, 5)}****************${k.slice(-4)}`;
+    } else if (mockSettings.llm.provider !== body.provider) {
+      mockSettings.llm.has_api_key = false;
+      mockSettings.llm.api_key_masked = '';
     }
     return;
   }

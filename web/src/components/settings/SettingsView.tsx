@@ -1,15 +1,11 @@
 import { useState, useEffect } from 'react';
-import type { FormEvent } from 'react';
 import {
-  Cpu,
   Wrench,
   Database,
   Volume2,
-  Save,
   RefreshCw,
   CheckCircle2,
   AlertCircle,
-  EyeOff,
   Sliders,
   FolderSync,
   ShieldCheck,
@@ -20,41 +16,27 @@ import {
   CardTitle,
   CardDescription,
   CardContent,
-  CardFooter,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
 import {
   getSettings,
-  updateLLMSettings,
   type SettingsResponse,
 } from '@/lib/api';
+import { LLMProviderCard } from './LLMProviderCard';
 
 export function SettingsView() {
-  const { success, error: toastError } = useToast();
+  const { error: toastError } = useToast();
 
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
-
-  // Editable LLM Form State
-  const [baseUrl, setBaseUrl] = useState('');
-  const [model, setModel] = useState('');
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [temperature, setTemperature] = useState<number>(0.3);
 
   const loadSettings = async () => {
     setLoading(true);
     try {
       const data = await getSettings();
       setSettings(data);
-      setBaseUrl(data.llm.base_url || '');
-      setModel(data.llm.model || '');
-      setTemperature(data.llm.temperature ?? 0.3);
-      // HARD REQUIREMENT: API key is never prefilled with plaintext
-      setApiKeyInput('');
     } catch (err: any) {
       toastError(err.message || '获取配置信息失败');
     } finally {
@@ -65,37 +47,6 @@ export function SettingsView() {
   useEffect(() => {
     loadSettings();
   }, []);
-
-  const handleSaveLLM = async (e: FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      const payload: {
-        base_url: string;
-        model: string;
-        temperature: number;
-        api_key?: string;
-      } = {
-        base_url: baseUrl.trim(),
-        model: model.trim(),
-        temperature: Number(temperature),
-      };
-
-      // Only send api_key if the user entered a non-empty string
-      if (apiKeyInput.trim()) {
-        payload.api_key = apiKeyInput.trim();
-      }
-
-      await updateLLMSettings(payload);
-      success('LLM 模型服务配置已更新保存');
-      // Reload updated settings
-      await loadSettings();
-    } catch (err: any) {
-      toastError(err.message || '保存设置失败');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   if (loading && !settings) {
     return (
@@ -131,135 +82,13 @@ export function SettingsView() {
         </Button>
       </div>
 
-      {/* 1. LLM Provider Form */}
-      <Card className="border shadow-xs">
-        <CardHeader className="pb-4">
-          <div className="flex items-center gap-2">
-            <Cpu className="w-4 h-4 text-primary" />
-            <CardTitle>大语言模型 (LLM Provider)</CardTitle>
-          </div>
-          <CardDescription>
-            负责音箱语音意图识别、曲库模糊检索编排与智能对话生成
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSaveLLM} id="llm-form" className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Base URL */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground flex items-center gap-1">
-                  Base URL (API 接入端点)
-                </label>
-                <Input
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder="https://api.openai.com/v1"
-                  required
-                />
-                <span className="text-[11px] text-muted-foreground">
-                  支持 OpenAI 兼容格式或本地 Ollama / vLLM / FastChat
-                </span>
-              </div>
-
-              {/* Model */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground flex items-center gap-1">
-                  模型名称 (Model)
-                </label>
-                <Input
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="gpt-4o-mini 或 qwen-2.5-72b-instruct"
-                  required
-                />
-                <span className="text-[11px] text-muted-foreground">
-                  例如：gpt-4o-mini、qwen2.5:7b、deepseek-chat
-                </span>
-              </div>
-            </div>
-
-            {/* API Key */}
-            <div className="space-y-1.5 pt-1">
-              <label className="text-xs font-semibold text-foreground flex items-center justify-between">
-                <span className="flex items-center gap-1">
-                  <EyeOff className="w-3.5 h-3.5 text-muted-foreground" />
-                  API 密钥 (API Key)
-                </span>
-                {settings?.llm.api_key_masked && (
-                  <span className="text-[11px] font-mono text-muted-foreground bg-muted/60 px-2 py-0.5 rounded">
-                    当前: {settings.llm.api_key_masked}
-                  </span>
-                )}
-              </label>
-              <Input
-                type="password"
-                value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                placeholder="留空表示不修改 (保持当前密钥)"
-                autoComplete="new-password"
-              />
-              <span className="text-[11px] text-muted-foreground">
-                出于安全考虑，当前密钥已脱敏且不回填明文。留空提交则保持现有密钥不变。
-              </span>
-            </div>
-
-            {/* Temperature */}
-            <div className="space-y-2 pt-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-foreground">
-                  采样温度 (Temperature): {temperature}
-                </label>
-                <span className="text-[11px] text-muted-foreground">
-                  {temperature <= 0.3
-                    ? '确定性高 (推荐用于工具精准调用)'
-                    : temperature >= 0.8
-                    ? '发散创造'
-                    : '平衡'}
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min="0"
-                  max="1.5"
-                  step="0.05"
-                  value={temperature}
-                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                  className="w-full accent-primary h-2 bg-muted rounded-lg cursor-pointer"
-                />
-                <Input
-                  type="number"
-                  min="0"
-                  max="2"
-                  step="0.05"
-                  value={temperature}
-                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                  className="w-20 text-center font-mono h-8 text-xs"
-                />
-              </div>
-            </div>
-          </form>
-        </CardContent>
-        <CardFooter className="flex justify-between items-center border-t bg-muted/20 px-6 py-3">
-          <span className="text-xs text-muted-foreground">
-            保存后将在下一次对话与指令推理中即时生效
-          </span>
-          <Button
-            type="submit"
-            form="llm-form"
-            size="sm"
-            disabled={saving}
-            className="gap-2 shadow-xs"
-          >
-            {saving ? (
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Save className="w-3.5 h-3.5" />
-            )}
-            保存配置
-          </Button>
-        </CardFooter>
-      </Card>
+      {/* 1. Redesigned LLM Provider Card */}
+      {settings?.llm && (
+        <LLMProviderCard
+          currentSettings={settings.llm}
+          onSaved={loadSettings}
+        />
+      )}
 
       {/* 2. External Tools Status Table */}
       <Card className="border shadow-xs">

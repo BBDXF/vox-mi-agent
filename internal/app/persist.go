@@ -15,8 +15,8 @@ import (
 
 // persistLLM rewrites the llm section of <dataDir>/config.yaml (yaml.Node
 // round-trip, so comments and other sections are preserved). apiKey == nil
-// leaves the stored key untouched. The write is atomic and keeps mode 0600.
-func persistLLM(dataDir, baseURL, model string, temperature float64, apiKey *string) error {
+// leaves the stored key untouched (a pointer to "" clears it). The write is atomic and keeps mode 0600.
+func persistLLM(dataDir, provider, baseURL, model string, temperature float64, apiKey *string) error {
 	path := filepath.Join(dataDir, config.FileName)
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -41,6 +41,7 @@ func persistLLM(dataDir, baseURL, model string, temperature float64, apiKey *str
 		llm = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		mapSet(root, "llm", llm)
 	}
+	mapSet(llm, "provider", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: provider, Style: yaml.DoubleQuotedStyle})
 	mapSet(llm, "base_url", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: baseURL, Style: yaml.DoubleQuotedStyle})
 	mapSet(llm, "model", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: model, Style: yaml.DoubleQuotedStyle})
 	mapSet(llm, "temperature", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!float", Value: strconv.FormatFloat(temperature, 'g', -1, 64)})

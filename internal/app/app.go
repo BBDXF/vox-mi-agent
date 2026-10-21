@@ -82,6 +82,9 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 		return nil, err
 	}
 	a := &App{Cfg: c, Log: o.logger, Store: st, llm: c.LLM}
+	if a.llm.Provider == "" {
+		a.llm.Provider = llm.CustomPresetID
+	}
 	ok := false
 	defer func() {
 		if !ok {
@@ -156,7 +159,7 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 }
 
 func newOpenAI(l config.LLM) llm.Provider {
-	return llm.NewOpenAI(llm.Config{BaseURL: l.BaseURL, APIKey: l.APIKey, Model: l.Model, Timeout: l.Timeout})
+	return llm.NewOpenAI(llm.Config{BaseURL: l.EffectiveBaseURL(), APIKey: l.APIKey, Model: l.Model, Timeout: l.Timeout})
 }
 
 // normalize returns a copy of cfg with filesystem paths made absolute (the
@@ -197,8 +200,11 @@ func (a *App) LLMConfig() config.LLM {
 	return a.llm
 }
 
-// LLMUpdate is a runtime LLM reconfiguration. APIKey "" = unchanged.
+// LLMUpdate is a runtime LLM reconfiguration. Provider "" = current
+// provider. APIKey "" keeps the stored key only when the provider is
+// unchanged; switching provider with an empty key clears the stored key.
 type LLMUpdate struct {
+	Provider    string
 	BaseURL     string
 	Model       string
 	APIKey      string
@@ -208,38 +214,83 @@ type LLMUpdate struct {
 // ErrInvalid marks a validation failure of user-supplied settings.
 var ErrInvalid = errors.New("invalid settings")
 
+// LLMTarget is a fully resolved LLM endpoint (provider, URL and key).
+type LLMTarget struct {
+	Provider string
+	BaseURL  string
+	APIKey   string
+	Preset   llm.Preset
+}
+
+// ResolveLLM resolves a user-supplied (provider, base_url, api_key) triple
+// against the preset table and the current settings. Provider "" means the
+// current provider. An empty api_key falls back to the stored key only when
+// the provider equals the current one.
+func (a *App) ResolveLLM(provider, baseURL, apiKey string) (LLMTarget, error) {
+	return a.resolveLocked(a.LLMConfig(), provider, baseURL, apiKey)
+}
+
+func (a *App) resolveLocked(cur config.LLM, provider, baseURL, apiKey string) (LLMTarget, error) {
+	curProv := cur.Provider
+	if curProv == "" {
+		curProv = llm.CustomPresetID
+	}
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		provider = curProv
+	}
+	preset, ok := llm.PresetByID(provider)
+	if !ok {
+		return LLMTarget{}, fmt.Errorf("%w: unknown provider %q", ErrInvalid, provider)
+	}
+	baseURL = strings.TrimSpace(baseURL)
+	switch {
+	case !preset.BaseURLEditable && preset.ID != llm.CustomPresetID:
+		baseURL = preset.BaseURL
+	case baseURL == "" && preset.BaseURL != "":
+		baseURL = preset.BaseURL
+	case baseURL == "" && provider == curProv:
+		baseURL = cur.BaseURL
+	}
+	pu, err := url.Parse(baseURL)
+	if err != nil || (pu.Scheme != "http" && pu.Scheme != "https") || pu.Host == "" {
+		return LLMTarget{}, fmt.Errorf("%w: base_url must be an http(s) URL", ErrInvalid)
+	}
+	if apiKey == "" && provider == curProv {
+		apiKey = cur.APIKey
+	}
+	return LLMTarget{Provider: provider, BaseURL: baseURL, APIKey: apiKey, Preset: preset}, nil
+}
+
 // UpdateLLM validates u, persists it to <data>/config.yaml (the file is
 // authoritative) and then swaps the live provider.
 func (a *App) UpdateLLM(u LLMUpdate) error {
-	u.BaseURL = strings.TrimSpace(u.BaseURL)
 	u.Model = strings.TrimSpace(u.Model)
-	pu, err := url.Parse(u.BaseURL)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	cur := a.llm
+	tgt, err := a.resolveLocked(cur, u.Provider, u.BaseURL, u.APIKey)
+	if err != nil {
+		return err
+	}
 	switch {
-	case err != nil || (pu.Scheme != "http" && pu.Scheme != "https") || pu.Host == "":
-		return fmt.Errorf("%w: base_url must be an http(s) URL", ErrInvalid)
 	case u.Model == "":
 		return fmt.Errorf("%w: model is required", ErrInvalid)
 	case u.Temperature < 0 || u.Temperature > 2:
 		return fmt.Errorf("%w: temperature must be between 0 and 2", ErrInvalid)
+	case tgt.Preset.KeyRequired && tgt.APIKey == "":
+		return fmt.Errorf("%w: %s requires an API key", ErrInvalid, tgt.Preset.Name)
 	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	var key *string
-	if u.APIKey != "" {
-		key = &u.APIKey
-	}
-	if err := persistLLM(a.Cfg.DataDir, u.BaseURL, u.Model, u.Temperature, key); err != nil {
+	key := tgt.APIKey
+	if err := persistLLM(a.Cfg.DataDir, tgt.Provider, tgt.BaseURL, u.Model, u.Temperature, &key); err != nil {
 		return fmt.Errorf("persist config: %w", err)
 	}
-	n := a.llm
-	n.BaseURL, n.Model, n.Temperature = u.BaseURL, u.Model, u.Temperature
-	if key != nil {
-		n.APIKey = *key
-	}
+	n := cur
+	n.Provider, n.BaseURL, n.APIKey = tgt.Provider, tgt.BaseURL, tgt.APIKey
+	n.Model, n.Temperature = u.Model, u.Temperature
 	a.llm = n
 	a.Provider.Set(newOpenAI(n), n.Model, n.Temperature)
-	a.Log.Info("llm reconfigured", "base_url", n.BaseURL, "model", n.Model, "temperature", n.Temperature)
+	a.Log.Info("llm reconfigured", "provider", n.Provider, "base_url", n.BaseURL, "model", n.Model, "temperature", n.Temperature)
 	return nil
 }
 
