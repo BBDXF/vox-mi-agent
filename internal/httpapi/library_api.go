@@ -17,20 +17,25 @@ const (
 )
 
 type trackDTO struct {
-	ID      string   `json:"id"`
-	Title   string   `json:"title"`
-	Artist  string   `json:"artist"`
-	Artists []string `json:"artists"`
-	Album   string   `json:"album"`
-	Alias   []string `json:"alias"`
-	Path    string   `json:"path"`
-	Ext     string   `json:"ext"`
-	Score   *float64 `json:"score,omitempty"`
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Artist    string   `json:"artist"`
+	Artists   []string `json:"artists"`
+	Album     string   `json:"album"`
+	Year      int      `json:"year,omitempty"`
+	TrackNo   int      `json:"track_no,omitempty"`
+	Genre     string   `json:"genre,omitempty"`
+	TagSource string   `json:"tag_source"` // filename | tags | mixed
+	Alias     []string `json:"alias"`
+	Path      string   `json:"path"`
+	Ext       string   `json:"ext"`
+	Score     *float64 `json:"score,omitempty"`
 }
 
 func toTrackDTO(t media.Track) trackDTO {
 	d := trackDTO{
 		ID: t.ID, Title: t.Title, Artist: t.Artist, Artists: t.Artists, Album: t.Album,
+		Year: t.Year, TrackNo: t.TrackNo, Genre: t.Genre, TagSource: t.TagSource,
 		Alias: t.Alias, Path: t.Path,
 		Ext: strings.ToLower(strings.TrimPrefix(filepath.Ext(t.Path), ".")),
 	}
@@ -53,7 +58,7 @@ func hasArtist(t media.Track, name string) bool {
 }
 
 // GET /api/media/tracks?q=&artist=&sort=title|artist|path&limit=50&offset=0
-// -> {total, items:[{id,title,artist,artists,album,alias,path,ext,score?}]}
+// -> {total, items:[{id,title,artist,artists,album,year?,track_no?,genre?,tag_source,alias,path,ext,score?}]}
 // With q the items are the fuzzy-search hits (same fzq search as search_audio)
 // in score order; without q the library is listed sorted and paged.
 func (s *Server) mediaTracks(w http.ResponseWriter, r *http.Request) {

@@ -25,8 +25,13 @@ type Track struct {
 	// fzq matches any of them.
 	Artists []string `json:"artists"`
 	Album   string   `json:"album"`
-	Alias   []string `json:"alias"`
-	Path    string   `json:"path"`
+	Year    int      `json:"year,omitempty"`
+	TrackNo int      `json:"track_no,omitempty"`
+	Genre   string   `json:"genre,omitempty"`
+	// TagSource tells where title/artist came from: filename | tags | mixed.
+	TagSource string   `json:"tag_source"`
+	Alias     []string `json:"alias"`
+	Path      string   `json:"path"`
 }
 
 // Hit is one search result as exposed to the agent (no path).

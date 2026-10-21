@@ -172,3 +172,62 @@ func mk(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 }
+
+func TestDeleteConversation(t *testing.T) {
+	ctx := context.Background()
+	s, _ := open(t)
+	a, _ := s.CreateConversation(ctx, "a", ChannelWeb)
+	b, _ := s.CreateConversation(ctx, "b", ChannelCLI)
+	for _, c := range []*Conversation{a, b} {
+		if _, err := s.AppendMessage(ctx, c.ID, Message{Role: "user", Content: "hi"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.InsertTraces(ctx, []TraceRow{{TS: time.Now(), ConversationID: c.ID, TurnID: "t", Kind: TraceTurn, Status: TraceOK}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// a trace without a conversation must survive both deletes
+	if err := s.InsertTraces(ctx, []TraceRow{{TS: time.Now(), TurnID: "x", Kind: TraceTool, Name: "media_sync", Status: TraceOK}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteConversation(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteConversation(ctx, a.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second delete: %v", err)
+	}
+	if err := s.DeleteConversation(ctx, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown: %v", err)
+	}
+	if _, err := s.GetConversation(ctx, a.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("still there: %v", err)
+	}
+	if m, _ := s.ListMessages(ctx, a.ID); len(m) != 0 {
+		t.Fatalf("messages left: %v", m)
+	}
+	if tr, _ := s.QueryTraces(ctx, TraceFilter{ConversationID: a.ID}); len(tr) != 0 {
+		t.Fatalf("traces left: %v", tr)
+	}
+	// the other conversation is untouched
+	if m, _ := s.ListMessages(ctx, b.ID); len(m) != 1 {
+		t.Fatalf("b messages: %v", m)
+	}
+	if tr, _ := s.QueryTraces(ctx, TraceFilter{ConversationID: b.ID}); len(tr) != 1 {
+		t.Fatalf("b traces: %v", tr)
+	}
+
+	n, err := s.DeleteAllConversations(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("delete all: %d %v", n, err)
+	}
+	if cs, _ := s.ListConversations(ctx, 10, time.Time{}); len(cs) != 0 {
+		t.Fatalf("conversations left: %v", cs)
+	}
+	if tr, _ := s.QueryTraces(ctx, TraceFilter{}); len(tr) != 1 || tr[0].ConversationID != "" {
+		t.Fatalf("expected only the conversation-less trace: %v", tr)
+	}
+	if n, err := s.DeleteAllConversations(ctx); err != nil || n != 0 {
+		t.Fatalf("empty delete all: %d %v", n, err)
+	}
+}

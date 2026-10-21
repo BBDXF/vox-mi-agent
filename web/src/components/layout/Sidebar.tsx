@@ -5,14 +5,12 @@ import {
   Radio,
   Sun,
   Moon,
-  FlaskConical,
   Activity,
   ScrollText,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { isMockMode, setMockMode } from '@/lib/api';
 
 export type NavTab = 'chat' | 'settings' | 'media' | 'logs';
 
@@ -31,14 +29,6 @@ export function Sidebar({
   onToggleTheme,
   healthOk,
 }: SidebarProps) {
-  const mockActive = isMockMode();
-
-  const handleToggleMock = () => {
-    setMockMode(!mockActive);
-    // Reload to apply mock or real mode across application
-    window.location.reload();
-  };
-
   const navItems: Array<{
     id: NavTab | 'speaker_simulator';
     label: string;
@@ -170,27 +160,6 @@ export function Sidebar({
           </div>
           <Activity className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
         </div>
-
-        {/* Mock Mode Toggle */}
-        <button
-          type="button"
-          onClick={handleToggleMock}
-          className={cn(
-            'w-full flex items-center justify-between px-2 py-1.5 rounded-md text-[11px] border transition-colors',
-            mockActive
-              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
-              : 'bg-background/60 text-muted-foreground border-border hover:text-foreground'
-          )}
-          title="点击切换真实后台 / 本地 Mock 演示模式"
-        >
-          <div className="flex items-center gap-1.5">
-            <FlaskConical className="w-3.5 h-3.5 shrink-0" />
-            <span>演示模式 (Mock)</span>
-          </div>
-          <span className="font-mono text-[10px] uppercase font-semibold">
-            {mockActive ? 'ON' : 'OFF'}
-          </span>
-        </button>
 
         {/* Theme Toggle */}
         <div className="flex items-center justify-between pt-1">

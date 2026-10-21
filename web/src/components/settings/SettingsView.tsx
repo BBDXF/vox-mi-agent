@@ -15,7 +15,6 @@ import { useToast } from '@/components/ui/toast';
 import {
   getSettingsSchema,
   getSettings,
-  mockSettingsSchema,
   type SettingsSchemaResponse,
   type SettingsResponse,
 } from '@/lib/api';
@@ -43,7 +42,7 @@ export function SettingsView() {
   const { error: toastError } = useToast();
 
   const [loading, setLoading] = useState(false);
-  const [schema, setSchema] = useState<SettingsSchemaResponse>(mockSettingsSchema);
+  const [schema, setSchema] = useState<SettingsSchemaResponse>({ sections: [] } as any);
   const [legacySettings, setLegacySettings] = useState<SettingsResponse | null>(null);
   const [activeSection, setActiveSection] = useState<string>('llm');
 
@@ -51,7 +50,7 @@ export function SettingsView() {
     setLoading(true);
     try {
       const [sSchema, sSettings] = await Promise.all([
-        getSettingsSchema().catch(() => mockSettingsSchema),
+        getSettingsSchema(),
         getSettings().catch(() => null),
       ]);
       if (sSchema && sSchema.sections && sSchema.sections.length > 0) {
@@ -72,7 +71,7 @@ export function SettingsView() {
   }, []);
 
   // Filter out media and aliases from settings tabs (they live on the 曲库 page)
-  const rawSections = schema.sections || mockSettingsSchema.sections;
+  const rawSections = schema.sections || [];
   const sectionsList = rawSections.filter((s) => !EXCLUDED_SECTIONS.has(s.name));
   const currentSection =
     sectionsList.find((s) => s.name === activeSection) || sectionsList[0];

@@ -9,6 +9,7 @@ export interface ToolCallCardProps {
   result?: unknown;
   error?: string;
   isRunning?: boolean;
+  durationMs?: number;
 }
 
 export function ToolCallCard({
@@ -18,8 +19,9 @@ export function ToolCallCard({
   result,
   error,
   isRunning = false,
+  durationMs,
 }: ToolCallCardProps) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
   // Format arguments
@@ -94,19 +96,24 @@ export function ToolCallCard({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {durationMs !== undefined && !isRunning && (
+            <span className="text-[10px] font-mono text-muted-foreground">
+              {durationMs >= 1000 ? (durationMs / 1000).toFixed(2) + 's' : Math.round(durationMs) + 'ms'}
+            </span>
+          )}
           {isRunning ? (
             <Badge variant="warning" className="h-5 text-[10px] animate-pulse">
-              执行中...
+              运行中
             </Badge>
           ) : error ? (
             <Badge variant="destructive" className="h-5 text-[10px] gap-1">
               <AlertCircle className="w-3 h-3" />
-              执行异常
+              失败
             </Badge>
           ) : result !== undefined ? (
             <Badge variant="success" className="h-5 text-[10px] gap-1">
               <CheckCircle2 className="w-3 h-3" />
-              已返回
+              成功
             </Badge>
           ) : (
             <Badge variant="secondary" className="h-5 text-[10px]">

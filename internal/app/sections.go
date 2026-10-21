@@ -151,6 +151,8 @@ func mediaSection() *section {
 			intField("max_files", "媒体库最大文件数，超出部分被忽略（1–10000000）", func(c *config.Config) *int { return &c.Media.MaxFiles }),
 			strField("filename_pattern", "从相对路径解析歌手/歌名的正则，必须包含命名分组 (?P<title>…)，可选 (?P<artist>…)",
 				func(c *config.Config) *string { return &c.Media.FilenamePattern }),
+			enumField("tag_mode", "读取内嵌音频标签（ID3/FLAC/M4A…）：filename_first=文件名同时解析出歌手和歌名时优先用文件名，否则用标签；tags_first=优先用标签；filename_only=不读取标签。专辑/年份/音轨/流派/封面始终来自标签（filename_only 除外）",
+				media.TagModes, func(c *config.Config) *string { return &c.Media.TagMode }),
 		},
 	}
 	// sync_interval: keep the historical bare `0` in the file.
@@ -223,7 +225,7 @@ func mediaSection() *section {
 			applied["sync_interval"] = FmtDuration(n.Media.SyncInterval)
 		}
 		started := false
-		if changed.any("folders", "extensions", "filename_pattern", "max_files") {
+		if changed.any("folders", "extensions", "filename_pattern", "max_files", "tag_mode") {
 			started = !a.Syncer.TriggerAsyncOrQueue("settings")
 			applied["sync"] = "triggered"
 		}

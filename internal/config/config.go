@@ -159,6 +159,8 @@ type Media struct {
 	SyncOnStart     bool          `yaml:"sync_on_start" json:"sync_on_start"`
 	MaxFiles        int           `yaml:"max_files" json:"max_files"`
 	FilenamePattern string        `yaml:"filename_pattern" json:"filename_pattern"`
+	// TagMode: filename_first | tags_first | filename_only (embedded audio tags).
+	TagMode string `yaml:"tag_mode" json:"tag_mode"`
 }
 
 // UnmarshalYAML lets sync_interval be a bare 0 ("manual only") as well as a
@@ -221,6 +223,7 @@ func Defaults() *Config {
 			SyncOnStart:     true,
 			MaxFiles:        100000,
 			FilenamePattern: `(?:(?P<artist>[^/]+?) - )?(?P<title>[^/]+)\.\w+$`,
+			TagMode:         "filename_first",
 		},
 		Search: Search{
 			StripPatterns: []string{
@@ -397,6 +400,11 @@ func (c *Config) Validate() error {
 	}
 	if c.Media.SyncInterval < 0 {
 		return errors.New("config: media.sync_interval must be >= 0")
+	}
+	switch c.Media.TagMode {
+	case "filename_first", "tags_first", "filename_only":
+	default:
+		return fmt.Errorf("config: media.tag_mode must be filename_first|tags_first|filename_only, got %q", c.Media.TagMode)
 	}
 	switch c.Logging.Level {
 	case "debug", "info", "warn", "error":

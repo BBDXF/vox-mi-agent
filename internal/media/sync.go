@@ -81,6 +81,10 @@ type Syncer struct {
 	lib     *Library
 	log     *slog.Logger
 
+	// readTags reads one file's embedded tags; nil => readFileTags. Tests
+	// replace it to count reads.
+	readTags func(path string) (rawTags, error)
+
 	mu      sync.Mutex
 	flight  *flight
 	rerun   bool // a config change arrived mid-flight: sync again afterwards
@@ -354,17 +358,19 @@ func scan(folders, exts []string, max int) (files []fileEntry, truncated bool, e
 
 // songsSchema versions the songs-file format and the track-id algorithm; bump
 // it whenever either changes so existing libraries are regenerated.
-const songsSchema = "v3-artists"
+const songsSchema = "v5-tags-nocover"
 
 // snapshotHash covers every input of the songs file: schema version, absolute
-// path+size+mtime of all files, the filename pattern, and the alias table.
-func snapshotHash(files []fileEntry, pattern string, aliases map[string][]string) string {
+// path+size+mtime of all files, the filename pattern, the tag mode, and the
+// alias table.
+func snapshotHash(files []fileEntry, pattern, tagMode string, aliases map[string][]string) string {
 	h := sha1.New()
 	fmt.Fprintf(h, "schema\x00%s\n", songsSchema)
 	for _, f := range files {
 		fmt.Fprintf(h, "%s\x00%s\x00%d\x00%d\n", f.abs, f.rel, f.size, f.mtime)
 	}
 	fmt.Fprintf(h, "pattern\x00%s\n", pattern)
+	fmt.Fprintf(h, "tagmode\x00%s\n", tagMode)
 	titles := make([]string, 0, len(aliases))
 	for t := range aliases {
 		titles = append(titles, t)
@@ -379,6 +385,13 @@ func snapshotHash(files []fileEntry, pattern string, aliases map[string][]string
 // parseName extracts artist/title from the relative path via the pattern's
 // named groups; title falls back to the basename without extension.
 func parseName(re *regexp.Regexp, rel string) (artist, title string) {
+	artist, title, _ = parseNameMatch(re, rel)
+	return artist, title
+}
+
+// parseNameMatch is parseName that also reports whether the pattern matched
+// and produced a title (false: title is just the basename).
+func parseNameMatch(re *regexp.Regexp, rel string) (artist, title string, matched bool) {
 	if re != nil {
 		if m := re.FindStringSubmatch(rel); m != nil {
 			for i, n := range re.SubexpNames() {
@@ -395,8 +408,10 @@ func parseName(re *regexp.Regexp, rel string) (artist, title string) {
 		artist = ""
 		b := path.Base(rel)
 		title = strings.TrimSuffix(b, path.Ext(b))
+	} else {
+		matched = true
 	}
-	return artist, title
+	return artist, title, matched
 }
 
 func (s *Syncer) run(ctx context.Context) (Status, error) {
@@ -407,6 +422,12 @@ func (s *Syncer) run(ctx context.Context) (Status, error) {
 		if err := checkFolder(f); err != nil {
 			return st, err
 		}
+	}
+	if mc.TagMode == "" {
+		mc.TagMode = TagFilenameFirst
+	}
+	if !ValidTagMode(mc.TagMode) {
+		return st, fmt.Errorf("media: tag_mode %q is not one of %s", mc.TagMode, strings.Join(TagModes, ", "))
 	}
 	var re *regexp.Regexp
 	if mc.FilenamePattern != "" {
@@ -431,7 +452,7 @@ func (s *Syncer) run(ctx context.Context) (Status, error) {
 			return st, fmt.Errorf("media: aliases: %w", err)
 		}
 	}
-	snap := snapshotHash(files, mc.FilenamePattern, aliases)
+	snap := snapshotHash(files, mc.FilenamePattern, mc.TagMode, aliases)
 	songs := SongsPath(cfg.DataDir)
 	if s.store != nil {
 		old, gerr := s.store.GetSetting(ctx, SettingSnapshot)
@@ -452,7 +473,16 @@ func (s *Syncer) run(ctx context.Context) (Status, error) {
 		return st, nil
 	}
 
-	// 2. generate
+	// 2. generate (embedded tags: only files whose path+size+mtime changed
+	// since the last sync are re-read)
+	var tagInfo map[string]rawTags
+	if mc.TagMode != TagFilenameOnly {
+		var terr error
+		tagInfo, terr = s.collectTags(ctx, files, loadTagCache(TagsPath(cfg.DataDir)))
+		if terr != nil {
+			return st, terr
+		}
+	}
 	tracks := make([]Track, 0, len(files))
 	byID := make(map[string]string, len(files)) // id -> abs path
 	seenPath := make(map[string]bool, len(files))
@@ -466,10 +496,15 @@ func (s *Syncer) run(ctx context.Context) (Status, error) {
 			s.log.Warn("media: track id collision, using a longer id", "id", id, "path", f.abs)
 		}
 		byID[id] = f.abs
-		artist, title := parseName(re, f.rel)
+		fnArtist, fnTitle, fnMatched := parseNameMatch(re, f.rel)
+		rt := tagInfo[f.abs] // zero (OK=false) in filename_only mode
+		artist, title, source := pickNames(mc.TagMode, fnArtist, fnTitle, fnMatched, rt)
 		t := Track{
 			ID: id, Title: title, Artist: artist, Artists: SplitArtists(artist),
-			Alias: []string{}, Path: f.abs,
+			Alias: []string{}, Path: f.abs, TagSource: source,
+		}
+		if rt.OK && mc.TagMode != TagFilenameOnly {
+			t.Album, t.Year, t.TrackNo, t.Genre = rt.Album, rt.Year, rt.Track, rt.Genre
 		}
 		if a := aliases[title]; len(a) > 0 {
 			t.Alias = append([]string(nil), a...)
@@ -480,6 +515,18 @@ func (s *Syncer) run(ctx context.Context) (Status, error) {
 	// 3. atomic write
 	if err := writeSongs(songs, tracks); err != nil {
 		return st, err
+	}
+	if tagInfo != nil {
+		entries := make([]rawTags, 0, len(tagInfo))
+		for _, f := range files {
+			if rt, ok := tagInfo[f.abs]; ok {
+				entries = append(entries, rt)
+				delete(tagInfo, f.abs) // dedupe overlapping folders
+			}
+		}
+		if err := saveTagCache(TagsPath(cfg.DataDir), entries); err != nil {
+			s.log.Warn("media: save tag cache", "err", err)
+		}
 	}
 	if err := s.lib.Reload(); err != nil {
 		return st, err

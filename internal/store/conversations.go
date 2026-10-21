@@ -165,3 +165,59 @@ func (s *Store) ListMessages(ctx context.Context, convID string) ([]Message, err
 	}
 	return out, rows.Err()
 }
+
+// DeleteConversation removes a conversation with its messages and trace rows
+// in one transaction. ErrNotFound if id does not exist. (Trace rows still
+// queued in the async trace writer may be inserted afterwards; they are
+// orphans and age out with the normal trace pruning.)
+func (s *Store) DeleteConversation(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var one int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM conversations WHERE id=?`, id).Scan(&one); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	for _, q := range []string{
+		`DELETE FROM messages WHERE conversation_id=?`,
+		`DELETE FROM traces WHERE conversation_id=?`,
+		`DELETE FROM conversations WHERE id=?`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, id); err != nil {
+			return fmt.Errorf("store: delete conversation: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// DeleteAllConversations removes every conversation with all messages and
+// conversation-bound trace rows (conversation_id <> ”) in one transaction and
+// returns how many conversations were deleted.
+func (s *Store) DeleteAllConversations(ctx context.Context) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	for _, q := range []string{
+		`DELETE FROM messages`,
+		`DELETE FROM traces WHERE conversation_id<>''`,
+	} {
+		if _, err := tx.ExecContext(ctx, q); err != nil {
+			return 0, fmt.Errorf("store: delete conversations: %w", err)
+		}
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM conversations`)
+	if err != nil {
+		return 0, fmt.Errorf("store: delete conversations: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}

@@ -306,10 +306,11 @@ export function TracksCard() {
             <thead className="bg-muted/50 border-b text-muted-foreground select-none">
               <tr>
                 <th className="px-4 py-2.5 font-medium w-48">歌名</th>
-                <th className="px-4 py-2.5 font-medium w-40">歌手</th>
+                <th className="px-4 py-2.5 font-medium w-36">歌手</th>
+                <th className="px-4 py-2.5 font-medium w-40">专辑 · 年份</th>
                 <th className="px-4 py-2.5 font-medium w-20">格式</th>
                 <th className="px-4 py-2.5 font-medium">识别别名 (Aliases)</th>
-                <th className="px-4 py-2.5 font-medium w-52">存储路径</th>
+                <th className="px-4 py-2.5 font-medium w-48">存储路径</th>
                 <th className="px-4 py-2.5 font-medium w-24">ID</th>
                 <th className="px-4 py-2.5 font-medium text-right w-24">操作</th>
               </tr>
@@ -317,7 +318,7 @@ export function TracksCard() {
             <tbody className="divide-y divide-border/60">
               {loading && tracks.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <RefreshCw className="w-5 h-5 animate-spin text-primary" />
                       <span>正在检索曲库索引快照...</span>
@@ -326,16 +327,16 @@ export function TracksCard() {
                 </tr>
               ) : tracks.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                     未找到匹配的音频曲目
                   </td>
                 </tr>
               ) : (
                 tracks.map((track) => (
                   <tr key={track.id} className="hover:bg-muted/30 transition-colors">
-                    {/* Title + Score Badge */}
+                    {/* Title + Score Badge + tag_source badge */}
                     <td className="px-4 py-2.5 font-medium text-foreground">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-semibold">{track.title}</span>
                         {debouncedQ.trim() && track.score !== undefined && (
                           <Badge
@@ -346,12 +347,16 @@ export function TracksCard() {
                             <span>{track.score}分</span>
                           </Badge>
                         )}
+                        {track.tag_source && track.tag_source !== 'filename' && (
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] py-0 px-1 text-muted-foreground/80 font-sans border-border/70 bg-muted/30 shrink-0"
+                            title={`元数据来源: ${track.tag_source === 'tags' ? '内嵌音频标签' : '文件名与标签混合'}`}
+                          >
+                            {track.tag_source === 'tags' ? '标签' : '混合'}
+                          </Badge>
+                        )}
                       </div>
-                      {track.album && (
-                        <div className="text-[11px] text-muted-foreground truncate max-w-xs">
-                          专辑: {track.album}
-                        </div>
-                      )}
                     </td>
 
                     {/* Artists Chips */}
@@ -367,6 +372,25 @@ export function TracksCard() {
                           </Badge>
                         ))}
                       </div>
+                    </td>
+
+                    {/* 专辑 · 年份 */}
+                    <td className="px-4 py-2.5 text-foreground">
+                      {track.album ? (
+                        <div
+                          className="text-xs truncate max-w-[160px]"
+                          title={`${track.album}${track.year ? ` · ${track.year}` : ''}`}
+                        >
+                          <span>{track.album}</span>
+                          {track.year ? (
+                            <span className="text-muted-foreground font-mono text-[11px] ml-1">
+                              · {track.year}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground/50 text-[11px]">-</span>
+                      )}
                     </td>
 
                     {/* Format / Ext */}

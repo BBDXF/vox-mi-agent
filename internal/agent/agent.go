@@ -49,8 +49,72 @@ type Runtime struct {
 	opt Options
 	log *slog.Logger
 
-	mu  sync.Mutex
-	mem map[string][]llm.Message // used when Store == nil
+	mu     sync.Mutex
+	mem    map[string][]llm.Message // used when Store == nil
+	active map[*activeTurn]struct{} // turns currently running
+}
+
+// activeTurn is a running turn of one conversation.
+type activeTurn struct {
+	conv   string
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// cancelWait bounds how long CancelConversation waits for turns to stop.
+const cancelWait = 5 * time.Second
+
+// CancelConversation cancels the turns currently running for the conversation
+// (waiting briefly for them to finish persisting), drops any in-memory
+// history of it, and reports whether a turn was running.
+func (r *Runtime) CancelConversation(id string) bool {
+	return r.cancelTurns(func(t *activeTurn) bool { return t.conv == id }, id)
+}
+
+// CancelAll cancels every running turn and clears the in-memory history; it
+// reports whether any turn was running.
+func (r *Runtime) CancelAll() bool {
+	return r.cancelTurns(func(*activeTurn) bool { return true }, "")
+}
+
+func (r *Runtime) cancelTurns(match func(*activeTurn) bool, memID string) bool {
+	r.mu.Lock()
+	var hit []*activeTurn
+	for t := range r.active {
+		if match(t) {
+			hit = append(hit, t)
+		}
+	}
+	if memID == "" {
+		clear(r.mem)
+	} else {
+		delete(r.mem, memID)
+	}
+	r.mu.Unlock()
+	for _, t := range hit {
+		t.cancel()
+	}
+	deadline := time.After(cancelWait)
+	for _, t := range hit {
+		select {
+		case <-t.done:
+		case <-deadline:
+		}
+	}
+	return len(hit) > 0
+}
+
+func (r *Runtime) register(conv string, cancel context.CancelFunc) (unregister func()) {
+	t := &activeTurn{conv: conv, cancel: cancel, done: make(chan struct{})}
+	r.mu.Lock()
+	r.active[t] = struct{}{}
+	r.mu.Unlock()
+	return func() {
+		r.mu.Lock()
+		delete(r.active, t)
+		r.mu.Unlock()
+		close(t.done)
+	}
 }
 
 // New creates a Runtime, applying defaults.
@@ -68,7 +132,7 @@ func New(opt Options) *Runtime {
 	if lg == nil {
 		lg = slog.New(slog.DiscardHandler)
 	}
-	return &Runtime{opt: opt, log: lg, mem: map[string][]llm.Message{}}
+	return &Runtime{opt: opt, log: lg, mem: map[string][]llm.Message{}, active: map[*activeTurn]struct{}{}}
 }
 
 // Run executes one user turn, emitting events as they occur. It returns a
@@ -104,6 +168,10 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 		return fail(err)
 	}
 	ts.convID = convID
+	// make the turn cancellable by CancelConversation (e.g. conversation deletion)
+	ctx, cancelTurn := context.WithCancel(ctx)
+	defer cancelTurn()
+	defer r.register(convID, cancelTurn)()
 	emit(Event{Type: EventConversation, Data: ConversationData{ID: convID}})
 
 	userMsg := llm.Message{Role: llm.RoleUser, Content: in.Text}

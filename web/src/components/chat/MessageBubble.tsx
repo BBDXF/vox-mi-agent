@@ -11,9 +11,10 @@ import { formatTime, cn } from '@/lib/utils';
 
 export interface MessageBubbleProps {
   message: Message;
-  toolResultsMap?: Record<string, { result?: unknown; error?: string }>;
+  toolResultsMap?: Record<string, { result?: unknown; error?: string; durationMs?: number }>;
   isStreaming?: boolean;
   conversationId?: string;
+  orphanTool?: boolean;
 }
 
 export function MessageBubble({
@@ -21,6 +22,7 @@ export function MessageBubble({
   toolResultsMap = {},
   isStreaming = false,
   conversationId,
+  orphanTool = false,
 }: MessageBubbleProps) {
   const [showTrace, setShowTrace] = useState(false);
   const isUser = message.role === 'user';
@@ -28,7 +30,9 @@ export function MessageBubble({
   const isAssistant = message.role === 'assistant';
 
   if (isTool) {
-    // Standalone tool result message (if not grouped with assistant)
+    // Tool results are shown inside the assistant's tool call card;
+    // only orphan tool messages (no matching call) render standalone.
+    if (message.tool_call_id && toolResultsMap[message.tool_call_id] && !orphanTool) return null;
     return (
       <div className="py-2 px-3 sm:px-6 flex justify-start">
         <div className="max-w-2xl w-full">
@@ -100,6 +104,7 @@ export function MessageBubble({
                     args={tc.arguments}
                     result={res?.result}
                     error={res?.error}
+                    durationMs={res?.durationMs}
                     isRunning={!res && isStreaming}
                   />
                 );

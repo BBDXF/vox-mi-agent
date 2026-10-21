@@ -50,6 +50,7 @@ media:
   sync_on_start: true
   max_files: 100000
   filename_pattern: '(?:(?P<artist>[^/]+?) - )?(?P<title>[^/]+)\.\w+$'
+  tag_mode: filename_first            # filename_first | tags_first | filename_only
 
 search:
   strip_patterns:

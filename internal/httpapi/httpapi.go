@@ -61,6 +61,8 @@ func New(a *app.App, opts ...Option) *Server {
 	r.Get("/healthz", s.healthz)
 	r.Get("/api/conversations", s.listConversations)
 	r.Post("/api/conversations", s.createConversation)
+	r.Delete("/api/conversations", s.deleteAllConversations)
+	r.Delete("/api/conversations/{id}", s.deleteConversation)
 	r.Get("/api/conversations/{id}/messages", s.listMessages)
 	r.Post("/sse/chat", s.chat)
 	r.Get("/api/settings", s.getSettings)
@@ -254,6 +256,41 @@ func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toConv(*c))
+}
+
+// DELETE /api/conversations/{id} -> 204, or 404 if unknown. A turn running for
+// the conversation is cancelled first.
+func (s *Server) deleteConversation(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if _, err := s.app.Store.GetConversation(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "conversation not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.app.Agent.CancelConversation(id)
+	if err := s.app.Store.DeleteConversation(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "conversation not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DELETE /api/conversations -> {"deleted": n}. Running turns are cancelled first.
+func (s *Server) deleteAllConversations(w http.ResponseWriter, r *http.Request) {
+	s.app.Agent.CancelAll()
+	n, err := s.app.Store.DeleteAllConversations(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"deleted": n})
 }
 
 type messageDTO struct {

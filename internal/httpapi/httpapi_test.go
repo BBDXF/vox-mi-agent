@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"github.com/andy/vox-mi-agent/internal/config"
 	"github.com/andy/vox-mi-agent/internal/llm"
 	"github.com/andy/vox-mi-agent/internal/logx"
+	"github.com/andy/vox-mi-agent/internal/store"
 )
 
 type testEnv struct {
@@ -896,5 +898,106 @@ func TestLLMTestEndpoint(t *testing.T) {
 	_, b = e.do(t, "GET", "/api/settings", "")
 	if !strings.Contains(string(b), `"provider":"custom"`) {
 		t.Errorf("settings changed: %s", b)
+	}
+}
+
+type convBlockProvider struct{ started chan struct{} }
+
+func (convBlockProvider) Name() string { return "convblock" }
+func (b convBlockProvider) Stream(ctx context.Context, _ llm.Request) (<-chan llm.Event, error) {
+	close(b.started)
+	out := make(chan llm.Event)
+	go func() { <-ctx.Done(); close(out) }()
+	return out, nil
+}
+
+func TestDeleteConversations(t *testing.T) {
+	e := newEnv(t, llm.NewFake(), nil)
+	create := func() string {
+		t.Helper()
+		resp, b := e.do(t, "POST", "/api/conversations", `{"title":"x"}`)
+		if resp.StatusCode != 201 {
+			t.Fatalf("create: %d %s", resp.StatusCode, b)
+		}
+		var c struct {
+			ID string `json:"id"`
+		}
+		json.Unmarshal(b, &c)
+		return c.ID
+	}
+	ctx := context.Background()
+	a, b, c := create(), create(), create()
+	if _, err := e.app.Store.AppendMessage(ctx, a, store.Message{Role: "user", Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, body := e.do(t, "DELETE", "/api/conversations/"+a, "")
+	if resp.StatusCode != 204 || len(body) != 0 {
+		t.Fatalf("delete: %d %q", resp.StatusCode, body)
+	}
+	for _, path := range []string{"/api/conversations/" + a, "/api/conversations/nope"} {
+		if resp, _ := e.do(t, "DELETE", path, ""); resp.StatusCode != 404 {
+			t.Fatalf("DELETE %s: %d", path, resp.StatusCode)
+		}
+	}
+	if resp, _ := e.do(t, "GET", "/api/conversations/"+a+"/messages", ""); resp.StatusCode != 404 {
+		t.Fatalf("messages of deleted: %d", resp.StatusCode)
+	}
+	if _, err := e.app.Store.GetConversation(ctx, b); err != nil {
+		t.Fatalf("b must survive: %v", err)
+	}
+
+	resp, body = e.do(t, "DELETE", "/api/conversations", "")
+	var del struct {
+		Deleted int `json:"deleted"`
+	}
+	json.Unmarshal(body, &del)
+	if resp.StatusCode != 200 || del.Deleted != 2 {
+		t.Fatalf("delete all: %d %s", resp.StatusCode, body)
+	}
+	if _, err := e.app.Store.GetConversation(ctx, c); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("c: %v", err)
+	}
+	_, body = e.do(t, "DELETE", "/api/conversations", "")
+	json.Unmarshal(body, &del)
+	if del.Deleted != 0 {
+		t.Fatalf("empty: %s", body)
+	}
+}
+
+func TestDeleteConversationCancelsRunningTurn(t *testing.T) {
+	started := make(chan struct{})
+	e := newEnv(t, convBlockProvider{started: started}, nil)
+	_, b := e.do(t, "POST", "/api/conversations", `{"title":"x"}`)
+	var c struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(b, &c)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		resp, err := http.Post(e.srv.URL+"/sse/chat", "application/json",
+			strings.NewReader(`{"conversation_id":"`+c.ID+`","message":"hi"}`))
+		if err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("turn never started")
+	}
+	if resp, body := e.do(t, "DELETE", "/api/conversations/"+c.ID, ""); resp.StatusCode != 204 {
+		t.Fatalf("delete: %d %s", resp.StatusCode, body)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("running turn was not cancelled")
+	}
+	if _, err := e.app.Store.GetConversation(context.Background(), c.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("conversation still exists: %v", err)
 	}
 }

@@ -224,6 +224,8 @@ func TestSectionMediaExtraFields(t *testing.T) {
 		`{"max_files":1.5}`:                            "max_files",
 		`{"sync_on_start":"yes"}`:                      "sync_on_start",
 		`{"sync_interval":"30s"}`:                      "sync_interval",
+		`{"tag_mode":"bogus"}`:                         "tag_mode",
+		`{"tag_mode":5}`:                               "tag_mode",
 	} {
 		if f := putFields(t, a, "media", js); f[key] == "" {
 			t.Errorf("%s: fields %v", js, f)
@@ -254,7 +256,14 @@ func TestSectionMediaExtraFields(t *testing.T) {
 	if !r.Media.SyncOnStart || r.Media.SyncInterval != 2*time.Hour || r.Media.MaxFiles != 5000 || !strings.Contains(r.Media.FilenamePattern, "(?P<title>") {
 		t.Fatalf("persisted %+v", r.Media)
 	}
+	put(t, a, "media", `{"tag_mode":"tags_first"}`)
+	if reload(t, dir).Media.TagMode != "tags_first" {
+		t.Fatal("tag_mode not persisted")
+	}
 	got, _ := a.GetSection(context.Background(), "media")
+	if got["tag_mode"] != "tags_first" {
+		t.Fatalf("tag_mode %v", got["tag_mode"])
+	}
 	if got["max_files"] != 5000 || got["sync_on_start"] != true {
 		t.Fatalf("%+v", got)
 	}

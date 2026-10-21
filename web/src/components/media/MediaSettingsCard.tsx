@@ -33,6 +33,7 @@ import {
   updateMediaSettings,
   validateFsPath,
   type MediaConfig,
+  type MediaTagMode,
   type ValidateFsPathResponse,
 } from '@/lib/api';
 
@@ -68,6 +69,7 @@ export function MediaSettingsCard({
   const [initialFolders, setInitialFolders] = useState<string[]>([]);
   const [initialExtensions, setInitialExtensions] = useState<string[]>([]);
   const [initialSyncInterval, setInitialSyncInterval] = useState<string>('6h');
+  const [initialTagMode, setInitialTagMode] = useState<MediaTagMode>('filename_first');
   const [initialFilenamePattern, setInitialFilenamePattern] = useState<string>(
     '(?:(?P<artist>.+?) - )?(?P<title>.+)\\.\\w+$'
   );
@@ -78,6 +80,7 @@ export function MediaSettingsCard({
   const [folders, setFolders] = useState<string[]>([]);
   const [extensions, setExtensions] = useState<string[]>([]);
   const [syncInterval, setSyncInterval] = useState<string>('6h');
+  const [tagMode, setTagMode] = useState<MediaTagMode>('filename_first');
   const [filenamePattern, setFilenamePattern] = useState<string>(
     '(?:(?P<artist>.+?) - )?(?P<title>.+)\\.\\w+$'
   );
@@ -153,10 +156,12 @@ export function MediaSettingsCard({
         mediaConfig.filename_pattern ?? '(?:(?P<artist>.+?) - )?(?P<title>.+)\\.\\w+$';
       const rawMaxFiles = mediaConfig.max_files ?? 100000;
       const rawSyncOnStart = mediaConfig.sync_on_start ?? true;
+      const rawTagMode = mediaConfig.tag_mode || 'filename_first';
 
       setInitialFolders(rawFolders);
       setInitialExtensions(rawExtensions);
       setInitialSyncInterval(rawInterval);
+      setInitialTagMode(rawTagMode);
       setInitialFilenamePattern(rawPattern);
       setInitialMaxFiles(rawMaxFiles);
       setInitialSyncOnStart(rawSyncOnStart);
@@ -164,6 +169,7 @@ export function MediaSettingsCard({
       setFolders(rawFolders);
       setExtensions(rawExtensions);
       setSyncInterval(rawInterval);
+      setTagMode(rawTagMode);
       setFilenamePattern(rawPattern);
       setMaxFiles(rawMaxFiles);
       setSyncOnStart(rawSyncOnStart);
@@ -186,6 +192,7 @@ export function MediaSettingsCard({
     extensions.some((e, idx) => e !== initialExtensions[idx]);
 
   const isIntervalChanged = syncInterval !== initialSyncInterval;
+  const isTagModeChanged = tagMode !== initialTagMode;
   const isPatternChanged = filenamePattern !== initialFilenamePattern;
   const isMaxFilesChanged = maxFiles !== initialMaxFiles;
   const isSyncOnStartChanged = syncOnStart !== initialSyncOnStart;
@@ -194,6 +201,7 @@ export function MediaSettingsCard({
     isFoldersChanged ||
     isExtensionsChanged ||
     isIntervalChanged ||
+    isTagModeChanged ||
     isPatternChanged ||
     isMaxFilesChanged ||
     isSyncOnStartChanged;
@@ -253,6 +261,7 @@ export function MediaSettingsCard({
         folders,
         extensions,
         sync_interval: syncInterval,
+        tag_mode: tagMode,
         filename_pattern: filenamePattern,
         max_files: maxFiles,
         sync_on_start: syncOnStart,
@@ -262,6 +271,7 @@ export function MediaSettingsCard({
       setInitialFolders([...folders]);
       setInitialExtensions([...extensions]);
       setInitialSyncInterval(syncInterval);
+      setInitialTagMode(tagMode);
       setInitialFilenamePattern(filenamePattern);
       setInitialMaxFiles(maxFiles);
       setInitialSyncOnStart(syncOnStart);
@@ -522,6 +532,33 @@ export function MediaSettingsCard({
                     {opt.label}
                   </option>
                 ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Section: 歌名/歌手来源 (tag_mode) */}
+          <div className="space-y-3 pt-2 border-t">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <FileAudio className="w-4 h-4 text-primary" />
+                <span className="text-xs font-semibold text-foreground">
+                  歌名/歌手来源
+                </span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                专辑、年份、封面始终读取文件标签，仅文件名模式除外
+              </p>
+            </div>
+
+            <div className="max-w-xs">
+              <select
+                value={tagMode}
+                onChange={(e) => setTagMode(e.target.value as any)}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <option value="filename_first">文件名优先</option>
+                <option value="tags_first">标签优先</option>
+                <option value="filename_only">仅文件名</option>
               </select>
             </div>
           </div>

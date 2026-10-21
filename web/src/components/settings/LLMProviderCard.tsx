@@ -41,7 +41,6 @@ import {
   getLLMModels,
   testLLM,
   updateLLMSettings,
-  mockProviders,
   type LLMProvider,
   type LLMSettings,
   type UpdateLLMRequest,
@@ -59,7 +58,7 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
   const { success, error: toastError } = useToast();
 
   // Provider presets
-  const [providers, setProviders] = useState<LLMProvider[]>(mockProviders);
+  const [providers, setProviders] = useState<LLMProvider[]>([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
 
   // Form State
@@ -107,7 +106,7 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
           setProviders(res.items);
         }
       } catch {
-        // Fallback to mock presets if network error
+        // ignore: keep empty preset list
       } finally {
         if (mounted) setLoadingProviders(false);
       }

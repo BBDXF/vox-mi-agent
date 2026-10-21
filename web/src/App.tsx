@@ -5,13 +5,12 @@ import { SettingsView } from '@/components/settings/SettingsView';
 import { MediaView } from '@/components/media/MediaView';
 import { LogsView } from '@/components/logs/LogsView';
 import { ToastProvider } from '@/components/ui/toast';
-import { getHealth, isMockMode } from '@/lib/api';
+import { getHealth } from '@/lib/api';
 import {
   MessageSquare,
   Settings as SettingsIcon,
   Music,
   ScrollText,
-  FlaskConical,
 } from 'lucide-react';
 
 export function App() {
@@ -47,10 +46,7 @@ export function App() {
         const res = await getHealth();
         setHealthOk(res.status === 'ok');
       } catch {
-        // If not mock mode and backend is down, healthOk = false
-        if (!isMockMode()) {
-          setHealthOk(false);
-        }
+        setHealthOk(false);
       }
     };
 
@@ -60,8 +56,6 @@ export function App() {
   }, []);
 
   const toggleTheme = () => setIsDark((prev) => !prev);
-
-  const mockActive = isMockMode();
 
   return (
     <ToastProvider>
@@ -79,22 +73,6 @@ export function App() {
 
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden relative">
-          {/* Mock Mode Alert Banner if active */}
-          {mockActive && (
-            <div className="bg-amber-500/10 border-b border-amber-500/20 px-3 py-1.5 flex items-center justify-between text-xs text-amber-600 dark:text-amber-400 shrink-0 select-none">
-              <div className="flex items-center gap-2">
-                <FlaskConical className="w-3.5 h-3.5" />
-                <span className="font-medium">当前运行于本地演示模式 (Mock Mode)</span>
-                <span className="hidden md:inline text-[11px] opacity-80">
-                  - 模拟 SSE 流式响应、本地曲库状态与工具执行，脱离后端亦可完整体验
-                </span>
-              </div>
-              <span className="font-mono text-[10px] bg-amber-500/20 px-1.5 py-0.5 rounded">
-                ?mock=1
-              </span>
-            </div>
-          )}
-
           {/* Active Tab View */}
           <div className="flex-1 h-full min-w-0 overflow-hidden">
             {currentTab === 'chat' && (

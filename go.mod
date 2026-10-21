@@ -3,6 +3,7 @@ module github.com/andy/vox-mi-agent
 go 1.27.2
 
 require (
+	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/go-chi/chi/v5 v5.5.0
 	golang.org/x/text v0.43.0
 	gopkg.in/yaml.v3 v3.0.1

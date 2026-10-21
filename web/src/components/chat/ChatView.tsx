@@ -10,6 +10,7 @@ import {
   MessageSquare,
   Menu,
   X,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -21,10 +22,9 @@ import {
   type ToolCall,
   getConversations,
   createConversation,
+  deleteConversation,
+  deleteAllConversations,
   getMessages,
-  addMockUserMessage,
-  appendMockAssistantMessage,
-  isMockMode,
 } from '@/lib/api';
 import { streamChat } from '@/lib/sse';
 import { useToast } from '@/components/ui/toast';
@@ -52,12 +52,13 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [toolResults, setToolResults] = useState<
-    Record<string, { result?: unknown; error?: string }>
+    Record<string, { result?: unknown; error?: string; durationMs?: number }>
   >({});
 
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const toolStartRef = useRef<Record<string, number>>({});
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -122,7 +123,7 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
         setMessages(res.items || []);
 
         // Prepopulate tool results from messages with role === 'tool'
-        const resultsMap: Record<string, { result?: unknown; error?: string }> = {};
+        const resultsMap: Record<string, { result?: unknown; error?: string; durationMs?: number }> = {};
         for (const msg of res.items || []) {
           if (msg.role === 'tool' && msg.tool_call_id) {
             resultsMap[msg.tool_call_id] = { result: msg.content };
@@ -176,6 +177,47 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
     }
   };
 
+  const startEmptyConversation = async () => {
+    setMessages([]);
+    setToolResults({});
+    try {
+      await handleNewChat();
+    } catch {
+      /* handled inside */
+    }
+  };
+
+  const handleDeleteOne = async (c: Conversation) => {
+    if (!window.confirm(`确定删除会话「${c.title || '无标题会话'}」吗？\n会话、消息及其追踪记录将一并删除。`)) return;
+    try {
+      if (c.id === activeConvId) abortControllerRef.current?.abort();
+      await deleteConversation(c.id);
+      setConversations((prev) => prev.filter((x) => x.id !== c.id));
+      if (c.id === activeConvId) {
+        setIsStreaming(false);
+        await startEmptyConversation();
+      }
+      toast({ type: 'success', title: '已删除会话', message: '会话及其追踪记录已移除' });
+    } catch (err: any) {
+      toastError(err.message || '删除会话失败');
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (!window.confirm('确定清空全部会话吗？\n所有会话、消息及其追踪记录将一并删除，且无法恢复。')) return;
+    try {
+      abortControllerRef.current?.abort();
+      const res = await deleteAllConversations();
+      setConversations([]);
+      setNextBefore(undefined);
+      setIsStreaming(false);
+      await startEmptyConversation();
+      toast({ type: 'success', title: `已清空 ${res.deleted} 个会话`, message: '所有会话及追踪记录已移除' });
+    } catch (err: any) {
+      toastError(err.message || '清空会话失败');
+    }
+  };
+
   // Stop generation
   const handleStop = () => {
     if (abortControllerRef.current) {
@@ -217,17 +259,11 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    // Local mock store sync
-    if (isMockMode() && currentConvId) {
-      addMockUserMessage(currentConvId, textToSend);
-    }
-
     try {
       await streamChat({
         conversationId: currentConvId || undefined,
         message: textToSend,
         signal: controller.signal,
-        mock: isMockMode(),
         callbacks: {
           onConversation: (data) => {
             if (!currentConvId || currentConvId !== data.id) {
@@ -255,6 +291,7 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
             );
           },
           onToolCall: (data) => {
+            toolStartRef.current[data.id] = Date.now();
             const newTc: ToolCall = {
               id: data.id,
               name: data.name,
@@ -275,6 +312,11 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
               [data.id]: {
                 result: data.result,
                 error: data.error,
+                durationMs:
+                  data.duration_ms ??
+                  (toolStartRef.current[data.id]
+                    ? Date.now() - toolStartRef.current[data.id]
+                    : undefined),
               },
             }));
           },
@@ -289,13 +331,6 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
                     }
                   : m
               );
-              // Save to mock storage if mock mode
-              if (isMockMode() && currentConvId) {
-                const finalAssistant = updated.find((m) => m.id === assistantMsgId);
-                if (finalAssistant) {
-                  appendMockAssistantMessage(currentConvId, finalAssistant);
-                }
-              }
               return updated;
             });
             setIsStreaming(false);
@@ -341,6 +376,10 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
       handleSend();
     }
   };
+
+  const calledIds = new Set<string>(
+    messages.flatMap((m) => (m.tool_calls || []).map((t) => t.id))
+  );
 
   const quickPrompts = [
     '播放周杰伦的晴天',
@@ -401,6 +440,20 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
           </Button>
         </div>
 
+        {conversations.length > 0 && (
+          <div className="px-3 py-1.5 border-b flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>共 {conversations.length}{nextBefore ? '+' : ''} 个会话</span>
+            <button
+              type="button"
+              onClick={handleClearAll}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:text-destructive hover:bg-destructive/10 transition-colors"
+            >
+              <Trash2 className="w-3 h-3" />
+              清空全部
+            </button>
+          </div>
+        )}
+
         {/* List items */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {conversations.length === 0 && !loadingList && (
@@ -412,14 +465,15 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
           {conversations.map((c) => {
             const isActive = c.id === activeConvId;
             return (
-              <button
+              <div
                 key={c.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => {
                   setActiveConvId(c.id);
                   setMobileSidebarOpen(false);
                 }}
-                className={`w-full text-left p-2.5 rounded-lg text-xs transition-all flex flex-col gap-1.5 ${
+                className={`group/item relative cursor-pointer w-full text-left p-2.5 rounded-lg text-xs transition-all flex flex-col gap-1.5 ${
                   isActive
                     ? 'bg-primary/10 text-primary font-medium border border-primary/20 shadow-xs'
                     : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'
@@ -451,7 +505,18 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
                   <span className="font-mono">{c.id.slice(0, 10)}</span>
                   <span>{formatRelativeTime(c.updated_at || c.created_at)}</span>
                 </div>
-              </button>
+                <button
+                  type="button"
+                  title="删除会话"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteOne(c);
+                  }}
+                  className="absolute right-1.5 top-1.5 p-1 rounded bg-card/90 border border-border text-muted-foreground opacity-0 group-hover/item:opacity-100 focus:opacity-100 hover:text-destructive hover:border-destructive/40 transition-opacity"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
             );
           })}
 
@@ -549,6 +614,7 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
               {messages.map((msg) => (
                 <MessageBubble
                   key={msg.id}
+                  orphanTool={msg.role === 'tool' && !calledIds.has(msg.tool_call_id || '')}
                   message={msg}
                   toolResultsMap={toolResults}
                   isStreaming={msg.streaming && isStreaming}
