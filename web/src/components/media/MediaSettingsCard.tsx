@@ -441,7 +441,7 @@ export function MediaSettingsCard({
                 </span>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                扫描时仅对符合以下后缀的音频文件提取 ID3 标签并构建模糊索引
+                扫描时仅对符合以下后缀的音频文件读取标签并构建模糊索引
               </p>
             </div>
 
@@ -546,8 +546,16 @@ export function MediaSettingsCard({
                 </span>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                专辑、年份、封面始终读取文件标签，仅文件名模式除外
+                专辑、年份、曲序、流派始终读取文件标签，仅文件名模式除外
               </p>
+              <ul className="text-[11px] text-muted-foreground list-disc pl-4 space-y-0.5">
+                <li>支持读取标签：MP3（ID3v1/v2）、FLAC、M4A/AAC（MP4 容器）、OGG</li>
+                <li>不读取标签：WAV、APE 及裸 AAC 流，这些文件只用文件名</li>
+                <li>只读取文件内已有的标签，不联网补全；文件内没有的字段就留空</li>
+                <li>老旧 MP3 的 ID3v1 标签若为 GBK 编码，中文可能乱码，此时建议用「文件名优先」</li>
+                <li>「文件名优先」：文件名同时解析出歌手和歌名才采用，否则改用标签</li>
+                <li>修改后会重新同步；标签读取结果有缓存，只重读有变化的文件</li>
+              </ul>
             </div>
 
             <div className="max-w-xs">
