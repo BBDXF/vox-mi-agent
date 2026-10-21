@@ -19,6 +19,10 @@ import (
 
 const maxQueryRunes = 200
 
+// ErrDeferred is returned by Player.Play when playback was queued to start
+// after the current spoken reply (speaker hook turns) instead of starting now.
+var ErrDeferred = errors.New("playback deferred until the reply has been spoken")
+
 // PlayRequest is what the speaker is asked to play.
 type PlayRequest struct {
 	URL     string // http(s) URL the speaker fetches
@@ -227,10 +231,16 @@ func (t *playAudio) Call(ctx context.Context, raw json.RawMessage) (any, error) 
 	if t.d.Player == nil {
 		return errResult("no speaker is configured"), nil
 	}
-	if err := t.d.Player.Play(ctx, req); err != nil {
+	status := "playing"
+	if err := t.d.Player.Play(ctx, req); errors.Is(err, ErrDeferred) {
+		status = "queued"
+	} else if err != nil {
 		return errResult("playback failed: %v", err), nil
 	}
-	res := map[string]any{"status": "playing", "url": req.URL, "title": req.Title}
+	res := map[string]any{"status": status, "url": req.URL, "title": req.Title}
+	if status == "queued" {
+		res["note"] = "will play after the reply has been spoken"
+	}
 	if req.TrackID != "" {
 		res["id"], res["track_id"], res["artist"] = req.TrackID, req.TrackID, req.Artist
 	}

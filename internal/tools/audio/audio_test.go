@@ -196,3 +196,19 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("%v", p)
 	}
 }
+
+type deferPlayer struct{ LogPlayer }
+
+func (*deferPlayer) Play(context.Context, PlayRequest) error { return ErrDeferred }
+
+func TestPlayAudioDeferredReportsQueued(t *testing.T) {
+	tl := NewPlayAudio(Deps{Player: &deferPlayer{}})
+	res, err := tl.Call(context.Background(), json.RawMessage(`{"url":"http://h/a.mp3"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := res.(map[string]any)
+	if m["status"] != "queued" || m["note"] == nil || m["error"] != nil {
+		t.Fatalf("%v", m)
+	}
+}

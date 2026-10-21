@@ -62,7 +62,18 @@ search:
   candidates: 500
 
 speaker:
-  driver: mock
+  driver: mock                        # mock | log | xiaomi
+  volume_default: 30                  # default for the volume test action; 0 = unset (never applied automatically)
+  xiaomi:
+    devices: []                       # {device_id, name, hardware, enabled, play_mode: auto|url|music, tts_mode: auto|mina|miot, miot_tts: "5-1"}
+  hook:
+    mode: keyword                     # keyword | all | off
+    keywords: ["请", "你", "问问"]
+    poll_interval: 1s                 # 500ms - 5s
+    interrupt_window: 3s
+  mock:
+    latency_ms: 0
+    fail_rate: 0
 
 logging:
   level: info                         # debug | info | warn | error

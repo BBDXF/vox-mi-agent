@@ -525,7 +525,7 @@ func TestSectionSpeakerLoggingServer(t *testing.T) {
 	if a.Config().Speaker.Driver != "log" || reload(t, dir).Speaker.Driver != "log" {
 		t.Fatal("speaker driver")
 	}
-	if f := putFields(t, a, "speaker", `{"driver":"xiaomi"}`); f["driver"] == "" {
+	if f := putFields(t, a, "speaker", `{"driver":"bogus"}`); f["driver"] == "" {
 		t.Fatalf("%v", f)
 	}
 	// logging: level is live

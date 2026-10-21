@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -196,6 +197,43 @@ type Speaker struct {
 	PublicBaseURL string `yaml:"public_base_url" json:"public_base_url"`
 	// URLTTL is the lifetime of a signed media URL.
 	URLTTL time.Duration `yaml:"url_ttl" json:"url_ttl"`
+	// VolumeDefault is the volume used by the speaker "volume" test action when
+	// none is given (default 30; 0 = unset). It is never applied automatically.
+	VolumeDefault int           `yaml:"volume_default" json:"volume_default"`
+	Xiaomi        SpeakerXiaomi `yaml:"xiaomi" json:"xiaomi"`
+	Hook          SpeakerHook   `yaml:"hook" json:"hook"`
+	Mock          SpeakerMock   `yaml:"mock" json:"mock"`
+}
+
+// SpeakerXiaomi holds the Xiaomi driver settings (the account itself lives in
+// <data>/mi_token.json, never in the config).
+type SpeakerXiaomi struct {
+	Devices []SpeakerDevice `yaml:"devices" json:"devices"`
+}
+
+// SpeakerDevice is one configured speaker (also used by the mock driver).
+type SpeakerDevice struct {
+	DeviceID string `yaml:"device_id" json:"device_id"`
+	Name     string `yaml:"name" json:"name"`
+	Hardware string `yaml:"hardware" json:"hardware"`
+	Enabled  bool   `yaml:"enabled" json:"enabled"`
+	PlayMode string `yaml:"play_mode" json:"play_mode"` // auto|url|music
+	TTSMode  string `yaml:"tts_mode" json:"tts_mode"`   // auto|mina|miot
+	MiotTTS  string `yaml:"miot_tts" json:"miot_tts"`   // "siid-aiid", empty = by model
+}
+
+// SpeakerHook configures the conversation hook (PROJECT_DESIGN.md §6.7.3).
+type SpeakerHook struct {
+	Mode            string        `yaml:"mode" json:"mode"` // keyword|all|off
+	Keywords        []string      `yaml:"keywords" json:"keywords"`
+	PollInterval    time.Duration `yaml:"poll_interval" json:"poll_interval"`
+	InterruptWindow time.Duration `yaml:"interrupt_window" json:"interrupt_window"`
+}
+
+// SpeakerMock configures fault injection of the mock driver.
+type SpeakerMock struct {
+	LatencyMS int     `yaml:"latency_ms" json:"latency_ms"`
+	FailRate  float64 `yaml:"fail_rate" json:"fail_rate"`
 }
 
 // Defaults returns the built-in defaults (before file/env). Tool paths are
@@ -241,7 +279,9 @@ func Defaults() *Config {
 			Limit:      5,
 			Candidates: 500,
 		},
-		Speaker: Speaker{Driver: "mock", URLTTL: time.Hour},
+		Speaker: Speaker{Driver: "mock", URLTTL: time.Hour, VolumeDefault: 30,
+			Hook: SpeakerHook{Mode: "keyword", Keywords: []string{"请", "你", "问问"},
+				PollInterval: time.Second, InterruptWindow: 3 * time.Second}},
 		Logging: Logging{
 			Level:                "info",
 			TraceRetentionDays:   30,
@@ -390,6 +430,9 @@ func (c *Config) Validate() error {
 	if c.Speaker.URLTTL <= 0 {
 		return errors.New("config: speaker.url_ttl must be > 0")
 	}
+	if err := c.Speaker.validate(); err != nil {
+		return err
+	}
 	switch c.Tools.Shell.ExposeTo {
 	case "admin_console", "all":
 	default:
@@ -480,6 +523,8 @@ func (c *Config) Clone() *Config {
 	cp.Media.Folders = append([]string(nil), c.Media.Folders...)
 	cp.Media.Extensions = append([]string(nil), c.Media.Extensions...)
 	cp.Search.StripPatterns = append([]string(nil), c.Search.StripPatterns...)
+	cp.Speaker.Xiaomi.Devices = append([]SpeakerDevice(nil), c.Speaker.Xiaomi.Devices...)
+	cp.Speaker.Hook.Keywords = append([]string(nil), c.Speaker.Hook.Keywords...)
 	cp.Sources = make([]Source, len(c.Sources))
 	for i, s := range c.Sources {
 		s.Keys = append([]string(nil), s.Keys...)
@@ -534,4 +579,58 @@ func maskSecret(s string) string {
 		return strings.Repeat("*", len(r))
 	}
 	return "****" + string(r[len(r)-4:])
+}
+
+var miotTTSRe = regexp.MustCompile(`^[0-9]{1,3}-[0-9]{1,3}$`)
+
+func (s Speaker) validate() error {
+	switch s.Driver {
+	case "mock", "log", "xiaomi":
+	default:
+		return fmt.Errorf("config: speaker.driver must be mock|log|xiaomi, got %q", s.Driver)
+	}
+	if s.VolumeDefault < 0 || s.VolumeDefault > 100 {
+		return errors.New("config: speaker.volume_default must be 0-100")
+	}
+	switch s.Hook.Mode {
+	case "keyword", "all", "off":
+	default:
+		return fmt.Errorf("config: speaker.hook.mode must be keyword|all|off, got %q", s.Hook.Mode)
+	}
+	if s.Hook.PollInterval < 500*time.Millisecond || s.Hook.PollInterval > 5*time.Second {
+		return errors.New("config: speaker.hook.poll_interval must be between 500ms and 5s")
+	}
+	if s.Hook.InterruptWindow < 0 || s.Hook.InterruptWindow > 30*time.Second {
+		return errors.New("config: speaker.hook.interrupt_window must be between 0 and 30s")
+	}
+	if s.Mock.LatencyMS < 0 || s.Mock.LatencyMS > 60000 {
+		return errors.New("config: speaker.mock.latency_ms must be 0-60000")
+	}
+	if s.Mock.FailRate < 0 || s.Mock.FailRate > 1 {
+		return errors.New("config: speaker.mock.fail_rate must be 0-1")
+	}
+	seen := map[string]bool{}
+	for i, d := range s.Xiaomi.Devices {
+		if strings.TrimSpace(d.DeviceID) == "" {
+			return fmt.Errorf("config: speaker.xiaomi.devices[%d]: device_id is required", i)
+		}
+		if seen[d.DeviceID] {
+			return fmt.Errorf("config: speaker.xiaomi.devices: duplicate device_id %q", d.DeviceID)
+		}
+		seen[d.DeviceID] = true
+		switch d.PlayMode {
+		case "", "auto", "url", "music":
+		default:
+			return fmt.Errorf("config: speaker.xiaomi.devices[%d].play_mode must be auto|url|music", i)
+		}
+		switch d.TTSMode {
+		case "", "auto", "mina", "miot":
+		default:
+			return fmt.Errorf("config: speaker.xiaomi.devices[%d].tts_mode must be auto|mina|miot", i)
+		}
+		if d.MiotTTS != "" && !miotTTSRe.MatchString(d.MiotTTS) {
+			return fmt.Errorf("config: speaker.xiaomi.devices[%d].miot_tts must look like 5-1", i)
+		}
+	}
+	return nil
 }

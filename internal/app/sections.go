@@ -660,31 +660,139 @@ func toolsSection() *section {
 // ---------------------------------------------------------------- speaker
 
 func speakerSection() *section {
+	itemFields := []Field{
+		{Key: "device_id", Type: TString, Default: "", Description: "设备 ID（可通过「发现设备」获得）"},
+		{Key: "name", Type: TString, Default: "", Description: "显示名称（也是该设备对话的标题）"},
+		{Key: "hardware", Type: TString, Default: "", Description: "型号，如 LX06、L05B；留空则从设备列表自动获取"},
+		{Key: "enabled", Type: TBool, Default: true, Description: "启用（播放目标 / 监听对话）"},
+		{Key: "play_mode", Type: TEnum, Default: "auto", Enum: []string{"auto", "url", "music"}, Description: "播放方式：auto 按型号选择 player_play_url / player_play_music"},
+		{Key: "tts_mode", Type: TEnum, Default: "auto", Enum: []string{"auto", "mina", "miot"}, Description: "TTS 方式：auto = mina（有已知 MIoT 参数时失败回退 miot）"},
+		{Key: "miot_tts", Type: TString, Default: "", Description: "MIoT TTS 的 siid-aiid（如 5-1），留空按型号"},
+	}
+	devices := &fieldDef{
+		Field: Field{Key: "xiaomi.devices", Type: TObjects, Default: []any{}, Description: "音箱设备列表（整体替换；mock 驱动在为空时使用内置的 2 台虚拟设备）", Items: itemFields},
+		get: func(c *config.Config) any {
+			out := make([]config.SpeakerDevice, len(c.Speaker.Xiaomi.Devices))
+			for i, d := range c.Speaker.Xiaomi.Devices {
+				if d.PlayMode == "" {
+					d.PlayMode = "auto"
+				}
+				if d.TTSMode == "" {
+					d.TTSMode = "auto"
+				}
+				out[i] = d
+			}
+			return out
+		},
+		set: func(c *config.Config, raw json.RawMessage) error {
+			var items []config.SpeakerDevice
+			if isNull(raw) || decodeStrict(raw, &items) != nil {
+				return fmt.Errorf("must be an array of {device_id, name, hardware, enabled, play_mode, tts_mode, miot_tts}")
+			}
+			c.Speaker.Xiaomi.Devices = items
+			return nil
+		},
+		node: func(c *config.Config) (*yamlNode, error) {
+			if len(c.Speaker.Xiaomi.Devices) == 0 {
+				return &yamlNode{Kind: yamlSeq, Tag: "!!seq", Style: yamlFlow}, nil
+			}
+			return yamlOf(c.Speaker.Xiaomi.Devices)
+		},
+	}
 	s := &section{
 		Name: "speaker", Title: "音箱",
-		Description: "播放输出驱动（xiaomi 小爱音箱驱动后续支持）。修改后立即生效。",
+		Description: "播放输出驱动（mock / log / xiaomi）、小米音箱设备与对话接管（hook）。修改后立即生效；小米账号登录走 /api/speaker/xiaomi/*。",
 		fields: []*fieldDef{
-			enumField("driver", "驱动：mock（静默记录）、log（记录并输出日志）", []string{"mock", "log"}, func(c *config.Config) *string { return &c.Speaker.Driver }),
+			enumField("driver", "驱动：mock（内存虚拟音箱，可在界面模拟提问）、log（仅输出日志）、xiaomi（小米小爱音箱）", []string{"mock", "log", "xiaomi"}, func(c *config.Config) *string { return &c.Speaker.Driver }),
 			strField("public_base_url", "音箱访问本服务的地址，如 http://192.168.1.10:8081（无结尾斜杠）；留空则自动取本机首个非回环 IPv4 + 服务端口（Docker 桥接模式下通常不可达，请显式设置）", func(c *config.Config) *string { return &c.Speaker.PublicBaseURL }),
 			durField("url_ttl", "签名媒体 URL 有效期（如 1h，最小 1m）", func(c *config.Config) *time.Duration { return &c.Speaker.URLTTL }),
+			intField("volume_default", "默认音量（0–100，默认 30）：仅在测试面板「音量」未指定数值时使用，不会自动应用到音箱；0 = 不设置（不改动音箱音量）", func(c *config.Config) *int { return &c.Speaker.VolumeDefault }),
+			devices,
+			enumField("hook.mode", "对话接管：keyword（以唤醒前缀开头才接管）、all（接管全部提问）、off（只播报不监听）", []string{"keyword", "all", "off"}, func(c *config.Config) *string { return &c.Speaker.Hook.Mode }),
+			stringsField("hook.keywords", "keyword 模式的唤醒前缀（接管后会从问题中去掉）", func(c *config.Config) *[]string { return &c.Speaker.Hook.Keywords }),
+			durField("hook.poll_interval", "轮询小爱对话的间隔（500ms–5s）", func(c *config.Config) *time.Duration { return &c.Speaker.Hook.PollInterval }),
+			durField("hook.interrupt_window", "接管后打断小爱原生回复的观察窗口（0–30s）", func(c *config.Config) *time.Duration { return &c.Speaker.Hook.InterruptWindow }),
+			intField("mock.latency_ms", "mock 驱动：每次调用的人为延迟（毫秒，0–60000）", func(c *config.Config) *int { return &c.Speaker.Mock.LatencyMS }),
+			floatField("mock.fail_rate", "mock 驱动：随机失败概率（0–1）", func(c *config.Config) *float64 { return &c.Speaker.Mock.FailRate }),
 		},
 	}
 	s.validate = func(a *App, old, n *config.Config, provided, changed keySet, fe fieldErrs) {
+		sp := &n.Speaker
 		if provided["public_base_url"] {
-			if err := mediaurl.ValidateBase(n.Speaker.PublicBaseURL); err != nil {
+			if err := mediaurl.ValidateBase(sp.PublicBaseURL); err != nil {
 				fe["public_base_url"] = err.Error()
 			}
 		}
-		if provided["url_ttl"] && n.Speaker.URLTTL < time.Minute {
+		if provided["url_ttl"] && sp.URLTTL < time.Minute {
 			fe["url_ttl"] = "must be at least 1m"
+		}
+		if provided["volume_default"] && (sp.VolumeDefault < 0 || sp.VolumeDefault > 100) {
+			fe["volume_default"] = "must be between 0 and 100"
+		}
+		if provided["hook.poll_interval"] && (sp.Hook.PollInterval < 500*time.Millisecond || sp.Hook.PollInterval > 5*time.Second) {
+			fe["hook.poll_interval"] = "must be between 500ms and 5s"
+		}
+		if provided["hook.interrupt_window"] && (sp.Hook.InterruptWindow < 0 || sp.Hook.InterruptWindow > 30*time.Second) {
+			fe["hook.interrupt_window"] = "must be between 0 and 30s"
+		}
+		if provided["mock.latency_ms"] && (sp.Mock.LatencyMS < 0 || sp.Mock.LatencyMS > 60000) {
+			fe["mock.latency_ms"] = "must be between 0 and 60000"
+		}
+		if provided["mock.fail_rate"] && (sp.Mock.FailRate < 0 || sp.Mock.FailRate > 1) {
+			fe["mock.fail_rate"] = "must be between 0 and 1"
+		}
+		if provided["hook.keywords"] {
+			var kws []string
+			for _, k := range sp.Hook.Keywords {
+				if k = strings.TrimSpace(k); k != "" {
+					kws = append(kws, k)
+				}
+			}
+			sp.Hook.Keywords = kws
+		}
+		if provided["xiaomi.devices"] {
+			if len(sp.Xiaomi.Devices) > 20 {
+				fe["xiaomi.devices"] = "at most 20 devices"
+				return
+			}
+			seen := map[string]bool{}
+			for i := range sp.Xiaomi.Devices {
+				d := &sp.Xiaomi.Devices[i]
+				pre := fmt.Sprintf("xiaomi.devices[%d].", i)
+				d.DeviceID, d.Name, d.Hardware, d.MiotTTS = strings.TrimSpace(d.DeviceID), strings.TrimSpace(d.Name), strings.TrimSpace(d.Hardware), strings.TrimSpace(d.MiotTTS)
+				switch {
+				case d.DeviceID == "":
+					fe[pre+"device_id"] = "required"
+				case seen[d.DeviceID]:
+					fe[pre+"device_id"] = "duplicate device_id"
+				}
+				seen[d.DeviceID] = true
+				if d.PlayMode == "" {
+					d.PlayMode = "auto"
+				}
+				if d.TTSMode == "" {
+					d.TTSMode = "auto"
+				}
+				if d.PlayMode != "auto" && d.PlayMode != "url" && d.PlayMode != "music" {
+					fe[pre+"play_mode"] = "must be auto, url or music"
+				}
+				if d.TTSMode != "auto" && d.TTSMode != "mina" && d.TTSMode != "miot" {
+					fe[pre+"tts_mode"] = "must be auto, mina or miot"
+				}
+				if d.MiotTTS != "" && !miotIIDRe.MatchString(d.MiotTTS) {
+					fe[pre+"miot_tts"] = "must look like 5-1"
+				}
+			}
 		}
 	}
 	s.apply = func(ctx context.Context, a *App, old, n *config.Config, changed keySet) (map[string]any, *bool, error) {
-		a.setDriver(n.Speaker.Driver)
+		a.applySpeaker(n)
 		return map[string]any{"driver": n.Speaker.Driver}, nil, nil
 	}
 	return s
 }
+
+var miotIIDRe = regexp.MustCompile(`^[0-9]{1,3}-[0-9]{1,3}$`)
 
 // ---------------------------------------------------------------- logging
 

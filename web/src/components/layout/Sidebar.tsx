@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-export type NavTab = 'chat' | 'settings' | 'media' | 'logs';
+export type NavTab = 'chat' | 'settings' | 'media' | 'logs' | 'speaker_simulator';
 
 interface SidebarProps {
   currentTab: NavTab;
@@ -68,8 +68,8 @@ export function Sidebar({
       id: 'speaker_simulator',
       label: '模拟音箱',
       icon: Radio,
-      badge: '即将推出',
-      disabled: true,
+      badge: undefined,
+      disabled: false,
     },
   ];
 

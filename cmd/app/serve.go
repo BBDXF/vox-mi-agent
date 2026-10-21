@@ -53,6 +53,7 @@ func cmdServe(ctx context.Context, args []string) error {
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	a.Scheduler.Start(sctx)
+	a.StartSpeaker()
 	srv := httpapi.New(a)
 	err = httpapi.Serve(ctx, ln, srv.Handler(), log)
 	cancel()

@@ -22,6 +22,8 @@ import (
 	"github.com/andy/vox-mi-agent/internal/logx"
 	"github.com/andy/vox-mi-agent/internal/media"
 	"github.com/andy/vox-mi-agent/internal/mediaurl"
+	"github.com/andy/vox-mi-agent/internal/speaker"
+	"github.com/andy/vox-mi-agent/internal/speaker/xiaomi"
 	"github.com/andy/vox-mi-agent/internal/store"
 	"github.com/andy/vox-mi-agent/internal/toolrunner"
 	"github.com/andy/vox-mi-agent/internal/tools"
@@ -37,7 +39,11 @@ type options struct {
 	provider llm.Provider
 	logger   *slog.Logger
 	level    *slog.LevelVar
+	xiaomi   func(*xiaomi.Options)
 }
+
+// WithXiaomiOptions lets tests override the Xiaomi base URLs / HTTP client.
+func WithXiaomiOptions(f func(*xiaomi.Options)) Option { return func(o *options) { o.xiaomi = f } }
 
 // WithLevelVar links the runtime log level to lv (the handler of the logger
 // passed via WithLogger must use the same LevelVar). Default: a private one.
@@ -60,7 +66,9 @@ type App struct {
 	Syncer    *media.Syncer
 	Index     *media.Index
 	Scheduler *media.Scheduler
-	Player    *audio.LogPlayer
+	Speaker   *speaker.Manager
+	Hook      *speaker.Hook
+	Mock      *speaker.Mock
 	Tools     *tools.Registry
 	Agent     *agent.Runtime
 	Provider  *SwapProvider
@@ -74,8 +82,11 @@ type App struct {
 
 	healthMu sync.RWMutex
 	sources  *data.SourceSet
-	player   *driverPlayer
-	loud     *loggingPlayer
+	logDrv   *speaker.Log
+	xmOpts   func(*xiaomi.Options)
+	xmMu     sync.Mutex
+	xm       *xiaomi.Driver
+	hookOn   bool
 
 	secret   []byte
 	baseOnce sync.Once
@@ -151,10 +162,11 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 	if a.secret, err = mediaurl.LoadSecret(c.DataDir); err != nil {
 		return nil, fmt.Errorf("app: server secret: %w", err)
 	}
-	a.Player = &audio.LogPlayer{}
-	a.loud = &loggingPlayer{LogPlayer: a.Player, log: a.Log}
-	a.player = &driverPlayer{}
-	a.setDriver(c.Speaker.Driver)
+	a.xmOpts = o.xiaomi
+	a.Mock = speaker.NewMock()
+	a.logDrv = speaker.NewLog(a.Log)
+	a.Speaker = speaker.NewManager(a.Log)
+	a.applySpeaker(a.cfg)
 	reg := tools.NewRegistry()
 	for _, t := range data.All(data.Deps{Runner: a.Runner, Live: a.sources, ToolsDir: c.Tools.Dir,
 		BinPath: func(name string) string {
@@ -165,7 +177,7 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 		reg.Register(t)
 	}
 	for _, t := range audio.All(audio.Deps{
-		Searcher: a.Index, Library: a.Library, Player: a.player, URLFor: a.TrackURL,
+		Searcher: a.Index, Library: a.Library, Player: a.Speaker, URLFor: a.TrackURL,
 		Limit: c.Search.Limit, MinScore: int(c.Search.MinScore),
 		Params: func() (limit, minScore int) {
 			a.withConfig(func(c *config.Config) { limit, minScore = c.Search.Limit, int(c.Search.MinScore) })
@@ -188,6 +200,7 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 	a.Agent = agent.New(agent.Options{
 		Provider: a.Provider, Tools: reg, Store: st, Logger: a.Log, Tracer: a.Tracer,
 	})
+	a.Hook = speaker.NewHook(speaker.HookDeps{Mgr: a.Speaker, Agent: a.Agent, Store: st, Tracer: a.Tracer, Log: a.Log})
 	ok = true
 	return a, nil
 }
@@ -226,6 +239,9 @@ func normalize(cfg *config.Config) (*config.Config, error) {
 
 // Close flushes the trace writers and releases resources.
 func (a *App) Close() error {
+	if a.Hook != nil {
+		a.Hook.Stop()
+	}
 	if a.Tracer != nil {
 		a.Tracer.Close()
 	}
@@ -247,32 +263,6 @@ func (a *App) setHealth(h ToolStatuses) {
 	a.healthMu.Lock()
 	a.Health = h
 	a.healthMu.Unlock()
-}
-
-// driverPlayer routes to the player selected by speaker.driver.
-type driverPlayer struct {
-	mu sync.RWMutex
-	p  audio.Player
-}
-
-func (d *driverPlayer) cur() audio.Player { d.mu.RLock(); defer d.mu.RUnlock(); return d.p }
-func (d *driverPlayer) Play(ctx context.Context, r audio.PlayRequest) error {
-	return d.cur().Play(ctx, r)
-}
-func (d *driverPlayer) SetVolume(ctx context.Context, v int) error {
-	return d.cur().SetVolume(ctx, v)
-}
-
-// setDriver selects the speaker driver: "log" logs every call, anything else
-// (mock) only records it.
-func (a *App) setDriver(driver string) {
-	var p audio.Player = a.Player
-	if driver == "log" {
-		p = a.loud
-	}
-	a.player.mu.Lock()
-	a.player.p = p
-	a.player.mu.Unlock()
 }
 
 // LLMConfig returns the current LLM settings (including the secret: never
@@ -425,22 +415,6 @@ func (a *App) updateLLMLocked(u LLMUpdate) ([]string, error) {
 	a.auditSettings("llm", changed)
 	a.Log.Info("llm reconfigured", "provider", nl.Provider, "base_url", nl.BaseURL, "model", nl.Model, "temperature", nl.Temperature)
 	return changed, nil
-}
-
-// loggingPlayer logs and records play/volume calls until a real speaker exists.
-type loggingPlayer struct {
-	*audio.LogPlayer
-	log *slog.Logger
-}
-
-func (p *loggingPlayer) Play(ctx context.Context, r audio.PlayRequest) error {
-	p.log.Info("speaker(log): play", "url", r.URL, "track_id", r.TrackID, "title", r.Title, "artist", r.Artist)
-	return p.LogPlayer.Play(ctx, r)
-}
-
-func (p *loggingPlayer) SetVolume(ctx context.Context, v int) error {
-	p.log.Info("speaker(log): set volume", "volume", v)
-	return p.LogPlayer.SetVolume(ctx, v)
 }
 
 // Secret returns the server secret used to sign media URLs.

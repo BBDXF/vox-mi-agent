@@ -20,6 +20,7 @@ import {
 } from '@/lib/api';
 import { LLMProviderCard } from './LLMProviderCard';
 import { SourcesTableEditor } from './SourcesTableEditor';
+import { SpeakerSettings } from './speaker/SpeakerSettings';
 import { GenericSectionForm } from './GenericSectionForm';
 
 // Mapping section keys to display names and icons (曲库 and 别名 are now on the dedicated 曲库 page)
@@ -155,7 +156,9 @@ export function SettingsView() {
           {activeSection === 'sources' && <SourcesTableEditor />}
 
           {/* Generic Schema-Driven Section Form for search, tools, speaker, server, logging */}
-          {activeSection !== 'llm' && activeSection !== 'sources' && (
+          {activeSection === 'speaker' && <SpeakerSettings />}
+
+          {activeSection !== 'llm' && activeSection !== 'sources' && activeSection !== 'speaker' && (
             <GenericSectionForm
               key={activeSection}
               section={currentSection}
