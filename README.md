@@ -165,10 +165,13 @@ make up      # 构建本地镜像并用 compose 启动（读取 .env）
 | `certs/` | 本地专用代理 CA（仓库中为空文件） |
 | `docs/DESIGN.md` | 设计文档 |
 
+## 智能体、MCP 与扩展工具
+
+- **智能体设置**（设置 → 智能体）：系统提示词、工具轮数、温度、单轮超时、历史条数、空闲重置（音箱默认 30 分钟后换新上下文）、上下文预算（默认 16000 token，超出按整轮删除最早的对话）。
+- **MCP**（设置 → 工具）：支持 HTTP / SSE / 本地命令三种方式，工具自动注册给 Agent。内置「常用 MCP」模板一键添加：time、fetch、duckduckgo、memory、filesystem、高德地图、Home Assistant。
+- **运行环境**：本地命令类 MCP 需要的 bun / node / uv 可在「工具」页一键安装到 `/data/runtime`（需联网），`npx` / `bunx` / `uvx` 随即可用。
+- **run_shell**：bash 工具，默认关闭，在「内置工具」中开启后 Agent 可在 `/data/workspace` 执行命令（无沙箱）。
+
 ## 许可证
 
 [MIT](LICENSE) © BBDXF
-
-## Optional runtimes & run_shell
-
-bun / node / uv can be installed on demand into `/data/runtime/` via `GET/POST/DELETE /api/runtimes[/{name}[/install]]`. The `run_shell` tool (bash, no sandbox) is disabled by default; remove it from `agent.tools_disabled` to enable. See docs/DESIGN.md §6.10.
