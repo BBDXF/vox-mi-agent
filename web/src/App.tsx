@@ -8,6 +8,7 @@ import { GuideView } from '@/components/guide/GuideView';
 import { LogsView } from '@/components/logs/LogsView';
 import { ToastProvider } from '@/components/ui/toast';
 import { getHealth } from '@/lib/api';
+import { useHashRoute, type Tab } from '@/lib/useHashRoute';
 import {
   MessageSquare,
   Settings as SettingsIcon,
@@ -17,9 +18,9 @@ import {
 } from 'lucide-react';
 
 export function App() {
-  const [currentTab, setCurrentTab] = useState<NavTab>('chat');
-  const [targetConversationId, setTargetConversationId] = useState<string | undefined>();
-  const [settingsSection, setSettingsSection] = useState<string>('llm');
+  const { route, navigate } = useHashRoute();
+  const currentTab: NavTab = route.tab;
+  const setCurrentTab = (t: Tab) => navigate(t);
   const [isDark, setIsDark] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     const saved = localStorage.getItem('vox_theme');
@@ -69,6 +70,7 @@ export function App() {
           <Sidebar
             currentTab={currentTab}
             onSelectTab={setCurrentTab}
+            onOpenAbout={() => navigate('settings', 'about')}
             isDark={isDark}
             onToggleTheme={toggleTheme}
             healthOk={healthOk}
@@ -80,23 +82,21 @@ export function App() {
           {/* Active Tab View */}
           <div className="flex-1 h-full min-w-0 overflow-hidden">
             {currentTab === 'chat' && (
-              <ChatView targetConversationId={targetConversationId} onOpenGuide={() => setCurrentTab('guide')} />
+              <ChatView routeKey={route.param} onSelectKey={(k) => navigate('chat', k)} onOpenGuide={() => setCurrentTab('guide')} />
             )}
             {currentTab === 'guide' && (
               <GuideView
                 onGo={(tab, section) => {
-                  if (section) setSettingsSection(section);
-                  setCurrentTab(tab);
+                  navigate(tab, tab === 'settings' ? section : undefined);
                 }}
               />
             )}
-            {currentTab === 'settings' && <SettingsView key={settingsSection} initialSection={settingsSection} />}
+            {currentTab === 'settings' && <SettingsView section={route.param || 'llm'} onSectionChange={(sec) => navigate('settings', sec)} />}
             {currentTab === 'media' && <MediaView />}
             {currentTab === 'logs' && (
               <LogsView
                 onNavigateToConversation={(convId) => {
-                  setTargetConversationId(convId);
-                  setCurrentTab('chat');
+                  navigate('chat', 'conv:' + convId);
                 }}
               />
             )}

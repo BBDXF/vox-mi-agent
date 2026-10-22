@@ -16,14 +16,15 @@ import { useToast } from '@/components/ui/toast';
 import { formatRelativeTime } from '@/lib/utils';
 
 export interface ChatViewProps {
-  targetConversationId?: string;
+  routeKey?: string;
+  onSelectKey?: (key: string) => void;
   onOpenGuide?: () => void;
 }
 
 const DEBUG_ID = 'debug';
 const EXAMPLES = ['小爱同学，播放一首周杰伦的晴天', '播放海阔天空', '来点陈奕迅的歌', '我想听七里香', '今天天气怎么样', '问问 我的曲库有多少首歌'];
 
-export function ChatView({ targetConversationId, onOpenGuide }: ChatViewProps = {}) {
+export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps = {}) {
   const { toast, error: toastError } = useToast();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -73,12 +74,12 @@ export function ChatView({ targetConversationId, onOpenGuide }: ChatViewProps = 
   const editable = activeDevice?.device_id === DEBUG_ID;
   const activeTitle = activeDevice ? (activeDevice.device_id === DEBUG_ID ? '调试音箱' : activeDevice.name) : conversations.find((c) => c.id === activeConvId)?.title || '历史会话';
 
-  // external navigation (from logs page)
+  // sync selection from the URL (back/forward, logs jump)
   useEffect(() => {
-    if (!targetConversationId) return;
-    setSelected('conv:' + targetConversationId);
-    setLegacyOpen(true);
-  }, [targetConversationId]);
+    if (!routeKey) return;
+    setSelected(routeKey);
+    if (routeKey.startsWith('conv:')) setLegacyOpen(true);
+  }, [routeKey]);
 
   const reloadMessages = useCallback(async (id: string) => {
     try {
@@ -143,7 +144,7 @@ export function ChatView({ targetConversationId, onOpenGuide }: ChatViewProps = 
 
   const calledIds = new Set<string>(messages.flatMap((m) => (m.tool_calls || []).map((t) => t.id)));
   const showEmpty = messages.length === 0 && events.length === 0;
-  const pick = (key: string) => { setSelected(key); setMobileSidebarOpen(false); };
+  const pick = (key: string) => { setSelected(key); onSelectKey?.(key); setMobileSidebarOpen(false); };
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-background">

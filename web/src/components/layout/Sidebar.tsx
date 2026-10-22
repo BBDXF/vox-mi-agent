@@ -11,7 +11,6 @@ import {
 import { useEffect, useState } from 'react';
 import { accent, type Area } from '@/lib/accent';
 import { getVersion, type VersionInfo } from '@/lib/version';
-import { AboutDialog } from '@/components/about/AboutDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -21,6 +20,7 @@ export type NavTab = 'guide' | 'chat' | 'settings' | 'media' | 'logs';
 interface SidebarProps {
   currentTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
+  onOpenAbout: () => void;
   isDark: boolean;
   onToggleTheme: () => void;
   healthOk: boolean;
@@ -29,12 +29,12 @@ interface SidebarProps {
 export function Sidebar({
   currentTab,
   onSelectTab,
+  onOpenAbout,
   isDark,
   onToggleTheme,
   healthOk,
 }: SidebarProps) {
   const [ver, setVer] = useState<VersionInfo | null>(null);
-  const [aboutOpen, setAboutOpen] = useState(false);
   useEffect(() => { getVersion().then(setVer); }, []);
 
   const navItems: Array<{
@@ -165,13 +165,12 @@ export function Sidebar({
 
         <button
           type="button"
-          onClick={() => setAboutOpen(true)}
+          onClick={() => onOpenAbout}
           className="w-full text-left px-2 text-[10px] font-mono text-muted-foreground/70 hover:text-foreground truncate"
           title="关于"
         >
           {ver ? `v${ver.version}${ver.commit ? ` · ${ver.commit.slice(0, 7)}` : ''}` : ' '}
         </button>
-        {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
 
         {/* Theme Toggle */}
         <div className="flex items-center justify-between pt-1">
