@@ -1,10 +1,52 @@
 # vox-mi-agent
 
-自托管的 AI 语音助手：接管小爱音箱的点歌请求，播放 NAS 上的本地音乐；其他问题可交给大模型 Agent。Go 后端 + Web 界面，单个 Docker 容器部署。
+[![ci](https://github.com/BBDXF/vox-mi-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/BBDXF/vox-mi-agent/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/BBDXF/vox-mi-agent)](https://github.com/BBDXF/vox-mi-agent/releases)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-- 说「小爱同学，播放晴天」「来点陈奕迅的歌」→ 本地曲库搜索，约 1–2 秒开始播放
-- Web 界面：调试音箱（无需真机即可试）、曲库与别名、大模型与音箱设置、调用追踪
-- 首次打开 Web 界面后，按左侧「快速开始」一步步配置
+自托管的 AI 语音助手：接管小爱音箱的点歌请求，播放 NAS 上的本地音乐；其他问题交给大模型 Agent。Go 后端 + Web 控制台，单个 Docker 容器（约 80MB，amd64 / arm64）。
+
+## 为什么好用：fzq 模糊搜索 + LLM Agent 原生工具调用
+
+语音点歌的难点是**识别出来的文字不准**：同音字、错别字、简繁、半句歌名、只说歌手。本项目把这件事拆成两层：
+
+- **[fzq](https://github.com/BBDXF/fzq) 本地模糊搜索负责「找歌」**：针对中文语音场景做了拼音/同音、错别字、部分匹配和多歌手拆分。「周杰轮的七里香」「海阔天空」「Iselin」都能命中。单次搜索 20–40ms，569 首曲库同步不到 0.5 秒，内置 79 条点歌回归用例全部通过。
+- **LLM Agent 原生调用（OpenAI function calling）负责「理解和兜底」**：`search_audio`、`play_audio`、`query_json` 等都是标准工具，模型自己决定何时搜索、何时播放、何时追问。不写提示词模板解析，不锁定某家厂商，任何兼容 OpenAI 接口的模型都能用。
+- **快路径不经过大模型**：点歌请求搜到唯一高分结果时直接播放，从说完话到开口约 1 秒（主要是轮询小米对话记录的间隔）。「来点陈奕迅的歌」会随机播放该歌手的歌。只有歧义、搜不到或非点歌问题才交给 LLM。
+
+### 小模型就够，大部分场景费用为 0
+
+- 搜索的「智能」在 fzq 里，LLM 只需做简单的工具调用，所以 **Qwen3-8B 这类 8B 小模型就能稳定完成**点歌、追问、确认播放。
+- 推荐 [硅基流动](https://siliconflow.cn) 的 `Qwen/Qwen3-8B`（平台免费模型；内置预设已关闭思考模式以降低延迟）。也支持 DeepSeek、通义、OpenAI、OpenRouter、本地 Ollama 等。
+- 日常点歌绝大多数走快路径，根本不调用大模型。**只用来点歌时，大模型甚至可以不配置。**
+- 需要更复杂的能力（比如用 jq 统计曲库）时，可以随时换成更强的模型。
+
+## 快速体验
+
+不接音箱也能试：启动后打开 Web 控制台，在「对话」里对「调试音箱」说「播放晴天」，就能看到搜索 → 播报 → 播放的完整过程，并在浏览器里试听。
+
+### docker run
+
+```sh
+docker run -d --name vox-mi-agent --restart unless-stopped \
+  -p 8080:8080 \
+  -v /vol1/docker/vox/data:/data \
+  -v /vol1/音乐:/music:ro \
+  -e TZ=Asia/Shanghai \
+  -e VOX_LLM_PROVIDER=siliconflow \
+  -e VOX_LLM_MODEL=Qwen/Qwen3-8B \
+  -e VOX_LLM_API_KEY=sk-xxxx \
+  ghcr.io/bbdxf/vox-mi-agent:latest serve --listen tcp://0.0.0.0:8080 --data /data
+```
+
+打开 `http://<NAS IP>:8080`，左侧「快速开始」会一步步引导配置。
+
+### 镜像与二进制
+
+| 形式 | 地址 |
+|---|---|
+| Docker 镜像（amd64 / arm64） | `ghcr.io/bbdxf/vox-mi-agent:latest`、`ghcr.io/bbdxf/vox-mi-agent:<版本>`（如 `0.1.0`、`0.1`） |
+| 二进制 | [Releases](https://github.com/BBDXF/vox-mi-agent/releases) 中的 `app_<版本>_linux_{amd64,arm64}.tar.gz`（需自备 fzq/jq/yq，推荐用镜像） |
 
 ## Docker 部署
 
@@ -29,7 +71,7 @@ cp .env.example .env
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
-| `VOX_IMAGE` | | 镜像，正式版 `ghcr.io/bbdxf/vox-mi-agent:<版本>` |
+| `VOX_IMAGE` / `VOX_VERSION` | | 用仓库 compose 时设镜像；用上面的 compose 时设版本，默认 `latest` |
 | `VOX_PORT` | ✅ | 宿主机端口，默认 8080。Web 界面和音箱拉取音乐都用它 |
 | `VOX_DATA` | ✅ | 宿主机数据目录 |
 | `VOX_MUSIC` | ✅ | 宿主机音乐目录 |
@@ -42,12 +84,49 @@ cp .env.example .env
 
 ### 3. 启动
 
-```sh
-docker compose --env-file .env up -d
-curl http://localhost:8080/healthz
+不需要克隆仓库，新建一个目录放 `compose.yaml` 和 `.env` 即可：
+
+```yaml
+# compose.yaml
+services:
+  app:
+    image: ghcr.io/bbdxf/vox-mi-agent:${VOX_VERSION:-latest}
+    container_name: vox-mi-agent
+    restart: unless-stopped
+    user: "1000:1000"
+    ports:
+      - "${VOX_PORT:-8080}:8080"
+    environment:
+      TZ: Asia/Shanghai
+      VOX_PUBLIC_BASE_URL: ${VOX_PUBLIC_BASE_URL:-}
+      VOX_LLM_PROVIDER: ${VOX_LLM_PROVIDER:-siliconflow}
+      VOX_LLM_MODEL: ${VOX_LLM_MODEL:-Qwen/Qwen3-8B}
+      VOX_LLM_API_KEY: ${VOX_LLM_API_KEY:-}
+    command: ["serve", "--listen", "tcp://0.0.0.0:8080", "--data", "/data"]
+    volumes:
+      - ${VOX_DATA:-./data}:/data
+      - ${VOX_MUSIC:-./music}:/music:ro
 ```
 
+```sh
+docker compose --env-file .env up -d
+curl http://localhost:8080/healthz          # {"status":"ok",...}
+docker compose pull && docker compose up -d # 升级
+```
+
+（克隆了仓库的话，直接用仓库里的 `compose.yaml`，在 `.env` 里设 `VOX_IMAGE=ghcr.io/bbdxf/vox-mi-agent:latest`。）
+
 浏览器打开 `http://<NAS IP>:<VOX_PORT>`，按「快速开始」完成：大模型 → 曲库（添加 `/music`）→ 调试音箱试一句「播放晴天」→ 对外地址 → 小米账号登录 → 添加音箱并保存。
+
+### 怎么说
+
+| 说法 | 效果 |
+|---|---|
+| 小爱同学，播放一首周杰伦的晴天 | 直接播放（不经过大模型） |
+| 我想听海阔天空 / 来一首七里香 | 直接播放 |
+| 来点陈奕迅的歌 | 随机播放该歌手的一首 |
+| 放一首关于下雨的歌 | 搜不到或有歧义 → 交给 Agent 处理（搜索、追问或推荐） |
+| 今天天气怎么样 | 不接管，仍由小爱回答 |
 
 ### 网络说明
 
