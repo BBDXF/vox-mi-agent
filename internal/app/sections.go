@@ -37,6 +37,8 @@ func init() {
 		speakerSection(), loggingSection(), serverSection()}
 }
 
+func readOnly(f *fieldDef) *fieldDef { f.ReadOnly = true; return f }
+
 func withDefault(f *fieldDef, def any) *fieldDef { f.Default = def; return f }
 
 // ---------------------------------------------------------------- llm
@@ -485,7 +487,7 @@ func speakerSection() *section {
 		Description: "播放输出驱动（mock / log / xiaomi）、小米音箱设备与对话接管（hook）。修改后立即生效；小米账号登录走 /api/speaker/xiaomi/*。",
 		fields: []*fieldDef{
 			enumField("driver", "驱动：mock（模拟音箱，仅常驻的调试音箱，无真实设备）、xiaomi（小米音箱，真实设备 + 调试音箱）", []string{"mock", "xiaomi"}, func(c *config.Config) *string { return &c.Speaker.Driver }),
-			strField("public_base_url", "音箱访问本服务的地址，如 http://192.168.1.10:8081（无结尾斜杠）；留空则自动取本机首个非回环 IPv4 + 服务端口（Docker 桥接模式下通常不可达，请显式设置）", func(c *config.Config) *string { return &c.Speaker.PublicBaseURL }),
+			readOnly(strField("public_base_url", "（只读，通过环境变量 VOX_PUBLIC_BASE_URL 或配置文件设置）音箱访问本服务的地址，如 http://192.168.1.10:8081（无结尾斜杠）；留空则自动取本机首个非回环 IPv4 + 服务端口（Docker 桥接模式下通常不可达，请显式设置）", func(c *config.Config) *string { return &c.Speaker.PublicBaseURL })),
 			durField("url_ttl", "签名媒体 URL 有效期（如 1h，最小 1m）", func(c *config.Config) *time.Duration { return &c.Speaker.URLTTL }),
 			boolField("debug_device", "调试音箱：始终可用的虚拟设备 debug（与驱动无关；聊天页的输入都经它走完整的音箱流程）。关闭则隐藏", func(c *config.Config) *bool { return &c.Speaker.DebugDevice }),
 			intField("volume_default", "默认音量（0–100，默认 30）：仅在测试面板「音量」未指定数值时使用，不会自动应用到音箱；0 = 不设置（不改动音箱音量）", func(c *config.Config) *int { return &c.Speaker.VolumeDefault }),

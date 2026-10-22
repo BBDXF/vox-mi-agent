@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -539,4 +540,27 @@ func TestMediaRejectsNestedFolders(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "nested") {
 		t.Fatalf("want nested error, got %v", err)
 	}
+}
+
+func TestEnvLockedAndReadOnlyFields(t *testing.T) {
+	a, _ := newTestApp(t, func(c *config.Config) {
+		c.EnvLocked = map[string]string{"llm.model": "VOX_LLM_MODEL"}
+	})
+	got, err := a.GetSection(context.Background(), "llm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := got["env_locked"].(map[string]string); l["model"] != "VOX_LLM_MODEL" {
+		t.Fatalf("env_locked: %v", got["env_locked"])
+	}
+	cur := a.Config().LLM.Model
+	if f := putFields(t, a, "llm", `{"model":"other"}`); f["model"] != "由环境变量 VOX_LLM_MODEL 管理" {
+		t.Fatalf("%v", f)
+	}
+	put(t, a, "llm", `{"model":`+strconv.Quote(cur)+`,"timeout":"31s"}`) // unchanged ok
+	// public_base_url is always read-only
+	if f := putFields(t, a, "speaker", `{"public_base_url":"http://1.2.3.4:80"}`); f["public_base_url"] == "" {
+		t.Fatalf("%v", f)
+	}
+	put(t, a, "speaker", `{"public_base_url":""}`)
 }

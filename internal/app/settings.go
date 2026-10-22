@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -220,10 +221,63 @@ func (a *App) GetSection(ctx context.Context, name string) (map[string]any, erro
 	if err != nil {
 		return nil, err
 	}
+	var out map[string]any
 	if s.getFn != nil {
-		return s.getFn(ctx, a)
+		if out, err = s.getFn(ctx, a); err != nil {
+			return nil, err
+		}
+	} else {
+		out = s.values(a.Config())
 	}
-	return s.values(a.Config()), nil
+	if locked := s.envLocked(a.Config()); len(locked) > 0 && out != nil {
+		out["env_locked"] = locked
+	}
+	return out, nil
+}
+
+// envLocked lists the section's fields overridden by environment variables.
+func (s *section) envLocked(c *config.Config) map[string]string {
+	out := map[string]string{}
+	for _, f := range s.fields {
+		if env, ok := c.EnvLocked[strings.Join(f.path(s.Name), ".")]; ok {
+			out[f.Key] = env
+		}
+	}
+	return out
+}
+
+// checkLocked rejects changes to env-managed or read-only fields; unchanged
+// values are accepted (forms resend the whole section).
+func (s *section) checkLocked(cur *config.Config, body map[string]json.RawMessage) error {
+	flat := map[string]json.RawMessage{}
+	s.flatten("", body, flat)
+	locked := s.envLocked(cur)
+	fe := fieldErrs{}
+	for k, raw := range flat {
+		f := s.field(k)
+		if f == nil || f.set == nil {
+			continue
+		}
+		msg := ""
+		if env, ok := locked[k]; ok {
+			msg = "由环境变量 " + env + " 管理"
+		} else if f.ReadOnly {
+			msg = "只读：请通过环境变量或配置文件设置"
+		} else {
+			continue
+		}
+		if f.Secret && string(bytes.TrimSpace(raw)) == `""` {
+			continue
+		}
+		n := cur.Clone()
+		if err := f.set(n, raw); err != nil || !reflect.DeepEqual(f.get(cur), f.get(n)) {
+			fe[k] = msg
+		}
+	}
+	if len(fe) > 0 {
+		return &ValidationError{Fields: fe}
+	}
+	return nil
 }
 
 // PutSection validates, persists and applies a (partial) update of one
@@ -240,6 +294,9 @@ func (a *App) PutSection(ctx context.Context, name string, body map[string]json.
 	}
 	a.updMu.Lock()
 	defer a.updMu.Unlock()
+	if err := s.checkLocked(a.Config(), body); err != nil {
+		return nil, err
+	}
 	if s.putFn != nil {
 		return s.putFn(ctx, a, body)
 	}

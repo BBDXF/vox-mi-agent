@@ -237,7 +237,7 @@ export function SpeakerSettings() {
   const save = async () => {
     setSaving(true); setErrs({});
     try {
-      const r = await updateSectionSettings('speaker', v);
+      const r = await updateSectionSettings('speaker', (({ env_locked, public_base_url, ...rest }: any) => rest)(v));
       setDirty(false);
       success((r as any)?.restart_required ? '已保存，部分设置需重启生效' : '音箱配置已保存');
       loadStatus();
@@ -273,8 +273,8 @@ export function SpeakerSettings() {
               <option value="mock">模拟音箱</option><option value="xiaomi">小米音箱</option>
             </select>
           </Field>
-          <Field label="对外地址" error={E('public_base_url')} help="音箱需要能访问到的 NAS 局域网地址，例如 http://192.168.1.10:8081；Docker 默认网络下自动探测的地址通常不可用">
-            <Input value={v.public_base_url ?? ''} onChange={(e) => set('public_base_url', e.target.value)} placeholder="http://192.168.1.10:8081" />
+          <Field label="对外地址" error={E('public_base_url')} help={(v.env_locked?.public_base_url ? `由环境变量 ${v.env_locked.public_base_url} 管理，` : '') + '通过环境变量 VOX_PUBLIC_BASE_URL 或配置文件设置（飞牛：应用设置）'}>
+            <Input value={v.public_base_url ?? ''} readOnly disabled placeholder="未设置（自动探测）" className="font-mono" />
           </Field>
           <Field label="链接有效期（如 1h，最小 1m）" error={E('url_ttl')}>
             <Input value={v.url_ttl ?? ''} placeholder="1h" onChange={(e) => set('url_ttl', e.target.value)} />

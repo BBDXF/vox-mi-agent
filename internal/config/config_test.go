@@ -330,3 +330,16 @@ func TestMCPConfigValidate(t *testing.T) {
 		t.Errorf("redaction: %+v", r.MCP.Servers[0].Headers)
 	}
 }
+
+func TestEnvLockedRecorded(t *testing.T) {
+	c, err := load(t.TempDir(), envMap(map[string]string{"VOX_LLM_MODEL": "m", "VOX_LISTEN": ""}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.EnvLocked["llm.model"] != "VOX_LLM_MODEL" || len(c.EnvLocked) != 1 {
+		t.Fatalf("%v", c.EnvLocked)
+	}
+	if c.Clone().EnvLocked["llm.model"] != "VOX_LLM_MODEL" {
+		t.Fatal("clone lost EnvLocked")
+	}
+}

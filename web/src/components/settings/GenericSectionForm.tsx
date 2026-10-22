@@ -66,6 +66,7 @@ export function GenericSectionForm({ section, onSaved }: GenericSectionFormProps
   const [isSaving, setIsSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [restartBanner, setRestartBanner] = useState(false);
+  const [envLocked, setEnvLocked] = useState<Record<string, string>>({});
 
   // Secret visibility map
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
@@ -82,6 +83,7 @@ export function GenericSectionForm({ section, onSaved }: GenericSectionFormProps
     try {
       const data = await getSectionSettings(section.name);
       if (!isMountedRef.current) return;
+      setEnvLocked((data && data.env_locked) || {});
       setInitialValues(data || {});
       setValues(data || {});
     } catch (err: any) {
@@ -162,6 +164,7 @@ export function GenericSectionForm({ section, onSaved }: GenericSectionFormProps
       // Prepare payload: omit empty secret inputs so existing secret is preserved
       const payload: Record<string, any> = {};
       for (const f of section.fields) {
+        if (envLocked[f.key] || f.read_only) continue;
         const currV = getDottedValue(values, f.key);
         if (f.secret) {
           if (currV && typeof currV === 'string' && currV.trim().length > 0 && !currV.startsWith('****')) {
@@ -452,7 +455,24 @@ export function GenericSectionForm({ section, onSaved }: GenericSectionFormProps
                 </p>
               )}
 
-              <div className="pt-1">{renderFieldInput(field)}</div>
+              <div className="pt-1">
+                {envLocked[field.key] || field.read_only ? (
+                  <fieldset disabled className="opacity-70 [&_*]:cursor-not-allowed">
+                    {renderFieldInput(field)}
+                  </fieldset>
+                ) : (
+                  renderFieldInput(field)
+                )}
+                {envLocked[field.key] ? (
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    由环境变量 {envLocked[field.key]} 管理，在部署配置中修改（飞牛：应用设置）
+                  </p>
+                ) : field.read_only ? (
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    通过环境变量或配置文件设置（飞牛：应用设置）
+                  </p>
+                ) : null}
+              </div>
 
               {/* Inline Field Error */}
               {err && (

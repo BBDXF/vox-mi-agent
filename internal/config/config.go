@@ -47,6 +47,9 @@ const (
 
 type Config struct {
 	DataDir string `yaml:"-" json:"data_dir"`
+	// EnvLocked maps yaml paths ("server.listen") to the non-empty env var
+	// that overrode them at load time; such fields are not web-editable.
+	EnvLocked map[string]string `yaml:"-" json:"-"`
 
 	Server  Server  `yaml:"server" json:"server"`
 	LLM     LLM     `yaml:"llm" json:"llm"`
@@ -436,6 +439,18 @@ func load(dataDir string, lookup func(string) (string, bool)) (*Config, error) {
 	return cfg, nil
 }
 
+// envPaths maps each env override to the config.yaml path it sets.
+var envPaths = map[string]string{
+	"VOX_LISTEN": "server.listen", "VOX_BASE_PATH": "server.base_path",
+	"VOX_REQUIRE_ADMIN": "server.auth.require_admin",
+	"VOX_LLM_PROVIDER":  "llm.provider", "VOX_LLM_BASE_URL": "llm.base_url",
+	"VOX_LLM_API_KEY": "llm.api_key", "VOX_LLM_MODEL": "llm.model", "VOX_LLM_TIMEOUT": "llm.timeout",
+	"VOX_LLM_TEMPERATURE": "agent.temperature", "VOX_AGENT_TURN_TIMEOUT": "agent.turn_timeout",
+	"VOX_TOOLS_DIR": "tools.dir", "VOX_FZQ_PATH": "tools.fzq_path",
+	"VOX_JQ_PATH": "tools.jq_path", "VOX_YQ_PATH": "tools.yq_path",
+	"VOX_SPEAKER_DRIVER": "speaker.driver", "VOX_PUBLIC_BASE_URL": "speaker.public_base_url",
+}
+
 func applyEnv(c *Config, lookup func(string) (string, bool)) error {
 	var errs []error
 	str := func(name string, dst *string) {
@@ -486,6 +501,12 @@ func applyEnv(c *Config, lookup func(string) (string, bool)) error {
 	str("VOX_YQ_PATH", &c.Tools.YqPath)
 	str("VOX_SPEAKER_DRIVER", &c.Speaker.Driver)
 	str("VOX_PUBLIC_BASE_URL", &c.Speaker.PublicBaseURL)
+	c.EnvLocked = map[string]string{}
+	for name, path := range envPaths {
+		if v, ok := lookup(name); ok && v != "" {
+			c.EnvLocked[path] = name
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -631,6 +652,10 @@ func (c *Config) DBPath() string { return filepath.Join(c.DataDir, "app.db") }
 // Clone returns a deep copy (slices, maps and nested structs are not shared).
 func (c *Config) Clone() *Config {
 	cp := *c
+	cp.EnvLocked = make(map[string]string, len(c.EnvLocked))
+	for k, v := range c.EnvLocked {
+		cp.EnvLocked[k] = v
+	}
 	cp.LLM.ExtraBody = cloneMap(c.LLM.ExtraBody)
 	cp.Media.Folders = append([]string(nil), c.Media.Folders...)
 	cp.Media.Extensions = append([]string(nil), c.Media.Extensions...)

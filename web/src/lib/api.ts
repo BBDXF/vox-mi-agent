@@ -216,6 +216,7 @@ export interface SchemaField {
   default: any;
   enum?: string[];
   secret?: boolean;
+  read_only?: boolean;
   restart_required?: boolean;
   description?: string;
 }

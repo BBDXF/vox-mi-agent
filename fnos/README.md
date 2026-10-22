@@ -10,7 +10,7 @@
 - `cmd/main`：start/stop/status（运行 0，未运行 3）
 - `cmd/*_init`、`*_callback`：生命周期钩子；`install_callback`/`config_callback` 经 `write_env.sh` 写 `.env`
 - `config/privilege`、`config/resource`：运行用户与 docker-project 声明
-- `wizard/*`：安装/配置/卸载/升级向导
+- `wizard/*`：安装/配置/卸载/升级向导。安装/配置向导的「NAS 局域网 IP」（`wizard_lan_ip`，可留空自动检测）与 `TRIM_SERVICE_PORT` 合成 `VOX_PUBLIC_BASE_URL`；该地址在 Web 中只读，修改请走应用设置
 
 ## 构建
 ```sh
@@ -26,7 +26,8 @@ appcenter-cli install-fpk vox-mi-agent.fpk
 或在应用中心「手动安装」上传。安装后通过飞牛桌面/远程访问 `/app/vox-mi-agent/`；局域网直连 `http://NAS-IP:18080/app/vox-mi-agent/`。在 Web 中配置 LLM 与小米账号。
 
 ## 真机待验证清单
-- [ ] 向导字段是否以 `wizard_*` 环境变量传给 cmd 脚本
+- [ ] 向导字段是否以 `wizard_*` 环境变量传给 cmd 脚本（`write_env.sh` 用到 `wizard_music_dir`、`wizard_lan_ip`，以及 `TRIM_APPDEST`、`TRIM_PKGVAR`、`TRIM_SERVICE_PORT`）
+- [ ] `write_env.sh` 能读到 `TRIM_SERVICE_PORT`（否则回退 18080），且自动检测的 NAS 局域网 IP 正确（`docker/.env` 中 `VOX_PUBLIC_BASE_URL=http://<IP>:<端口>`）；Web 设置页该项只读
 - [ ] compose 是否能读到 `docker/.env`（及 `TRIM_PKGVAR`/`TRIM_UID` 插值）
 - [ ] 音乐目录是否需通过数据共享授权才能挂载
 - [ ] `platform=all` 配合多架构镜像是否可行

@@ -75,7 +75,7 @@ cp .env.example .env
 | `VOX_PORT` | ✅ | 宿主机端口，默认 8080。Web 界面和音箱拉取音乐都用它 |
 | `VOX_DATA` | ✅ | 宿主机数据目录 |
 | `VOX_MUSIC` | ✅ | 宿主机音乐目录 |
-| `VOX_PUBLIC_BASE_URL` | 接音箱时 ✅ | 音箱访问本服务的地址：`http://<NAS局域网IP>:<VOX_PORT>`。也可在 Web「设置 → 音箱 → 对外地址」填写 |
+| `VOX_PUBLIC_BASE_URL` | 接音箱时 ✅ | 音箱访问本服务的地址：`http://<NAS局域网IP>:<VOX_PORT>`。Web 设置页只读显示，不可在线修改（改环境变量或 config.yaml 的 `speaker.public_base_url`） |
 | `VOX_LLM_PROVIDER` / `VOX_LLM_MODEL` / `VOX_LLM_API_KEY` | | 大模型；也可启动后在 Web 里配置。推荐硅基流动 `Qwen/Qwen3-8B` |
 
 > 环境变量非空时，每次启动都会覆盖 Web 里改过的同名设置；想完全在 Web 里管理就留空。
@@ -116,7 +116,7 @@ docker compose pull && docker compose up -d # 升级
 
 （克隆了仓库的话，直接用仓库里的 `compose.yaml`，在 `.env` 里设 `VOX_IMAGE=ghcr.io/bbdxf/vox-mi-agent:latest`。）
 
-浏览器打开 `http://<NAS IP>:<VOX_PORT>`，按「快速开始」完成：大模型 → 曲库（添加 `/music`）→ 调试音箱试一句「播放晴天」→ 对外地址 → 小米账号登录 → 添加音箱并保存。
+浏览器打开 `http://<NAS IP>:<VOX_PORT>`，按「快速开始」完成：大模型 → 曲库（添加 `/music`）→ 调试音箱试一句「播放晴天」→ 确认对外地址（只读，来自环境变量）→ 小米账号登录 → 添加音箱并保存。
 
 ### 怎么说
 

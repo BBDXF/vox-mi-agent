@@ -35,6 +35,7 @@ type Field struct {
 	Default         any      `json:"default"`
 	Enum            []string `json:"enum,omitempty"`
 	Secret          bool     `json:"secret,omitempty"`
+	ReadOnly        bool     `json:"read_only,omitempty"` // never editable via the API
 	RestartRequired bool     `json:"restart_required,omitempty"`
 	Description     string   `json:"description"`
 	// Items describes the elements of an object[] field.

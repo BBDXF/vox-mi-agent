@@ -48,7 +48,7 @@ export function GuideView({ onGo }: { onGo: (tab: NavTab, section?: string) => v
       { title: '试一下调试音箱', done: null, action: '去对话页', tab: 'chat',
         desc: '不需要真实音箱，在对话页对「调试音箱」说一句就能看到效果。', tip: '试试输入：播放晴天' },
       { title: '设置对外地址', done: urlOk, action: '去设置音箱', tab: 'settings', section: 'speaker',
-        desc: '小爱音箱通过这个地址拉取歌曲，需填 NAS 的局域网 IP 和端口，例如 http://192.168.1.10:8081。' },
+        desc: '小爱音箱通过这个地址拉取歌曲，需为 NAS 的局域网 IP 和端口（例如 http://192.168.1.10:8081），通过环境变量 VOX_PUBLIC_BASE_URL 或配置文件设置，此处只读显示（飞牛：应用设置）。' },
       { title: '登录小米账号', done: loggedIn, action: '去登录', tab: 'settings', section: 'speaker',
         desc: '在音箱设置中选择「小米音箱」驱动并登录。密码不会被保存；如需验证，按页面提示收验证码。' },
       { title: '添加并保存音箱', done: saved, action: '去添加音箱', tab: 'settings', section: 'speaker',
