@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/store"
+	"github.com/BBDXF/vox-mi-agent/internal/store"
 )
 
 // Sink stores trace rows (implemented by *store.Store).

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/mediaurl"
+	"github.com/BBDXF/vox-mi-agent/internal/mediaurl"
 )
 
 func TestServeAudio(t *testing.T) {

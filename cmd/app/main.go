@@ -5,7 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/andy/vox-mi-agent/internal/buildinfo"
+	"github.com/BBDXF/vox-mi-agent/internal/buildinfo"
 	"os"
 	"os/signal"
 	"syscall"

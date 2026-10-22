@@ -3,7 +3,7 @@ package buildinfo
 
 import "runtime"
 
-// Set at link time: -X github.com/andy/vox-mi-agent/internal/buildinfo.Version=...
+// Set at link time: -X github.com/BBDXF/vox-mi-agent/internal/buildinfo.Version=...
 var (
 	Version = "dev"
 	Commit  = "unknown"

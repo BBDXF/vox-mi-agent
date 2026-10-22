@@ -3,14 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/andy/vox-mi-agent/internal/buildinfo"
+	"github.com/BBDXF/vox-mi-agent/internal/buildinfo"
 	"log/slog"
 	"os"
 
-	"github.com/andy/vox-mi-agent/internal/app"
-	"github.com/andy/vox-mi-agent/internal/config"
-	"github.com/andy/vox-mi-agent/internal/httpapi"
-	"github.com/andy/vox-mi-agent/internal/logx"
+	"github.com/BBDXF/vox-mi-agent/internal/app"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/httpapi"
+	"github.com/BBDXF/vox-mi-agent/internal/logx"
 )
 
 func cmdServe(ctx context.Context, args []string) error {

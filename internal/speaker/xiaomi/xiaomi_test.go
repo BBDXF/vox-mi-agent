@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/speaker"
+	"github.com/BBDXF/vox-mi-agent/internal/speaker"
 )
 
 type reqLog struct {

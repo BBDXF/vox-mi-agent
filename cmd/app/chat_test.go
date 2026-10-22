@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/app"
-	"github.com/andy/vox-mi-agent/internal/config"
-	"github.com/andy/vox-mi-agent/internal/llm"
-	"github.com/andy/vox-mi-agent/internal/logx"
+	"github.com/BBDXF/vox-mi-agent/internal/app"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/llm"
+	"github.com/BBDXF/vox-mi-agent/internal/logx"
 )
 
 func TestRunChat(t *testing.T) {

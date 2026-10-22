@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/agent"
-	"github.com/andy/vox-mi-agent/internal/config"
-	"github.com/andy/vox-mi-agent/internal/store"
+	"github.com/BBDXF/vox-mi-agent/internal/agent"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/store"
 )
 
 // Recorder implements agent.Tracer on top of the async traces writer and the

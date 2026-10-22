@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/agent"
-	"github.com/andy/vox-mi-agent/internal/config"
-	"github.com/andy/vox-mi-agent/internal/llm"
-	"github.com/andy/vox-mi-agent/internal/store"
+	"github.com/BBDXF/vox-mi-agent/internal/agent"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/llm"
+	"github.com/BBDXF/vox-mi-agent/internal/store"
 )
 
 type countSink struct {

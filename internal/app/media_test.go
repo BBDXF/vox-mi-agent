@@ -12,8 +12,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/andy/vox-mi-agent/internal/config"
-	"github.com/andy/vox-mi-agent/internal/logx"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/logx"
 )
 
 func newTestApp(t *testing.T, mod func(*config.Config)) (*App, string) {

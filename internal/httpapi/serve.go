@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
 )
 
 const shutdownGrace = 5 * time.Second

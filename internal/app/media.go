@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/andy/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
 )
 
 // MediaUpdate is a runtime media-library reconfiguration. Folders replaces

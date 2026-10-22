@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/fzq"
-	"github.com/andy/vox-mi-agent/internal/toolrunner"
-	"github.com/andy/vox-mi-agent/internal/tools"
+	"github.com/BBDXF/vox-mi-agent/internal/fzq"
+	"github.com/BBDXF/vox-mi-agent/internal/toolrunner"
+	"github.com/BBDXF/vox-mi-agent/internal/tools"
 )
 
 func toolsDir(t *testing.T) string {

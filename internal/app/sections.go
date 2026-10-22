@@ -11,13 +11,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/andy/vox-mi-agent/internal/config"
-	"github.com/andy/vox-mi-agent/internal/llm"
-	"github.com/andy/vox-mi-agent/internal/logx"
-	"github.com/andy/vox-mi-agent/internal/media"
-	"github.com/andy/vox-mi-agent/internal/mediaurl"
-	"github.com/andy/vox-mi-agent/internal/store"
-	"github.com/andy/vox-mi-agent/internal/tools/data"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/llm"
+	"github.com/BBDXF/vox-mi-agent/internal/logx"
+	"github.com/BBDXF/vox-mi-agent/internal/media"
+	"github.com/BBDXF/vox-mi-agent/internal/mediaurl"
+	"github.com/BBDXF/vox-mi-agent/internal/store"
+	"github.com/BBDXF/vox-mi-agent/internal/tools/data"
 )
 
 // MaxMediaFolders caps the number of library folders.

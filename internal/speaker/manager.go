@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/tools/audio"
+	"github.com/BBDXF/vox-mi-agent/internal/tools/audio"
 )
 
 // DebugDeviceID is the always-available mock device (调试音箱).

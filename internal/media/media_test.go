@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
 )
 
 var sampleFiles = []string{

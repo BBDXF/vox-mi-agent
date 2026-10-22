@@ -29,7 +29,7 @@ cp .env.example .env
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
-| `VOX_IMAGE` | | 镜像，正式版 `ghcr.io/<owner>/vox-mi-agent:<版本>` |
+| `VOX_IMAGE` | | 镜像，正式版 `ghcr.io/bbdxf/vox-mi-agent:<版本>` |
 | `VOX_PORT` | ✅ | 宿主机端口，默认 8080。Web 界面和音箱拉取音乐都用它 |
 | `VOX_DATA` | ✅ | 宿主机数据目录 |
 | `VOX_MUSIC` | ✅ | 宿主机音乐目录 |
@@ -84,3 +84,7 @@ make up      # 构建本地镜像并用 compose 启动（读取 .env）
 | `compose.yaml` / `compose.local.yaml` / `compose.test.yaml` | 运行 / 本地 CA 覆盖 / 测试 |
 | `certs/` | 本地专用代理 CA（仓库中为空文件） |
 | `docs/DESIGN.md` | 设计文档 |
+
+## 许可证
+
+[MIT](LICENSE) © BBDXF

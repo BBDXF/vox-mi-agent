@@ -35,14 +35,6 @@ jobs:
       - name: Build web UI
         run: make web
 
-      - name: Embed web UI into Go package
-        run: |
-          if [ -d web/dist ]; then
-            rm -rf internal/webui/dist
-            mkdir -p internal/webui
-            cp -r web/dist internal/webui/dist
-          fi
-
       - name: Cross-compile (linux amd64 + arm64)
         # `make build` re-runs `make web` (idempotent); binaries land in dist/linux_<arch>/app
         run: make build VERSION="${VERSION}" COMMIT="${GITHUB_SHA::7}"
@@ -62,6 +54,7 @@ jobs:
             release/*.tar.gz
             release/SHA256SUMS.txt
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -74,7 +67,18 @@ jobs:
 
       - name: Image metadata
         id: meta
-        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # v1.2.3 -> 1.2.3, 1.2, latest (latest/1.2 skipped for pre-releases like v1.2.3-rc1)
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+          labels: |
+            org.opencontainers.image.title=vox-mi-agent
+            org.opencontainers.image.description=Self-hosted AI agent for Xiaomi speakers with local music library
+            org.opencontainers.image.licenses=MIT
 
       - name: Build and push multi-arch image
         uses: docker/build-push-action@v6
@@ -83,6 +87,5 @@ jobs:
           target: runtime
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ${{ steps.meta.outputs.image }}:${{ github.ref_name }}
-            ${{ steps.meta.outputs.image }}:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

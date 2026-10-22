@@ -3,7 +3,7 @@ package agent
 import (
 	"encoding/json"
 
-	"github.com/andy/vox-mi-agent/internal/llm"
+	"github.com/BBDXF/vox-mi-agent/internal/llm"
 )
 
 // Event types emitted by Runtime.Run (shared by CLI, SSE and the speaker).

@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/andy/vox-mi-agent/internal/config"
-	"github.com/andy/vox-mi-agent/internal/store"
-	"github.com/andy/vox-mi-agent/internal/toolrunner"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/store"
+	"github.com/BBDXF/vox-mi-agent/internal/toolrunner"
 )
 
 func toolsDir(t *testing.T) string {

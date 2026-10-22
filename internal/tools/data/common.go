@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/config"
-	"github.com/andy/vox-mi-agent/internal/toolrunner"
-	"github.com/andy/vox-mi-agent/internal/tools"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/toolrunner"
+	"github.com/BBDXF/vox-mi-agent/internal/tools"
 )
 
 const (

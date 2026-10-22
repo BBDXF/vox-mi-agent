@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/andy/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
 )
 
 // ErrUnknownSection is returned for a section name that does not exist.

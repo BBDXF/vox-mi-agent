@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andy/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
 )
 
 func TestSplitArtists(t *testing.T) {

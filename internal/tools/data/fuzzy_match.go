@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/andy/vox-mi-agent/internal/tools"
+	"github.com/BBDXF/vox-mi-agent/internal/tools"
 	"regexp"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/andy/vox-mi-agent/internal/fzq"
-	"github.com/andy/vox-mi-agent/internal/toolrunner"
+	"github.com/BBDXF/vox-mi-agent/internal/fzq"
+	"github.com/BBDXF/vox-mi-agent/internal/toolrunner"
 )
 
 const (

@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/andy/vox-mi-agent/internal/app"
+	"github.com/BBDXF/vox-mi-agent/internal/app"
 )
 
 // GET /api/settings/schema -> {sections:[{name,title,description,restart_required,fields:[...]}]}

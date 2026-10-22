@@ -8,7 +8,7 @@ IMAGE    ?= vox-mi-agent
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)$(shell git diff --quiet HEAD 2>/dev/null || echo -dirty)
 DATE     ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-BI       := github.com/andy/vox-mi-agent/internal/buildinfo
+BI       := github.com/BBDXF/vox-mi-agent/internal/buildinfo
 LDFLAGS  := -s -w -X $(BI).Version=$(VERSION) -X $(BI).Commit=$(COMMIT) -X $(BI).Date=$(DATE)
 export VOX_TOOLS_DIR ?= $(CURDIR)/.tools
 

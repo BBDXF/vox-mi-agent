@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/agent"
-	"github.com/andy/vox-mi-agent/internal/media"
-	"github.com/andy/vox-mi-agent/internal/store"
+	"github.com/BBDXF/vox-mi-agent/internal/agent"
+	"github.com/BBDXF/vox-mi-agent/internal/media"
+	"github.com/BBDXF/vox-mi-agent/internal/store"
 )
 
 // TurnRunner is the part of *agent.Runtime the hook needs.

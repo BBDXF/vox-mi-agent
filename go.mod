@@ -1,4 +1,4 @@
-module github.com/andy/vox-mi-agent
+module github.com/BBDXF/vox-mi-agent
 
 go 1.27.2
 

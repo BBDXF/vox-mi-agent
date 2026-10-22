@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/llm"
-	"github.com/andy/vox-mi-agent/internal/store"
+	"github.com/BBDXF/vox-mi-agent/internal/llm"
+	"github.com/BBDXF/vox-mi-agent/internal/store"
 )
 
 // Tracer receives structured trace records from the runtime. Implementations

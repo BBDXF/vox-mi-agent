@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andy/vox-mi-agent/internal/llm"
+	"github.com/BBDXF/vox-mi-agent/internal/llm"
 )
 
 type trackItem struct {

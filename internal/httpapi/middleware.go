@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/logx"
+	"github.com/BBDXF/vox-mi-agent/internal/logx"
 )
 
 // stripBase removes basePath from the request path when present; other

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/andy/vox-mi-agent/internal/llm"
-	"github.com/andy/vox-mi-agent/internal/store"
-	"github.com/andy/vox-mi-agent/internal/tools"
+	"github.com/BBDXF/vox-mi-agent/internal/llm"
+	"github.com/BBDXF/vox-mi-agent/internal/store"
+	"github.com/BBDXF/vox-mi-agent/internal/tools"
 )
 
 type memTracer struct {

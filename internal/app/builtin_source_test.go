@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andy/vox-mi-agent/internal/config"
-	"github.com/andy/vox-mi-agent/internal/media"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/media"
 )
 
 func TestBuiltinMediaLibrarySource(t *testing.T) {

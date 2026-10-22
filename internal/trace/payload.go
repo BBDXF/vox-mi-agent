@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/agent"
+	"github.com/BBDXF/vox-mi-agent/internal/agent"
 )
 
 const (

@@ -1,5 +1,5 @@
-export const REPO_URL = 'https://github.com/';
-export const RELEASES_URL = REPO_URL + 'releases';
+export const REPO_URL = 'https://github.com/BBDXF/vox-mi-agent';
+export const RELEASES_URL = REPO_URL + '/releases';
 
 export interface VersionInfo {
   version: string;

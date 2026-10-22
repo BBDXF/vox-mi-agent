@@ -3,7 +3,7 @@ package data
 import (
 	"context"
 	"encoding/json"
-	"github.com/andy/vox-mi-agent/internal/tools"
+	"github.com/BBDXF/vox-mi-agent/internal/tools"
 )
 
 type queryJSON struct{ d Deps }

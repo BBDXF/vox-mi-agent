@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/config"
-	"github.com/andy/vox-mi-agent/internal/fzq"
-	"github.com/andy/vox-mi-agent/internal/toolrunner"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/fzq"
+	"github.com/BBDXF/vox-mi-agent/internal/toolrunner"
 )
 
 // SearchTimeout is the per-query fzq timeout (§6.4.2).

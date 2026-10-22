@@ -8,11 +8,11 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/andy/vox-mi-agent/internal/agent"
-	"github.com/andy/vox-mi-agent/internal/app"
-	"github.com/andy/vox-mi-agent/internal/config"
-	"github.com/andy/vox-mi-agent/internal/logx"
-	"github.com/andy/vox-mi-agent/internal/store"
+	"github.com/BBDXF/vox-mi-agent/internal/agent"
+	"github.com/BBDXF/vox-mi-agent/internal/app"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/logx"
+	"github.com/BBDXF/vox-mi-agent/internal/store"
 )
 
 func cmdChat(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Writer) error {

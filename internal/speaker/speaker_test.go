@@ -3,7 +3,7 @@ package speaker
 import (
 	"context"
 	"encoding/json"
-	"github.com/andy/vox-mi-agent/internal/tools"
+	"github.com/BBDXF/vox-mi-agent/internal/tools"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/agent"
-	"github.com/andy/vox-mi-agent/internal/llm"
-	"github.com/andy/vox-mi-agent/internal/media"
-	"github.com/andy/vox-mi-agent/internal/store"
-	"github.com/andy/vox-mi-agent/internal/tools/audio"
+	"github.com/BBDXF/vox-mi-agent/internal/agent"
+	"github.com/BBDXF/vox-mi-agent/internal/llm"
+	"github.com/BBDXF/vox-mi-agent/internal/media"
+	"github.com/BBDXF/vox-mi-agent/internal/store"
+	"github.com/BBDXF/vox-mi-agent/internal/tools/audio"
 )
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))

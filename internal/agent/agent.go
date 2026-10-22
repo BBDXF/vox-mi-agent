@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/llm"
-	"github.com/andy/vox-mi-agent/internal/logx"
-	"github.com/andy/vox-mi-agent/internal/store"
-	"github.com/andy/vox-mi-agent/internal/tools"
+	"github.com/BBDXF/vox-mi-agent/internal/llm"
+	"github.com/BBDXF/vox-mi-agent/internal/logx"
+	"github.com/BBDXF/vox-mi-agent/internal/store"
+	"github.com/BBDXF/vox-mi-agent/internal/tools"
 )
 
 // ErrMaxSteps is returned when the LLM keeps requesting tools past MaxSteps.

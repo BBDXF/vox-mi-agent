@@ -16,7 +16,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/andy/vox-mi-agent/internal/mediaurl"
+	"github.com/BBDXF/vox-mi-agent/internal/mediaurl"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -29,7 +29,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/andy/vox-mi-agent/internal/llm"
+	"github.com/BBDXF/vox-mi-agent/internal/llm"
 )
 
 //go:embed default.yaml

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/speaker"
-	"github.com/andy/vox-mi-agent/internal/speaker/xiaomi"
+	"github.com/BBDXF/vox-mi-agent/internal/speaker"
+	"github.com/BBDXF/vox-mi-agent/internal/speaker/xiaomi"
 )
 
 type speakerDeviceView struct {

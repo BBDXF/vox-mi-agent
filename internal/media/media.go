@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/andy/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
 )
 
 // Track is one song of the library. Path is server-side only: it is never

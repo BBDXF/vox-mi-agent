@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andy/vox-mi-agent/internal/speaker"
+	"github.com/BBDXF/vox-mi-agent/internal/speaker"
 )
 
 // Driver implements speaker.Driver on the Xiaomi cloud.

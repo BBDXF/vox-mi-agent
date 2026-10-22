@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/andy/vox-mi-agent/internal/llm"
+	"github.com/BBDXF/vox-mi-agent/internal/llm"
 )
 
 // SwapProvider is an llm.Provider whose backend, default model and

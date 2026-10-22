@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/andy/vox-mi-agent/internal/mediaurl"
+	"github.com/BBDXF/vox-mi-agent/internal/mediaurl"
 )
 
 var audioTypes = map[string]string{

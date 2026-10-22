@@ -1,9 +1,9 @@
 package app
 
 import (
-	"github.com/andy/vox-mi-agent/internal/config"
-	"github.com/andy/vox-mi-agent/internal/speaker"
-	"github.com/andy/vox-mi-agent/internal/speaker/xiaomi"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/speaker"
+	"github.com/BBDXF/vox-mi-agent/internal/speaker/xiaomi"
 )
 
 // Xiaomi returns the Xiaomi driver (created on first use, kept across driver

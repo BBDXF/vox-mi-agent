@@ -4,8 +4,8 @@ import (
 	"context"
 	"os"
 
-	"github.com/andy/vox-mi-agent/internal/config"
-	"github.com/andy/vox-mi-agent/internal/httpapi"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/httpapi"
 )
 
 func cmdHealthcheck(ctx context.Context, args []string) error {

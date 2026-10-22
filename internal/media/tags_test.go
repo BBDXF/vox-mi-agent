@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/andy/vox-mi-agent/internal/config"
+	"github.com/BBDXF/vox-mi-agent/internal/config"
 )
 
 type id3 struct {

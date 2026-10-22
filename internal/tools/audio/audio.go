@@ -13,8 +13,8 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/andy/vox-mi-agent/internal/media"
-	"github.com/andy/vox-mi-agent/internal/tools"
+	"github.com/BBDXF/vox-mi-agent/internal/media"
+	"github.com/BBDXF/vox-mi-agent/internal/tools"
 )
 
 const maxQueryRunes = 200
