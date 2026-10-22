@@ -224,8 +224,16 @@ type SpeakerDevice struct {
 
 // SpeakerHook configures the conversation hook (PROJECT_DESIGN.md §6.7.3).
 type SpeakerHook struct {
-	Mode            string        `yaml:"mode" json:"mode"` // keyword|all|off
-	Keywords        []string      `yaml:"keywords" json:"keywords"`
+	Mode     string   `yaml:"mode" json:"mode"` // music|keyword|all|off
+	Keywords []string `yaml:"keywords" json:"keywords"`
+	// WakeWords are stripped from the start of every ask before matching.
+	WakeWords []string `yaml:"wake_words" json:"wake_words"`
+	// MusicTriggers are the play verbs of mode music.
+	MusicTriggers []string `yaml:"music_triggers" json:"music_triggers"`
+	// MusicExclude are phrases that look like triggers but are not music requests.
+	MusicExclude []string `yaml:"music_exclude" json:"music_exclude"`
+	// DirectPlayScore is the minimum search score (1-100) to skip the LLM.
+	DirectPlayScore int           `yaml:"direct_play_score" json:"direct_play_score"`
 	PollInterval    time.Duration `yaml:"poll_interval" json:"poll_interval"`
 	InterruptWindow time.Duration `yaml:"interrupt_window" json:"interrupt_window"`
 }
@@ -280,8 +288,12 @@ func Defaults() *Config {
 			Candidates: 500,
 		},
 		Speaker: Speaker{Driver: "mock", URLTTL: time.Hour, VolumeDefault: 30,
-			Hook: SpeakerHook{Mode: "keyword", Keywords: []string{"请", "你", "问问"},
-				PollInterval: time.Second, InterruptWindow: 3 * time.Second}},
+			Hook: SpeakerHook{Mode: "music", Keywords: []string{"问问"},
+				WakeWords:       []string{"小爱同学", "小爱"},
+				MusicTriggers:   []string{"播放", "放一首", "放首", "放一下", "放", "来一首", "来首", "来点", "我想听", "想听", "听一下", "听听", "听"},
+				MusicExclude:    []string{"放假", "放心", "放松", "听说", "听话", "听见"},
+				DirectPlayScore: 85,
+				PollInterval:    time.Second, InterruptWindow: 3 * time.Second}},
 		Logging: Logging{
 			Level:                "info",
 			TraceRetentionDays:   30,
@@ -396,6 +408,11 @@ func applyEnv(c *Config, lookup func(string) (string, bool)) error {
 
 // resolve fills derived defaults (tool paths from Tools.Dir).
 func (c *Config) resolve(_ func(string) (string, bool)) {
+	// Migration: the old keyword-mode default (["请","你","问问"]) becomes music mode.
+	if h := &c.Speaker.Hook; h.Mode == "keyword" && len(h.Keywords) == 3 &&
+		h.Keywords[0] == "请" && h.Keywords[1] == "你" && h.Keywords[2] == "问问" {
+		h.Mode, h.Keywords = "music", []string{"问问"}
+	}
 	if c.LLM.Provider == "" {
 		c.LLM.Provider = llm.CustomPresetID
 	}
@@ -525,6 +542,9 @@ func (c *Config) Clone() *Config {
 	cp.Search.StripPatterns = append([]string(nil), c.Search.StripPatterns...)
 	cp.Speaker.Xiaomi.Devices = append([]SpeakerDevice(nil), c.Speaker.Xiaomi.Devices...)
 	cp.Speaker.Hook.Keywords = append([]string(nil), c.Speaker.Hook.Keywords...)
+	cp.Speaker.Hook.WakeWords = append([]string(nil), c.Speaker.Hook.WakeWords...)
+	cp.Speaker.Hook.MusicTriggers = append([]string(nil), c.Speaker.Hook.MusicTriggers...)
+	cp.Speaker.Hook.MusicExclude = append([]string(nil), c.Speaker.Hook.MusicExclude...)
 	cp.Sources = make([]Source, len(c.Sources))
 	for i, s := range c.Sources {
 		s.Keys = append([]string(nil), s.Keys...)
@@ -593,9 +613,12 @@ func (s Speaker) validate() error {
 		return errors.New("config: speaker.volume_default must be 0-100")
 	}
 	switch s.Hook.Mode {
-	case "keyword", "all", "off":
+	case "music", "keyword", "all", "off":
 	default:
-		return fmt.Errorf("config: speaker.hook.mode must be keyword|all|off, got %q", s.Hook.Mode)
+		return fmt.Errorf("config: speaker.hook.mode must be music|keyword|all|off, got %q", s.Hook.Mode)
+	}
+	if s.Hook.DirectPlayScore < 1 || s.Hook.DirectPlayScore > 100 {
+		return errors.New("config: speaker.hook.direct_play_score must be 1-100")
 	}
 	if s.Hook.PollInterval < 500*time.Millisecond || s.Hook.PollInterval > 5*time.Second {
 		return errors.New("config: speaker.hook.poll_interval must be between 500ms and 5s")

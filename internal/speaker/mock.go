@@ -17,7 +17,7 @@ const (
 	EvStop        = "stop"
 	EvVolume      = "volume"
 	EvAsk         = "ask"
-	EvAskDetected = "ask_detected" // the hook saw the ask; latency_ms = detection lag
+	EvAskDetected = "ask_detected" // recorded by the hook: latency_ms = detection lag, handled + route
 	EvReply       = "reply"
 )
 
@@ -33,6 +33,12 @@ type MockEvent struct {
 	// LatencyMS is the time since the latest ask on this device (set on every
 	// event except "ask", within 60s of that ask).
 	LatencyMS *int64 `json:"latency_ms,omitempty"`
+	// play_url: track metadata (when known).
+	Title  string `json:"title,omitempty"`
+	Artist string `json:"artist,omitempty"`
+	// ask_detected: the hook's decision.
+	Handled *bool  `json:"handled,omitempty"`
+	Route   string `json:"route,omitempty"` // direct|artist_random|agent|ignored
 }
 
 // ErrInjected is returned by the mock when fault injection fires.
@@ -50,7 +56,6 @@ type Mock struct {
 	asks    map[string][]Ask
 	lastAsk time.Time
 	askAt   map[string]time.Time // latest ask time per device
-	seen    map[string]time.Time // latest ask already reported as detected
 	playing map[string]time.Time // device -> playback end (zero = until paused)
 	paused  map[string]bool
 	volume  map[string]int
@@ -74,7 +79,7 @@ func NewMock() *Mock {
 			{DeviceID: "mock-1", Name: "Mock Living Room", Hardware: "LX06", Enabled: true, PlayMode: "auto", TTSMode: "auto", Online: &t},
 			{DeviceID: "mock-2", Name: "Mock Bedroom", Hardware: "L05B", Enabled: true, PlayMode: "auto", TTSMode: "auto", Online: &t},
 		},
-		asks: map[string][]Ask{}, askAt: map[string]time.Time{}, seen: map[string]time.Time{}, playing: map[string]time.Time{}, paused: map[string]bool{},
+		asks: map[string][]Ask{}, askAt: map[string]time.Time{}, playing: map[string]time.Time{}, paused: map[string]bool{},
 		volume: map[string]int{}, rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 		CharsPerSec: 20,
 	}
@@ -93,7 +98,7 @@ func (m *Mock) Name() string { return "mock" }
 func (m *Mock) record(ev MockEvent) {
 	m.seq++
 	ev.Seq, ev.TS = m.seq, time.Now()
-	if t, ok := m.askAt[ev.Device]; ok && ev.Kind != EvAsk {
+	if t, ok := m.askAt[ev.Device]; ok && ev.Kind != EvAsk && ev.LatencyMS == nil {
 		if d := ev.TS.Sub(t).Milliseconds(); d >= 0 && d <= 60000 {
 			ev.LatencyMS = &d
 		}
@@ -188,10 +193,6 @@ func (m *Mock) GetLatestAsk(ctx context.Context, d Device, since time.Time) (*As
 	if !a.Time.After(since) {
 		return nil, nil
 	}
-	if m.seen[d.DeviceID].Before(a.Time) {
-		m.seen[d.DeviceID] = a.Time
-		m.record(MockEvent{Device: d.DeviceID, Kind: EvAskDetected, Text: a.Query})
-	}
 	return &a, nil
 }
 
@@ -223,7 +224,8 @@ func (m *Mock) PlayByURL(ctx context.Context, d Device, url string) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.record(MockEvent{Device: d.DeviceID, Kind: EvPlayURL, URL: url})
+	meta, _ := ctx.Value(playMetaKey{}).(PlayMeta)
+	m.record(MockEvent{Device: d.DeviceID, Kind: EvPlayURL, URL: url, Title: meta.Title, Artist: meta.Artist})
 	delete(m.paused, d.DeviceID)
 	m.playing[d.DeviceID] = time.Time{}
 	return nil

@@ -35,8 +35,9 @@ export interface SpeakerTestReq {
 export interface SpeakerTestRes { ok: boolean; action?: string; error?: string; elapsed_ms?: number; volume?: number; status?: { status: number; volume: number } }
 export interface MockEvent {
   seq: number; ts: number | string; device_id?: string;
-  kind: 'ask' | 'pause' | 'stop' | 'play' | 'tts' | 'play_url' | 'volume' | 'reply';
+  kind: 'ask' | 'pause' | 'stop' | 'play' | 'tts' | 'play_url' | 'volume' | 'reply' | 'ask_detected';
   text?: string; url?: string; volume?: number; latency_ms?: number;
+  title?: string; artist?: string; route?: 'direct' | 'artist_random' | 'agent' | 'ignored'; handled?: boolean;
 }
 
 async function req<T>(url: string, method = 'GET', body?: unknown): Promise<T> {

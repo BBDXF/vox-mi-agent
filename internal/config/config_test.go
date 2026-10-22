@@ -257,3 +257,30 @@ func TestLLMProvider(t *testing.T) {
 		t.Error("unknown provider accepted")
 	}
 }
+
+func TestHookDefaultsAndMigration(t *testing.T) {
+	c := Defaults()
+	h := c.Speaker.Hook
+	if h.Mode != "music" || len(h.Keywords) != 1 || h.Keywords[0] != "问问" || h.WakeWords[0] != "小爱同学" || h.DirectPlayScore != 85 || len(h.MusicTriggers) != 13 || len(h.MusicExclude) != 6 {
+		t.Fatalf("%+v", h)
+	}
+	dir := t.TempDir()
+	old := "speaker:\n  driver: mock\n  hook:\n    mode: keyword\n    keywords: [\"请\", \"你\", \"问问\"]\n"
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Speaker.Hook.Mode != "music" || len(got.Speaker.Hook.Keywords) != 1 || got.Speaker.Hook.Keywords[0] != "问问" {
+		t.Fatalf("not migrated: %+v", got.Speaker.Hook)
+	}
+	// customised keyword configs are left alone
+	custom := "speaker:\n  hook:\n    mode: keyword\n    keywords: [\"请\", \"问问\"]\n"
+	_ = os.WriteFile(filepath.Join(dir, FileName), []byte(custom), 0o600)
+	got, err = Load(dir)
+	if err != nil || got.Speaker.Hook.Mode != "keyword" || len(got.Speaker.Hook.Keywords) != 2 {
+		t.Fatalf("%v %+v", err, got.Speaker.Hook)
+	}
+}

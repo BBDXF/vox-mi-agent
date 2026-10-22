@@ -55,7 +55,8 @@ func (a *App) applyHook(c *config.Config) {
 		return
 	}
 	h := c.Speaker.Hook
-	a.Hook.Apply(speaker.HookSettings{Mode: h.Mode, Keywords: h.Keywords, PollInterval: h.PollInterval, InterruptWindow: h.InterruptWindow})
+	a.Hook.Apply(speaker.HookSettings{Mode: h.Mode, Keywords: h.Keywords, WakeWords: h.WakeWords, MusicTriggers: h.MusicTriggers,
+		MusicExclude: h.MusicExclude, DirectPlayScore: h.DirectPlayScore, PollInterval: h.PollInterval, InterruptWindow: h.InterruptWindow})
 }
 
 // StartSpeaker starts the conversation hook (serve only).

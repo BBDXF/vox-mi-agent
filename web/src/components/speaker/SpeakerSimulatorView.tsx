@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Radio, Send, User, Pause, Mic, Music, Volume2, Square, Play } from 'lucide-react';
+import { Check, Copy, ExternalLink, Radio, Send, User, Pause, Mic, Music, Volume2, Square, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
 import { getSpeakerStatus, getMockEvents, mockAsk, type MockEvent, type SpeakerStatus } from '@/lib/speakerApi';
 
-const EXAMPLES = ['请放一首晴天', '你今天天气怎么样', '问问 我的曲库有多少首歌', '普通提问不带关键词'];
+const EXAMPLES = ['小爱同学，播放一首周杰伦的晴天', '播放海阔天空', '来点陈奕迅的歌', '我想听七里香', '今天天气怎么样', '问问 我的曲库有多少首歌'];
+const ROUTES: Record<string, string> = { direct: '直接播放', artist_random: '随机播放歌手', agent: '交给Agent', ignored: '未接管' };
 
 function titleOf(url?: string) {
   if (!url) return '音频';
@@ -22,6 +23,27 @@ const fmtTime = (ts: number | string) => {
   const ms = typeof ts === 'number' ? (ts < 1e12 ? ts * 1000 : ts) : Date.parse(ts);
   return isNaN(ms) ? '' : new Date(ms).toLocaleTimeString();
 };
+
+function PlayUrl({ e }: { e: MockEvent }) {
+  const [copied, setCopied] = useState(false);
+  const title = e.title || titleOf(e.url);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(e.url || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* */ }
+  };
+  return (
+    <div className="space-y-1.5">
+      <div className="font-medium">{title}{e.artist && <span className="text-muted-foreground font-normal"> · {e.artist}</span>}</div>
+      {e.url && (
+        <div className="flex items-start gap-2">
+          <code className="text-[11px] font-mono break-all text-muted-foreground flex-1">{e.url}</code>
+          <button type="button" onClick={copy} title="复制" className="shrink-0 text-muted-foreground hover:text-foreground">{copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}</button>
+          <a href={e.url} target="_blank" rel="noreferrer" title="在新标签页打开" className="shrink-0 text-muted-foreground hover:text-foreground"><ExternalLink className="w-3.5 h-3.5" /></a>
+        </div>
+      )}
+      <audio controls preload="none" src={e.url} className="h-8 max-w-full" />
+    </div>
+  );
+}
 
 function EventRow({ e }: { e: MockEvent }) {
   const lat = e.latency_ms != null && <Badge variant="outline" className="font-mono text-[10px]">{e.latency_ms}ms</Badge>;
@@ -45,6 +67,16 @@ function EventRow({ e }: { e: MockEvent }) {
       </div>
     );
   }
+  if (e.kind === 'ask_detected') {
+    const r = e.route ? ROUTES[e.route] || e.route : e.handled ? '已接管' : '未接管';
+    return (
+      <div className="flex justify-center">
+        <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 rounded-full bg-muted px-3 py-1">
+          检测到提问 · 路线：{r}{lat}
+        </div>
+      </div>
+    );
+  }
   const map: Record<string, { icon: any; label: string }> = {
     pause: { icon: Pause, label: '暂停原生回复' },
     stop: { icon: Square, label: '停止播放' },
@@ -63,12 +95,7 @@ function EventRow({ e }: { e: MockEvent }) {
         </div>
         {e.kind === 'tts' && <div>{e.text}</div>}
         {e.kind === 'volume' && <div>音量 {e.volume}</div>}
-        {e.kind === 'play_url' && (
-          <div className="space-y-1">
-            <div className="font-medium">{titleOf(e.url)}</div>
-            <audio controls src={e.url} className="h-8 max-w-full" />
-          </div>
-        )}
+        {e.kind === 'play_url' && <PlayUrl e={e} />}
       </div>
     </div>
   );

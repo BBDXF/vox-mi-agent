@@ -179,6 +179,26 @@ function TestPanel({ deviceId, defVolume }: { deviceId: string; defVolume: numbe
   );
 }
 
+function Chips({ label, help, items, onChange, error }: { label: string; help?: string; items: string[]; onChange: (x: string[]) => void; error?: string }) {
+  const [t, setT] = useState('');
+  const add = () => { const k = t.trim(); if (k && !items.includes(k)) onChange([...items, k]); setT(''); };
+  return (
+    <Field label={label} help={help} error={error}>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((k, i) => (
+          <Badge key={k} variant="secondary" className="gap-1">{k}
+            <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))}><X className="w-3 h-3" /></button>
+          </Badge>
+        ))}
+      </div>
+      <div className="flex gap-2 max-w-sm mt-1">
+        <Input value={t} onChange={(e) => setT(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} placeholder="输入后回车" />
+        <Button size="sm" variant="outline" onClick={add}>添加</Button>
+      </div>
+    </Field>
+  );
+}
+
 export function SpeakerSettings() {
   const { success, error: toastError } = useToast();
   const [v, setV] = useState<Record<string, any> | null>(null);
@@ -188,7 +208,6 @@ export function SpeakerSettings() {
   const [found, setFound] = useState<any[] | null>(null);
   const [finding, setFinding] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
-  const [kw, setKw] = useState('');
 
   const loadStatus = useCallback(() => getSpeakerStatus().then(setStatus).catch(() => {}), []);
   useEffect(() => {
@@ -231,11 +250,6 @@ export function SpeakerSettings() {
   const addDev = (d: any) => {
     if (devices.some((x) => x.device_id === d.device_id)) return;
     setDevices([...devices, { device_id: d.device_id, name: d.name, hardware: d.hardware || '', enabled: d.enabled ?? true, play_mode: d.play_mode || 'auto', tts_mode: d.tts_mode || 'auto', miot_tts: d.miot_tts || '' }]);
-  };
-  const addKw = () => {
-    const k = kw.trim(); if (!k) return;
-    if (!keywords.includes(k)) setHook('keywords', [...keywords, k]);
-    setKw('');
   };
   const last = status?.hook?.last_ask;
 
@@ -361,25 +375,24 @@ export function SpeakerSettings() {
         <CardHeader><CardTitle>对话接管</CardTitle><CardDescription>监听音箱的提问，按规则交给本 Agent 回答。</CardDescription></CardHeader>
         <CardContent className="space-y-4">
           <div className="inline-flex rounded-md border overflow-hidden">
-            {[['keyword', '关键词触发'], ['all', '全部接管'], ['off', '关闭']].map(([k, l]) => (
+            {[['music', '音乐点播'], ['keyword', '关键词触发'], ['all', '全部接管'], ['off', '关闭']].map(([k, l]) => (
               <button key={k} type="button" onClick={() => setHook('mode', k)}
-                className={`px-3 py-1.5 text-xs ${hook.mode === k ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>{l}</button>
+                className={`px-3 py-1.5 text-xs ${(hook.mode || 'music') === k ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>{l}{k === 'music' && '（默认）'}</button>
             ))}
           </div>
+          {(hook.mode || 'music') === 'music' && <p className="text-xs text-muted-foreground">只接管「播放/来一首/我想听…」等点歌请求，暂停、下一首、天气等仍由小爱处理。</p>}
+          <Chips label="唤醒词" help="识别前会去掉（默认 小爱同学 / 小爱）" items={hook.wake_words || []} onChange={(x) => setHook('wake_words', x)} error={E('hook.wake_words')} />
+          {(hook.mode || 'music') === 'music' && (
+            <>
+              <Chips label="点歌触发词" items={hook.music_triggers || []} onChange={(x) => setHook('music_triggers', x)} error={E('hook.music_triggers')} />
+              <Chips label="排除词" help="包含这些词的提问不会被当作点歌，例如 放假、听说" items={hook.music_exclude || []} onChange={(x) => setHook('music_exclude', x)} error={E('hook.music_exclude')} />
+              <Field label="直接播放阈值（0-100）" help="搜索结果唯一且得分不低于此值时不经大模型直接播放，更快" error={E('hook.direct_play_score')}>
+                <Input className="max-w-[10rem]" type="number" min={0} max={100} value={hook.direct_play_score ?? ''} onChange={(e) => setHook('direct_play_score', num(e.target.value))} />
+              </Field>
+            </>
+          )}
           {hook.mode === 'keyword' && (
-            <Field label="关键词" help="以这些词开头的提问交给本 Agent，其余仍由小爱回答" error={E('hook.keywords')}>
-              <div className="flex flex-wrap gap-1.5">
-                {keywords.map((k, i) => (
-                  <Badge key={k} variant="secondary" className="gap-1">{k}
-                    <button type="button" onClick={() => setHook('keywords', keywords.filter((_, j) => j !== i))}><X className="w-3 h-3" /></button>
-                  </Badge>
-                ))}
-              </div>
-              <div className="flex gap-2 max-w-sm mt-1">
-                <Input value={kw} onChange={(e) => setKw(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addKw(); } }} placeholder="输入后回车" />
-                <Button size="sm" variant="outline" onClick={addKw}>添加</Button>
-              </div>
-            </Field>
+            <Chips label="关键词" help="以这些词开头的提问交给本 Agent，其余仍由小爱回答（默认 问问）" items={keywords} onChange={(x) => setHook('keywords', x)} error={E('hook.keywords')} />
           )}
           <div className="grid sm:grid-cols-2 gap-4">
             <Field label="轮询间隔（500ms–5s）" error={E('hook.poll_interval')}>

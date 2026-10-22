@@ -67,8 +67,12 @@ speaker:
   xiaomi:
     devices: []                       # {device_id, name, hardware, enabled, play_mode: auto|url|music, tts_mode: auto|mina|miot, miot_tts: "5-1"}
   hook:
-    mode: keyword                     # keyword | all | off
-    keywords: ["请", "你", "问问"]
+    mode: music                       # music | keyword | all | off
+    wake_words: ["小爱同学", "小爱"]    # stripped from the start of every ask
+    music_triggers: ["播放", "放一首", "放首", "放一下", "放", "来一首", "来首", "来点", "我想听", "想听", "听一下", "听听", "听"]
+    music_exclude: ["放假", "放心", "放松", "听说", "听话", "听见"]
+    direct_play_score: 85             # search score (1-100) to play without the LLM
+    keywords: ["问问"]                  # prefixes for mode keyword
     poll_interval: 1s                 # 500ms - 5s
     interrupt_window: 3s
   mock:

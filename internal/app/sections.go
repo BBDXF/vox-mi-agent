@@ -708,8 +708,12 @@ func speakerSection() *section {
 			durField("url_ttl", "签名媒体 URL 有效期（如 1h，最小 1m）", func(c *config.Config) *time.Duration { return &c.Speaker.URLTTL }),
 			intField("volume_default", "默认音量（0–100，默认 30）：仅在测试面板「音量」未指定数值时使用，不会自动应用到音箱；0 = 不设置（不改动音箱音量）", func(c *config.Config) *int { return &c.Speaker.VolumeDefault }),
 			devices,
-			enumField("hook.mode", "对话接管：keyword（以唤醒前缀开头才接管）、all（接管全部提问）、off（只播报不监听）", []string{"keyword", "all", "off"}, func(c *config.Config) *string { return &c.Speaker.Hook.Mode }),
-			stringsField("hook.keywords", "keyword 模式的唤醒前缀（接管后会从问题中去掉）", func(c *config.Config) *[]string { return &c.Speaker.Hook.Keywords }),
+			enumField("hook.mode", "对话接管：music（默认，只接管点歌请求，置信命中时不经大模型直接播放）、keyword（去掉唤醒词后以 hook.keywords 前缀开头才接管）、all（接管全部提问）、off（只播报不监听）", []string{"music", "keyword", "all", "off"}, func(c *config.Config) *string { return &c.Speaker.Hook.Mode }),
+			stringsField("hook.wake_words", "唤醒词：先从每条提问开头去掉（默认 小爱同学、小爱）", func(c *config.Config) *[]string { return &c.Speaker.Hook.WakeWords }),
+			stringsField("hook.music_triggers", "music 模式的点歌动词：规范化后的提问以其开头且后面有内容才接管；暂停/下一首/音量等纯控制指令不接管", func(c *config.Config) *[]string { return &c.Speaker.Hook.MusicTriggers }),
+			stringsField("hook.music_exclude", "music 模式的排除词：以其开头的提问不接管（放假、听说等）", func(c *config.Config) *[]string { return &c.Speaker.Hook.MusicExclude }),
+			intField("hook.direct_play_score", "music 模式直接播放的最低搜索分数（1–100，默认 85）：唯一且不模糊的命中达到该分数时跳过大模型，否则交给 Agent", func(c *config.Config) *int { return &c.Speaker.Hook.DirectPlayScore }),
+			stringsField("hook.keywords", "keyword 模式的前缀（去掉唤醒词后匹配，接管后会从问题中去掉，默认 问问）", func(c *config.Config) *[]string { return &c.Speaker.Hook.Keywords }),
 			durField("hook.poll_interval", "轮询小爱对话的间隔（500ms–5s）", func(c *config.Config) *time.Duration { return &c.Speaker.Hook.PollInterval }),
 			durField("hook.interrupt_window", "接管后打断小爱原生回复的观察窗口（0–30s）", func(c *config.Config) *time.Duration { return &c.Speaker.Hook.InterruptWindow }),
 			intField("mock.latency_ms", "mock 驱动：每次调用的人为延迟（毫秒，0–60000）", func(c *config.Config) *int { return &c.Speaker.Mock.LatencyMS }),
@@ -741,15 +745,25 @@ func speakerSection() *section {
 		if provided["mock.fail_rate"] && (sp.Mock.FailRate < 0 || sp.Mock.FailRate > 1) {
 			fe["mock.fail_rate"] = "must be between 0 and 1"
 		}
-		if provided["hook.keywords"] {
-			var kws []string
-			for _, k := range sp.Hook.Keywords {
+		if provided["hook.direct_play_score"] && (sp.Hook.DirectPlayScore < 1 || sp.Hook.DirectPlayScore > 100) {
+			fe["hook.direct_play_score"] = "must be between 1 and 100"
+		}
+		trim := func(key string, p *[]string) {
+			if !provided[key] {
+				return
+			}
+			var out []string
+			for _, k := range *p {
 				if k = strings.TrimSpace(k); k != "" {
-					kws = append(kws, k)
+					out = append(out, k)
 				}
 			}
-			sp.Hook.Keywords = kws
+			*p = out
 		}
+		trim("hook.keywords", &sp.Hook.Keywords)
+		trim("hook.wake_words", &sp.Hook.WakeWords)
+		trim("hook.music_triggers", &sp.Hook.MusicTriggers)
+		trim("hook.music_exclude", &sp.Hook.MusicExclude)
 		if provided["xiaomi.devices"] {
 			if len(sp.Xiaomi.Devices) > 20 {
 				fe["xiaomi.devices"] = "at most 20 devices"

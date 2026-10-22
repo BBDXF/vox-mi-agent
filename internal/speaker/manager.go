@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/andy/vox-mi-agent/internal/tools/audio"
 )
@@ -91,6 +92,17 @@ func (m *Manager) Resolve(id string) (Device, error) {
 	return Device{}, fmt.Errorf("unknown speaker device %q", id)
 }
 
+// PlayMeta is optional track metadata passed to drivers through the context
+// (the mock driver shows it in its event log).
+type PlayMeta struct{ Title, Artist string }
+
+type playMetaKey struct{}
+
+// WithPlayMeta attaches track metadata to ctx for Driver.PlayByURL.
+func WithPlayMeta(ctx context.Context, title, artist string) context.Context {
+	return context.WithValue(ctx, playMetaKey{}, PlayMeta{Title: title, Artist: artist})
+}
+
 // PlayQueue holds the play request of one hook turn; it is started only
 // after the turn's last sentence has been spoken.
 type PlayQueue struct {
@@ -127,7 +139,7 @@ func (m *Manager) Play(ctx context.Context, r audio.PlayRequest) error {
 	if err != nil {
 		return err
 	}
-	return m.Driver().PlayByURL(ctx, d, r.URL)
+	return m.Driver().PlayByURL(WithPlayMeta(ctx, r.Title, r.Artist), d, r.URL)
 }
 
 // SetVolume implements audio.Player.
@@ -150,6 +162,14 @@ func (m *Manager) Speak(ctx context.Context, text string) error {
 
 // Recorder is implemented by drivers that keep an action log (mock).
 type Recorder interface{ Record(MockEvent) }
+
+// NoteAsk records the hook's decision about an ask (lag = detection lag).
+func (m *Manager) NoteAsk(deviceID, query string, lag time.Duration, handled bool, route string) {
+	if r, ok := m.Driver().(Recorder); ok {
+		ms := max(lag.Milliseconds(), 0)
+		r.Record(MockEvent{Device: deviceID, Kind: EvAskDetected, Text: query, LatencyMS: &ms, Handled: &handled, Route: route})
+	}
+}
 
 // NoteReply records an agent reply in the driver's action log, if it has one.
 func (m *Manager) NoteReply(deviceID, text string) {

@@ -200,7 +200,9 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 	a.Agent = agent.New(agent.Options{
 		Provider: a.Provider, Tools: reg, Store: st, Logger: a.Log, Tracer: a.Tracer,
 	})
-	a.Hook = speaker.NewHook(speaker.HookDeps{Mgr: a.Speaker, Agent: a.Agent, Store: st, Tracer: a.Tracer, Log: a.Log})
+	a.Hook = speaker.NewHook(speaker.HookDeps{Mgr: a.Speaker, Agent: a.Agent, Store: st, Tracer: a.Tracer, Log: a.Log,
+		Music: &speaker.MusicDeps{Search: a.Index.Search, Tracks: a.Library.Tracks, Lookup: a.Library.Lookup, URLFor: a.TrackURL,
+			MinScore: func() (v int) { a.withConfig(func(c *config.Config) { v = int(c.Search.MinScore) }); return }}})
 	ok = true
 	return a, nil
 }

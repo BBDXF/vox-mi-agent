@@ -11,6 +11,7 @@ import (
 
 	"github.com/andy/vox-mi-agent/internal/agent"
 	"github.com/andy/vox-mi-agent/internal/llm"
+	"github.com/andy/vox-mi-agent/internal/media"
 	"github.com/andy/vox-mi-agent/internal/store"
 	"github.com/andy/vox-mi-agent/internal/tools/audio"
 )
@@ -659,5 +660,302 @@ func TestMockEventLatency(t *testing.T) {
 	}
 	if lt < lp {
 		t.Fatalf("tts latency %d < pause latency %d", lt, lp)
+	}
+}
+
+// ---- music routes ----
+
+var wakeDefault = []string{"小爱同学", "小爱"}
+var trigDefault = []string{"播放", "放一首", "放首", "放一下", "放", "来一首", "来首", "来点", "我想听", "想听", "听一下", "听听", "听"}
+var exclDefault = []string{"放假", "放心", "放松", "听说", "听话", "听见"}
+
+func TestNormalize(t *testing.T) {
+	for in, want := range map[string]string{
+		"小爱同学播放晴天":        "播放晴天",
+		"小爱同学，播放晴天。":      "播放晴天",
+		"小爱，请帮我播放晴天":      "播放晴天",
+		"  小爱同学 ！ 麻烦你放首歌": "放首歌",
+		"请给我来点音乐":         "来点音乐",
+		"播放晴天":            "播放晴天",
+		"小爱同学小爱同学放歌":      "放歌",
+	} {
+		if got := Normalize(in, wakeDefault, true); got != want {
+			t.Errorf("%q -> %q want %q", in, got, want)
+		}
+	}
+	// without polite prefixes (keyword mode) 请 stays
+	if got := Normalize("小爱同学，请问问天气", wakeDefault, false); got != "请问问天气" {
+		t.Errorf("%q", got)
+	}
+}
+
+func TestParseMusic(t *testing.T) {
+	type c struct {
+		in, content string
+		music       bool
+	}
+	for _, x := range []c{
+		{"播放一首周杰伦的晴天", "周杰伦的晴天", true},
+		{"小爱同学播放晴天", "晴天", true},
+		{"小爱同学，我想听周杰伦的歌", "周杰伦", true},
+		{"来点陈奕迅的歌", "陈奕迅", true},
+		{"放首七里香", "七里香", true},
+		{"请帮我放一首稻香吧", "稻香", true},
+		{"听听晴天", "晴天", true},
+		{"听一下晴天谢谢", "晴天", true},
+		{"放假", "", false},
+		{"放心吧", "", false},
+		{"我听说明天下雨", "", false},
+		{"听说周杰伦出新歌了", "", false},
+		{"放松一下", "", false},
+		{"听话", "", false},
+		{"暂停", "", false},
+		{"下一首", "", false},
+		{"停止播放", "", false},
+		{"音量调到30", "", false},
+		{"播放", "", false},
+		{"放一下", "", false},
+		{"小爱同学", "", false},
+		{"今天天气怎么样", "", false},
+	} {
+		p := ParseMusic(x.in, wakeDefault, trigDefault, exclDefault)
+		if p.Music != x.music || p.Content != x.content {
+			t.Errorf("%q -> %+v want music=%v content=%q", x.in, p, x.music, x.content)
+		}
+	}
+}
+
+type musicRig struct {
+	*rig
+	tracks   []media.Track
+	searches []string
+	hits     []media.Hit
+	amb      bool
+}
+
+func newMusicRig(t *testing.T, ag TurnRunner) *musicRig {
+	t.Helper()
+	m := &musicRig{rig: newRig(t, ag)}
+	m.hook.CharsPerSec = 1000 // the mock never reports "playing": keep the estimate fallback short
+	m.tracks = []media.Track{
+		{ID: "a1", Title: "晴天", Artist: "周杰伦", Artists: []string{"周杰伦"}},
+		{ID: "a2", Title: "七里香", Artist: "周杰伦", Artists: []string{"周杰伦"}},
+		{ID: "b1", Title: "十年", Artist: "陈奕迅", Artists: []string{"陈奕迅"}},
+	}
+	m.hook.d.Music = &MusicDeps{
+		Search: func(_ context.Context, q string, _, _ int) ([]media.Hit, bool, error) {
+			m.searches = append(m.searches, q)
+			return m.hits, m.amb, nil
+		},
+		Tracks: func() []media.Track { return m.tracks },
+		Lookup: func(id string) (media.Track, bool) {
+			for _, tr := range m.tracks {
+				if tr.ID == id {
+					return tr, true
+				}
+			}
+			return media.Track{}, false
+		},
+		URLFor: func(tr media.Track) (string, error) { return "http://srv/audio/" + tr.ID + ".mp3", nil },
+	}
+	return m
+}
+
+func (m *musicRig) startMusic() {
+	m.hook.Apply(HookSettings{Mode: "music", Keywords: []string{"问问"}, WakeWords: wakeDefault, MusicTriggers: trigDefault,
+		MusicExclude: exclDefault, DirectPlayScore: 85, PollInterval: 5 * time.Millisecond, InterruptWindow: 100 * time.Millisecond})
+}
+
+func detected(ev []MockEvent) *MockEvent {
+	for i := range ev {
+		if ev[i].Kind == EvAskDetected {
+			return &ev[i]
+		}
+	}
+	return nil
+}
+
+func TestMusicDirectPlayNoLLM(t *testing.T) {
+	st := openStore(t)
+	fake := llm.NewFake() // any LLM call would fail: zero scripted turns
+	rt := agent.New(agent.Options{Provider: fake, Store: st, Logger: quiet})
+	m := newMusicRig(t, rt)
+	m.hook.d.Store = st
+	m.hook.d.Agent = rt
+	m.hits = []media.Hit{{ID: "a1", Title: "晴天", Artist: "周杰伦", Score: 95}}
+	m.startMusic()
+	m.mock.InjectAsk("mock-1", "小爱同学播放周杰伦的晴天")
+	waitFor(t, "play_url", func() bool { return count(m.mock.Events(0), EvPlayURL) == 1 })
+	if fake.Calls() != 0 {
+		t.Fatalf("LLM must not be called, got %d", fake.Calls())
+	}
+	ev := m.mock.Events(0)
+	want := []string{"ask", "pause", "tts", "reply", "play_url"}
+	if k := kinds(ev); len(k) != len(want) || k[0] != want[0] || k[1] != want[1] || k[2] != want[2] || k[3] != want[3] || k[4] != want[4] {
+		t.Fatalf("%v", kinds(ev))
+	}
+	d := detected(ev)
+	if d == nil || d.Handled == nil || !*d.Handled || d.Route != RouteDirect || d.LatencyMS == nil {
+		t.Fatalf("%+v", d)
+	}
+	if m.searches[0] != "周杰伦的晴天" {
+		t.Fatalf("search content %q", m.searches[0])
+	}
+	var tts, play MockEvent
+	for _, e := range ev {
+		if e.Kind == EvTTS {
+			tts = e
+		}
+		if e.Kind == EvPlayURL {
+			play = e
+		}
+	}
+	if tts.Text != "好的，播放周杰伦的《晴天》" || !play.TS.After(tts.TS) {
+		t.Fatalf("%+v %+v", tts, play)
+	}
+	if play.URL != "http://srv/audio/a1.mp3" || play.Title != "晴天" || play.Artist != "周杰伦" || play.LatencyMS == nil {
+		t.Fatalf("%+v", play)
+	}
+	if la := m.hook.Status().LastAsk; la == nil || la.Route != RouteDirect || !la.Handled {
+		t.Fatalf("%+v", la)
+	}
+	// conversation + traces
+	v, err := st.GetSetting(context.Background(), "speaker.conversation.mock-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ := st.ListMessages(context.Background(), v)
+	if len(msgs) != 2 || msgs[0].Role != "user" || msgs[0].Content != "小爱同学播放周杰伦的晴天" || msgs[1].Role != "assistant" || msgs[1].Content != "好的，播放周杰伦的《晴天》" {
+		t.Fatalf("%+v", msgs)
+	}
+	waitFor(t, "turn trace", func() bool {
+		m.tr.mu.Lock()
+		defer m.tr.mu.Unlock()
+		for _, r := range m.tr.rows {
+			if r.Kind == store.TraceTurn {
+				return true
+			}
+		}
+		return false
+	})
+	have := map[string]bool{}
+	m.tr.mu.Lock()
+	for _, r := range m.tr.rows {
+		have[r.Kind+":"+r.Name] = true
+	}
+	m.tr.mu.Unlock()
+	for _, want := range []string{"turn:turn", "tool:search_audio", "tool:play_audio", "tool:speaker.first_tts"} {
+		if !have[want] {
+			t.Fatalf("missing trace %s in %v", want, have)
+		}
+	}
+}
+
+func TestMusicArtistRandom(t *testing.T) {
+	fake := llm.NewFake()
+	rt := agent.New(agent.Options{Provider: fake, Store: openStore(t), Logger: quiet})
+	m := newMusicRig(t, rt)
+	m.hook.d.Store = m.st
+	picked := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		m.hook.Rand = func(n int) int { return i % n }
+		m.startMusic()
+		m.mock.InjectAsk("mock-1", "来点周杰伦的歌")
+		waitFor(t, "play", func() bool { return count(m.mock.Events(0), EvPlayURL) == i+1 })
+		ev := m.mock.Events(0)
+		for _, e := range ev {
+			if e.Kind == EvPlayURL {
+				picked[e.Title] = true
+			}
+		}
+		if d := detected(ev); d == nil || d.Route != RouteArtistRandom {
+			t.Fatalf("%+v", d)
+		}
+	}
+	if !picked["晴天"] || !picked["七里香"] || picked["十年"] {
+		t.Fatalf("picked %v", picked)
+	}
+	var tts []string
+	for _, e := range m.mock.Events(0) {
+		if e.Kind == EvTTS {
+			tts = append(tts, e.Text)
+		}
+	}
+	if tts[0] != "好的，随机播放周杰伦的《晴天》" {
+		t.Fatalf("%q", tts)
+	}
+	if fake.Calls() != 0 || len(m.searches) != 0 {
+		t.Fatal("artist route must not use the LLM or search")
+	}
+}
+
+func TestMusicFallsBackToAgent(t *testing.T) {
+	for name, tc := range map[string]struct {
+		hits []media.Hit
+		amb  bool
+	}{
+		"ambiguous": {[]media.Hit{{ID: "a1", Title: "晴天", Artist: "周杰伦", Score: 97}, {ID: "a2", Title: "晴天2", Score: 95}}, true},
+		"low score": {[]media.Hit{{ID: "a1", Title: "晴天", Artist: "周杰伦", Score: 70}}, false},
+		"no hits":   {nil, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ag := &fakeAgent{sentences: []string{"我来帮你找找。"}}
+			m := newMusicRig(t, ag)
+			m.hits, m.amb = tc.hits, tc.amb
+			m.startMusic()
+			m.mock.InjectAsk("mock-1", "小爱同学播放晴天")
+			waitFor(t, "agent speech", func() bool { return count(m.mock.Events(0), EvTTS) == 1 })
+			in := ag.Inputs()
+			if len(in) != 1 || in[0].Text != "小爱同学播放晴天" { // the original query
+				t.Fatalf("%+v", in)
+			}
+			ev := m.mock.Events(0)
+			if d := detected(ev); d == nil || d.Route != RouteAgent || !*d.Handled {
+				t.Fatalf("%+v", d)
+			}
+			if count(ev, EvPlayURL) != 0 {
+				t.Fatal("no direct play")
+			}
+		})
+	}
+}
+
+func TestMusicModeIgnoresNonMusic(t *testing.T) {
+	ag := &fakeAgent{sentences: []string{"x。"}}
+	m := newMusicRig(t, ag)
+	m.startMusic()
+	for _, q := range []string{"暂停", "下一首", "小爱同学今天天气怎么样", "放假安排", "声音大一点"} {
+		m.mock.InjectAsk("mock-1", q)
+		waitFor(t, "detected", func() bool {
+			la := m.hook.Status().LastAsk
+			return la != nil && la.Query == q
+		})
+	}
+	time.Sleep(50 * time.Millisecond)
+	if len(ag.Inputs()) != 0 || count(m.mock.Events(0), EvPause) != 0 {
+		t.Fatal("must be left to the speaker")
+	}
+	n := 0
+	for _, e := range m.mock.Events(0) {
+		if e.Kind == EvAskDetected {
+			n++
+			if *e.Handled || e.Route != RouteIgnored {
+				t.Fatalf("%+v", e)
+			}
+		}
+	}
+	if n != 5 {
+		t.Fatalf("ask_detected events: %d", n)
+	}
+}
+
+func TestKeywordModeStripsWakeWord(t *testing.T) {
+	ag := &fakeAgent{sentences: []string{"好。"}}
+	r := newRig(t, ag)
+	r.hook.Apply(HookSettings{Mode: "keyword", Keywords: []string{"问问"}, WakeWords: wakeDefault, PollInterval: 5 * time.Millisecond, InterruptWindow: 50 * time.Millisecond})
+	r.mock.InjectAsk("mock-1", "小爱同学，问问明天天气")
+	waitFor(t, "agent", func() bool { return len(ag.Inputs()) == 1 })
+	if in := ag.Inputs(); in[0].Text != "明天天气" {
+		t.Fatalf("%+v", in)
 	}
 }

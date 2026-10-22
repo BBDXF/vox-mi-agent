@@ -425,10 +425,14 @@ Agent ──Player/Speaker 接口──▶ speaker.Manager ──▶ Driver: moc
 #### 6.7.3 Hook：接管小爱对话
 
 - 轮询间隔默认 1s（0.5–5s 可调），按设备 `time` 去重，启动时以当前时间为起点（不处理历史）。
+- **规范化**：每条提问先去掉开头的唤醒词（`hook.wake_words`，默认 `["小爱同学","小爱"]`，可与指令连说）、标点/空格；`music` 模式还会去掉礼貌前缀（请/帮我/给我/麻烦）。
 - **触发策略**（`speaker.hook.mode`）：
-  - `keyword`（默认）：提问以唤醒前缀开头才接管（默认 `["请", "你", "问问"]`，可编辑），其余交给小爱原生处理；
+  - `music`（默认）：规范化后以点歌动词开头（`hook.music_triggers`，默认 播放/放一首/放首/放一下/放/来一首/来首/来点/我想听/想听/听一下/听听/听）且后面有内容才接管；以 `hook.music_exclude`（放假/放心/放松/听说/听话/听见）开头的不接管；暂停/下一首/停止/音量等纯控制指令交给小爱；
+  - `keyword`：去掉唤醒词后以 `hook.keywords`（默认 `["问问"]`）前缀开头才接管，前缀会从问题中去掉；
   - `all`：接管全部提问；
   - `off`：只播报不监听。
+  - 迁移：旧配置 `mode: keyword` + `keywords: ["请","你","问问"]`（旧默认值）加载时自动改为 `music`。
+- **点歌快速通道（music 模式，不经 LLM）**：取触发词后的内容（去掉“一首/一下”、“的歌/的歌曲”等）。内容与曲库歌手完全一致（如“来点陈奕迅的歌”）→ 随机选该歌手一首，TTS「好的，随机播放{歌手}的《{歌名}》」（route=`artist_random`）；否则用 `search_audio` 同一搜索，唯一且不模糊、最高分 ≥ `hook.direct_play_score`（默认 85）→ TTS「好的，播放{歌手}的《{歌名}》」（route=`direct`）。TTS 播完后才 `PlayByURL`；该轮以 user + assistant 消息写入设备会话，并记录 turn + search_audio + play_audio 追踪。不满足条件则以原始提问交给 Agent（route=`agent`）。
 - **打断原生回复**：命中后立即 `PlayerPause`，并在 `interrupt_window`（默认 3s）内每 300ms 查询状态，若在播放再次 pause/stop（小爱回复存在延迟起播）。随后才开始 TTS。
 - 本轮 Agent 的句子逐句 `TextToSpeech`；下一句等待上一句播完（按状态轮询，或按字数估时，默认 4.5 字/秒兜底）。
 - 用户在 Agent 播报中再次提问 → 取消当前轮（复用会话取消钩子），按新问题处理。
@@ -442,7 +446,7 @@ Agent ──Player/Speaker 接口──▶ speaker.Manager ──▶ Driver: moc
 
 #### 6.7.5 配置（`speaker` 段，均可在 Web 修改）
 
-`driver(mock|log|xiaomi)`、`public_base_url`、`url_ttl`、`xiaomi.devices[]{device_id,name,hardware,enabled,play_mode,tts_mode,miot_tts}`、`hook.mode/keywords/poll_interval/interrupt_window`、`volume_default`。账号状态与登录动作走独立接口 `/api/speaker/xiaomi/*`，不进配置文件。
+`driver(mock|log|xiaomi)`、`public_base_url`、`url_ttl`、`xiaomi.devices[]{device_id,name,hardware,enabled,play_mode,tts_mode,miot_tts}`、`hook.mode/wake_words/music_triggers/music_exclude/direct_play_score/keywords/poll_interval/interrupt_window`、`volume_default`。账号状态与登录动作走独立接口 `/api/speaker/xiaomi/*`，不进配置文件。
 
 #### 6.7.6 风险
 

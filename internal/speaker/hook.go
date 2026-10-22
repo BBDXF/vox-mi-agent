@@ -2,17 +2,20 @@ package speaker
 
 import (
 	"context"
-	"crypto/rand"
+	crand "crypto/rand"
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"math/rand/v2"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/andy/vox-mi-agent/internal/agent"
+	"github.com/andy/vox-mi-agent/internal/media"
 	"github.com/andy/vox-mi-agent/internal/store"
 )
 
@@ -24,8 +27,12 @@ type TurnRunner interface {
 
 // HookSettings mirror speaker.hook.
 type HookSettings struct {
-	Mode            string // keyword|all|off
+	Mode            string // music|keyword|all|off
 	Keywords        []string
+	WakeWords       []string
+	MusicTriggers   []string
+	MusicExclude    []string
+	DirectPlayScore int // search score (1-100) needed to skip the LLM
 	PollInterval    time.Duration
 	InterruptWindow time.Duration
 }
@@ -36,6 +43,7 @@ type LastAsk struct {
 	Query   string    `json:"query"`
 	Time    time.Time `json:"time"`
 	Handled bool      `json:"handled"`
+	Route   string    `json:"route"` // direct|artist_random|agent|ignored
 }
 
 // HookStatus is served by /api/speaker/status.
@@ -51,6 +59,16 @@ type HookDeps struct {
 	Store  *store.Store // conversation + settings persistence
 	Tracer agent.Tracer // optional
 	Log    *slog.Logger
+	Music  *MusicDeps // optional: enables the LLM-free music routes
+}
+
+// MusicDeps give the hook access to the media library (direct play).
+type MusicDeps struct {
+	Search   func(ctx context.Context, query string, topN, minScore int) ([]media.Hit, bool, error)
+	Tracks   func() []media.Track
+	Lookup   func(id string) (media.Track, bool)
+	URLFor   func(media.Track) (string, error)
+	MinScore func() int // live search.min_score
 }
 
 // Hook polls the enabled devices for user asks and answers them with the agent.
@@ -58,10 +76,11 @@ type Hook struct {
 	d HookDeps
 
 	// Timing knobs (tests shorten them).
-	RecheckEvery time.Duration // interrupt recheck period (300ms)
-	StatusPoll   time.Duration // playback status poll (300ms)
-	StartGrace   time.Duration // wait for "playing" to show up (1.5s)
-	CharsPerSec  float64       // fallback speech speed (4.5)
+	RecheckEvery time.Duration   // interrupt recheck period (300ms)
+	StatusPoll   time.Duration   // playback status poll (300ms)
+	StartGrace   time.Duration   // wait for "playing" to show up (1.5s)
+	CharsPerSec  float64         // fallback speech speed (4.5)
+	Rand         func(n int) int // random pick (default math/rand)
 
 	mu      sync.Mutex
 	cur     HookSettings
@@ -197,18 +216,119 @@ func stripKeyword(q string, kws []string) (string, bool) {
 	return "", false
 }
 
+// decision is what the hook does with an ask.
+type decision struct {
+	route string
+	text  string // agent route: the user text
+	// direct / artist_random:
+	track    media.Track
+	reply    string
+	searchMS int64
+	toolArgs string
+	toolSum  string
+}
+
+// decide routes an ask according to the mode.
+func (h *Hook) decide(ctx context.Context, s HookSettings, ask Ask) decision {
+	switch s.Mode {
+	case "all":
+		return decision{route: RouteAgent, text: ask.Query}
+	case "keyword":
+		if t, ok := stripKeyword(Normalize(ask.Query, s.WakeWords, false), s.Keywords); ok {
+			return decision{route: RouteAgent, text: t}
+		}
+	case "music":
+		p := ParseMusic(ask.Query, s.WakeWords, s.MusicTriggers, s.MusicExclude)
+		if !p.Music {
+			break
+		}
+		if d, ok := h.resolveMusic(ctx, s, p.Content); ok {
+			return d
+		}
+		return decision{route: RouteAgent, text: ask.Query}
+	}
+	return decision{route: RouteIgnored}
+}
+
+func norm(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), "")) }
+
+// resolveMusic tries the LLM-free paths: a named artist (random track) or a
+// confident, unambiguous search hit.
+func (h *Hook) resolveMusic(ctx context.Context, s HookSettings, content string) (decision, bool) {
+	m := h.d.Music
+	if m == nil || m.URLFor == nil {
+		return decision{}, false
+	}
+	start := time.Now()
+	if m.Tracks != nil {
+		want := norm(content)
+		var cands []media.Track
+		artist := ""
+		for _, t := range m.Tracks() {
+			names := append([]string{t.Artist}, t.Artists...)
+			for _, a := range names {
+				if a != "" && norm(a) == want {
+					cands, artist = append(cands, t), firstNonEmpty(artist, a)
+					break
+				}
+			}
+		}
+		if len(cands) > 0 {
+			t := cands[h.randn(len(cands))]
+			return decision{route: RouteArtistRandom, track: t, searchMS: time.Since(start).Milliseconds(),
+				reply:    "好的，随机播放" + artist + "的《" + t.Title + "》",
+				toolArgs: "artist:" + artist, toolSum: itoa(len(cands)) + " tracks, picked " + t.Title}, true
+		}
+	}
+	if m.Search == nil || m.Lookup == nil {
+		return decision{}, false
+	}
+	minScore := 0
+	if m.MinScore != nil {
+		minScore = m.MinScore()
+	}
+	hits, amb, err := m.Search(ctx, content, 5, minScore)
+	ms := time.Since(start).Milliseconds()
+	if err != nil {
+		h.d.Log.Warn("speaker hook: direct search failed", "err", err)
+		return decision{}, false
+	}
+	if len(hits) == 0 || amb || hits[0].Score < float64(s.DirectPlayScore) {
+		h.d.Log.Info("speaker hook: no confident hit, using the agent", "content", content, "hits", len(hits), "ambiguous", amb)
+		return decision{}, false
+	}
+	tr, ok := m.Lookup(hits[0].ID)
+	if !ok {
+		return decision{}, false
+	}
+	reply := "好的，播放《" + tr.Title + "》"
+	if tr.Artist != "" {
+		reply = "好的，播放" + tr.Artist + "的《" + tr.Title + "》"
+	}
+	return decision{route: RouteDirect, track: tr, reply: reply, searchMS: ms, toolArgs: content,
+		toolSum: tr.Title + " score=" + strconv.FormatFloat(hits[0].Score, 'f', 0, 64)}, true
+}
+
+func (h *Hook) randn(n int) int {
+	if h.Rand != nil {
+		return h.Rand(n)
+	}
+	return rand.IntN(n)
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
 func (h *Hook) handle(ctx context.Context, drv Driver, dev Device, s HookSettings, ask Ask) {
 	t0 := time.Now()
 	// A new ask always ends the running turn.
 	h.cancelTurn(dev.DeviceID)
-	text, ok := ask.Query, true
-	if s.Mode == "keyword" {
-		text, ok = stripKeyword(ask.Query, s.Keywords)
-	}
+	d := h.decide(ctx, s, ask)
+	ok := d.route != RouteIgnored
 	h.mu.Lock()
-	h.last = &LastAsk{Device: dev.DeviceID, Query: ask.Query, Time: ask.Time, Handled: ok}
+	h.last = &LastAsk{Device: dev.DeviceID, Query: ask.Query, Time: ask.Time, Handled: ok, Route: d.route}
 	h.mu.Unlock()
-	h.d.Log.Info("speaker hook: ask", "device", dev.DeviceID, "query", ask.Query, "handled", ok)
+	h.d.Mgr.NoteAsk(dev.DeviceID, ask.Query, time.Since(ask.Time), ok, d.route)
+	h.d.Log.Info("speaker hook: ask", "device", dev.DeviceID, "query", ask.Query, "handled", ok, "route", d.route)
 	if !ok {
 		return
 	}
@@ -234,8 +354,88 @@ func (h *Hook) handle(ctx context.Context, drv Driver, dev Device, s HookSetting
 			}
 			h.mu.Unlock()
 		}()
-		h.runTurn(tctx, drv, dev, s, conv, text, ask, t0)
+		if d.route == RouteAgent {
+			h.runTurn(tctx, drv, dev, s, conv, d.text, ask, t0)
+		} else {
+			h.runDirect(tctx, drv, dev, s, conv, ask, d, t0)
+		}
 	}()
+}
+
+// runDirect answers a music request without the LLM: TTS confirmation, then
+// (after it finished) PlayByURL; the exchange is stored in the conversation.
+func (h *Hook) runDirect(ctx context.Context, drv Driver, dev Device, s HookSettings, conv string, ask Ask, d decision, t0 time.Time) {
+	var rb [4]byte
+	_, _ = crand.Read(rb[:])
+	sp := &spans{h: h, id: "spk-" + hex.EncodeToString(rb[:]), conv: conv, query: ask.Query, t0: t0, marks: map[string]int64{}}
+	sp.markMS("ask_detected", max(0, min(time.Since(ask.Time).Milliseconds(), 60000)), store.TraceOK)
+	status, errMsg := store.TraceOK, ""
+	defer func() {
+		if ctx.Err() != nil {
+			status = store.TraceCanceled
+		}
+		if tr := h.d.Tracer; tr != nil {
+			tr.Trace(store.TraceRow{TS: t0, ConversationID: conv, TurnID: sp.id, Kind: store.TraceTurn, Name: "turn", Status: status,
+				DurationMS: time.Since(t0).Milliseconds(), Args: ask.Query, ResultSummary: d.reply, Error: errMsg,
+				FinishReason: d.route, Channel: store.ChannelSpeaker})
+		}
+	}()
+	if tr := h.d.Tracer; tr != nil {
+		tr.Trace(store.TraceRow{TS: t0, ConversationID: conv, TurnID: sp.id, Step: 1, Kind: store.TraceTool, Name: "search_audio",
+			Status: store.TraceOK, DurationMS: d.searchMS, Args: d.toolArgs, ResultSummary: d.toolSum, Channel: store.ChannelSpeaker})
+	}
+
+	stop := make(chan struct{})
+	close(stop) // the reply is ready: just pause once, no recheck window
+	intDone := make(chan struct{})
+	go func() {
+		defer close(intDone)
+		h.interrupt(ctx, drv, dev, s.InterruptWindow, stop)
+		sp.mark("interrupt", t0, store.TraceOK)
+	}()
+	select {
+	case <-intDone:
+	case <-ctx.Done():
+		return
+	}
+	if err := drv.TextToSpeech(ctx, dev, d.reply); err != nil {
+		if ctx.Err() == nil {
+			errMsg, status = err.Error(), store.TraceError
+			h.d.Log.Warn("speaker hook: tts failed", "device", dev.DeviceID, "err", err)
+		}
+	} else {
+		sp.mark("first_tts", t0, store.TraceOK)
+	}
+	h.d.Mgr.NoteReply(dev.DeviceID, d.reply)
+	if h.d.Store != nil {
+		bg := context.WithoutCancel(ctx)
+		for _, m := range []store.Message{{Role: "user", Content: ask.Query}, {Role: "assistant", Content: d.reply}} {
+			if _, err := h.d.Store.AppendMessage(bg, conv, m); err != nil {
+				h.d.Log.Warn("speaker hook: persist message", "err", err)
+			}
+		}
+	}
+	if !h.waitFinish(ctx, drv, dev, d.reply) {
+		return
+	}
+	u, err := h.d.Music.URLFor(d.track)
+	if err == nil {
+		start := time.Now()
+		err = drv.PlayByURL(WithPlayMeta(ctx, d.track.Title, d.track.Artist), dev, u)
+		if tr := h.d.Tracer; tr != nil {
+			row := store.TraceRow{TS: start, ConversationID: conv, TurnID: sp.id, Step: 2, Kind: store.TraceTool, Name: "play_audio",
+				Status: store.TraceOK, DurationMS: time.Since(start).Milliseconds(), Args: d.track.ID, ResultSummary: "played", Channel: store.ChannelSpeaker}
+			if err != nil {
+				row.Status, row.Error = store.TraceError, err.Error()
+			}
+			tr.Trace(row)
+		}
+	}
+	if err != nil && ctx.Err() == nil {
+		errMsg, status = err.Error(), store.TraceError
+		h.d.Log.Warn("speaker hook: direct play failed", "device", dev.DeviceID, "err", err)
+	}
+	h.d.Log.Info("speaker turn", "device", dev.DeviceID, "turn_id", sp.id, "route", d.route, "search_ms", d.searchMS, "total_ms", time.Since(t0).Milliseconds())
 }
 
 func (h *Hook) cancelTurn(devID string) {
@@ -329,7 +529,7 @@ func (sp *spans) markMS(name string, ms int64, status string) {
 
 func (h *Hook) runTurn(ctx context.Context, drv Driver, dev Device, s HookSettings, conv, text string, ask Ask, t0 time.Time) {
 	var rb [4]byte
-	_, _ = rand.Read(rb[:])
+	_, _ = crand.Read(rb[:])
 	sp := &spans{h: h, id: "spk-" + hex.EncodeToString(rb[:]), conv: conv, query: text, t0: t0, marks: map[string]int64{}}
 	// Detection lag since the device recorded the ask (clock skew clamped).
 	sp.markMS("ask_detected", max(0, min(time.Since(ask.Time).Milliseconds(), 60000)), store.TraceOK)
@@ -406,7 +606,7 @@ func (h *Hook) runTurn(ctx context.Context, drv Driver, dev Device, s HookSettin
 			return
 		}
 		if prev == "" || h.waitFinish(ctx, drv, dev, prev) {
-			if err := drv.PlayByURL(ctx, dev, req.URL); err != nil && ctx.Err() == nil {
+			if err := drv.PlayByURL(WithPlayMeta(ctx, req.Title, req.Artist), dev, req.URL); err != nil && ctx.Err() == nil {
 				h.d.Log.Warn("speaker hook: queued play failed", "device", dev.DeviceID, "err", err)
 			}
 		}
