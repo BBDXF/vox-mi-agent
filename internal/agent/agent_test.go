@@ -400,3 +400,20 @@ func TestCancelDuringToolKeepsHistoryConsistent(t *testing.T) {
 		t.Fatalf("history %d", n)
 	}
 }
+
+func TestTrimHistoryStartsAtUser(t *testing.T) {
+	h := []llm.Message{
+		{Role: llm.RoleUser, Content: "1"}, {Role: llm.RoleAssistant, Content: "a"},
+		{Role: llm.RoleUser, Content: "2"}, {Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "c", Name: "t"}}},
+		{Role: llm.RoleTool, ToolCallID: "c", Content: "r"}, {Role: llm.RoleAssistant, Content: "b"},
+	}
+	if got := trimHistory(h, 0); len(got) != 6 {
+		t.Error("0 = keep all")
+	}
+	if got := trimHistory(h, 3); len(got) != 0 {
+		t.Errorf("orphan tool messages must be dropped: %+v", got)
+	}
+	if got := trimHistory(h, 4); len(got) != 4 || got[0].Content != "2" {
+		t.Errorf("%+v", got)
+	}
+}

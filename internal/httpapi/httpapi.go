@@ -84,6 +84,8 @@ func New(a *app.App, opts ...Option) *Server {
 	r.Get("/api/llm/providers", s.llmProviders)
 	r.Post("/api/llm/models", s.llmModels)
 	r.Post("/api/llm/test", s.llmTest)
+	r.Get("/api/mcp/status", s.mcpStatus)
+	r.Post("/api/mcp/test", s.mcpTest)
 	r.Get("/api/media/status", s.mediaStatus)
 	r.Post("/api/media/sync", s.mediaSync)
 	r.Get("/api/media/tracks", s.mediaTracks)

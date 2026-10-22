@@ -41,7 +41,7 @@ func TestSettingsSchemaAndSectionGets(t *testing.T) {
 			t.Errorf("restart flag of %s", s.Name)
 		}
 	}
-	if got := strings.Join(names, ","); got != "llm,media,aliases,search,sources,tools,speaker,logging,server" {
+	if got := strings.Join(names, ","); got != "llm,agent,mcp,media,aliases,search,sources,tools,speaker,logging,server" {
 		t.Fatalf("sections %s", got)
 	}
 	for _, n := range names {
@@ -375,5 +375,29 @@ func TestPayloadAPI(t *testing.T) {
 	_, b = e.do(t, "GET", "/api/traces/deadbeef0000/payload", "")
 	if p := decode[map[string]any](t, b); p["available"] != false {
 		t.Fatalf("%s", b)
+	}
+}
+
+func TestMCPAPI(t *testing.T) {
+	e := newEnv(t, llm.NewFake(), nil)
+	resp, b := e.do(t, "GET", "/api/mcp/status", "")
+	if resp.StatusCode != 200 || strings.TrimSpace(string(b)) != `{"servers":[]}` {
+		t.Fatalf("status %d %s", resp.StatusCode, b)
+	}
+	resp, b = e.do(t, "POST", "/api/mcp/test", `{"name":"x","transport":"stdio"}`)
+	if resp.StatusCode != 400 || !strings.Contains(string(b), "command") {
+		t.Fatalf("invalid: %d %s", resp.StatusCode, b)
+	}
+	resp, b = e.do(t, "POST", "/api/mcp/test", `{"name":"x","transport":"http","url":"http://127.0.0.1:1/","timeout":"2s"}`)
+	if resp.StatusCode != 200 || !strings.Contains(string(b), `"ok":false`) {
+		t.Fatalf("unreachable: %d %s", resp.StatusCode, b)
+	}
+	resp, b = e.do(t, "PUT", "/api/settings/mcp", `{"servers":[{"name":"x","enabled":false,"transport":"http","url":"http://h/"}]}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("put: %d %s", resp.StatusCode, b)
+	}
+	resp, b = e.do(t, "GET", "/api/mcp/status", "")
+	if !strings.Contains(string(b), `"name":"x"`) || !strings.Contains(string(b), `"connected":false`) {
+		t.Fatalf("status %s", b)
 	}
 }

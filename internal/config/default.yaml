@@ -19,6 +19,17 @@ llm:
   # extra_body:                       # merged into the chat/completions request JSON
   #   enable_thinking: false          # (siliconflow/dashscope presets default to this)
 
+agent:
+  system_prompt: ""                   # empty = built-in default prompt
+  max_steps: 6                        # max LLM calls (tool rounds) per turn
+  # temperature: 0.3                  # optional; overrides llm.temperature
+  turn_timeout: 120s
+  history_messages: 40                # stored messages kept as context; 0 = all
+  tools_disabled: []                  # built-in tool names hidden from the LLM
+
+mcp:
+  servers: []                         # {name, enabled, transport: http|sse|stdio, url, headers, command, args, env, timeout, tools_allow}
+
 tools:
   # dir: /usr/local/bin               # VOX_TOOLS_DIR; fzq/jq/yq default to <dir>/<name>
   # fzq_path: /usr/local/bin/fzq

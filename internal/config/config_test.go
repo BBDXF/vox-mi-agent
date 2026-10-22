@@ -295,3 +295,29 @@ func TestSpeakerDriverLogMigratesToMock(t *testing.T) {
 		t.Fatalf("%v %q", err, c.Speaker.Driver)
 	}
 }
+
+func TestMCPConfigValidate(t *testing.T) {
+	ok := MCPServer{Name: "a", Transport: MCPHTTP, URL: "http://x/mcp"}
+	bad := []MCPServer{
+		{Name: "a", Transport: "ws", URL: "http://x"},
+		{Name: "a", Transport: MCPHTTP},
+		{Name: "a", Transport: MCPStdio},
+		{Name: "1a", Transport: MCPStdio, Command: "x"},
+	}
+	if err := validateMCP([]MCPServer{ok, {Name: "b", Transport: MCPStdio, Command: "x"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range bad {
+		if validateMCP([]MCPServer{b}) == nil {
+			t.Errorf("accepted %+v", b)
+		}
+	}
+	if validateMCP([]MCPServer{ok, ok}) == nil {
+		t.Error("duplicate accepted")
+	}
+	c := Defaults()
+	c.MCP.Servers = []MCPServer{{Name: "a", Transport: MCPHTTP, URL: "http://x", Headers: map[string]string{"K": "secretvalue"}}}
+	if r := c.Redacted(); r.MCP.Servers[0].Headers["K"] != "****alue" || c.MCP.Servers[0].Headers["K"] != "secretvalue" {
+		t.Errorf("redaction: %+v", r.MCP.Servers[0].Headers)
+	}
+}

@@ -556,6 +556,12 @@ tools:
 
 ---
 
+### 6.11 Agent 配置与 MCP
+
+**`agent:`**（设置分区 `agent`，立即生效，无需重启）：`system_prompt`（空 = 内置 `DefaultSystemPrompt`，GET 附带只读 `default_system_prompt`）、`max_steps`（每轮最多调用 LLM 次数，默认 6）、`temperature`（可空，非空时覆盖 `llm.temperature`）、`turn_timeout`（单轮总超时，默认 120s，0 = 不限）、`history_messages`（作为上下文保留的最近消息数，默认 40，0 = 全部；截断后从 user 消息开始，避免孤立的 tool 消息）、`tools_disabled`（被禁用的内置工具名；不发送给 LLM，调用也会被拒绝）。GET 的 `available_tools` 列出内置工具 `{name, description}`（不含 MCP 工具）。
+
+**`mcp.servers`**（设置分区 `mcp`，保存后立即重连）：`{name, enabled, transport: http|sse|stdio, url, headers, command, args, env, timeout, tools_allow}`。使用官方 Go SDK（`github.com/modelcontextprotocol/go-sdk`）；`http` = Streamable HTTP，`sse` = 旧版 SSE，`stdio` = 本地子进程（以管理员权限运行任意命令，仅管理员可配置）。启动与保存时连接已启用的服务并 `tools/list`，工具注册为 `mcp__<server>__<tool>`（非 `[a-zA-Z0-9_-]` 字符替换为 `_`，最长 64），参数 schema 取自服务端；调用经 `tools/call`，仅返回文本内容并截断到 64KiB，`isError` 作为工具错误返回。`tools_allow` 非空时只注册列出的服务端工具。连接失败只记录日志并体现在 `GET /api/mcp/status`，不阻塞启动。`headers`/`env` 的值在 GET 中仅显示末 4 位；原样回传掩码值表示保持不变。`POST /api/mcp/test` 连接（可为未保存的）单个服务、列出工具后断开，不注册任何工具。MCP 工具调用与内置工具一样写入 traces。代码位于 `internal/mcp/`。
+
 ## 7. Web GUI 规划（范围已收窄）
 
 **P1 最小可用**：

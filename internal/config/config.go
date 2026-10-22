@@ -56,6 +56,97 @@ type Config struct {
 	Search  Search   `yaml:"search" json:"search"`
 	Speaker Speaker  `yaml:"speaker" json:"speaker"`
 	Logging Logging  `yaml:"logging" json:"logging"`
+	Agent   Agent    `yaml:"agent" json:"agent"`
+	MCP     MCP      `yaml:"mcp" json:"mcp"`
+}
+
+// Agent tunes the think-act loop. Temperature, when set, overrides
+// llm.temperature (nil = use llm.temperature / the provider default).
+type Agent struct {
+	// SystemPrompt empty = built-in default (agent.DefaultSystemPrompt).
+	SystemPrompt string `yaml:"system_prompt" json:"system_prompt"`
+	// MaxSteps is the max LLM calls (tool rounds) per turn.
+	MaxSteps    int      `yaml:"max_steps" json:"max_steps"`
+	Temperature *float64 `yaml:"temperature" json:"temperature"`
+	// TurnTimeout bounds a whole turn.
+	TurnTimeout time.Duration `yaml:"turn_timeout" json:"turn_timeout"`
+	// HistoryMessages is the number of stored messages kept as context (0 = all).
+	HistoryMessages int `yaml:"history_messages" json:"history_messages"`
+	// ToolsDisabled lists built-in tool names hidden from the LLM.
+	ToolsDisabled []string `yaml:"tools_disabled" json:"tools_disabled"`
+}
+
+// MCP configures external MCP servers whose tools are offered to the agent.
+type MCP struct {
+	Servers []MCPServer `yaml:"servers" json:"servers"`
+}
+
+// MCPServer is one MCP server connection.
+type MCPServer struct {
+	Name      string            `yaml:"name" json:"name"`
+	Enabled   bool              `yaml:"enabled" json:"enabled"`
+	Transport string            `yaml:"transport" json:"transport"` // http|sse|stdio
+	URL       string            `yaml:"url" json:"url"`
+	Headers   map[string]string `yaml:"headers" json:"headers"`
+	Command   string            `yaml:"command" json:"command"`
+	Args      []string          `yaml:"args" json:"args"`
+	Env       map[string]string `yaml:"env" json:"env"`
+	// Timeout bounds connecting and each tool call (default 15s).
+	Timeout    time.Duration `yaml:"timeout" json:"timeout"`
+	ToolsAllow []string      `yaml:"tools_allow" json:"tools_allow"`
+}
+
+// MCP transports.
+const (
+	MCPHTTP  = "http"
+	MCPSSE   = "sse"
+	MCPStdio = "stdio"
+)
+
+var mcpNameRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,31}$`)
+
+// ValidateMCPServer returns per-field problems of one server (keys are the
+// JSON field names).
+func ValidateMCPServer(m MCPServer) map[string]string {
+	fe := map[string]string{}
+	if !mcpNameRe.MatchString(m.Name) {
+		fe["name"] = "must match ^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+	}
+	switch m.Transport {
+	case MCPHTTP, MCPSSE:
+		u, err := url.Parse(m.URL)
+		if m.URL == "" {
+			fe["url"] = "required"
+		} else if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			fe["url"] = "must be an http(s) URL"
+		}
+	case MCPStdio:
+		if strings.TrimSpace(m.Command) == "" {
+			fe["command"] = "required"
+		}
+	default:
+		fe["transport"] = "must be one of http, sse, stdio"
+	}
+	if m.Timeout < 0 || m.Timeout > 10*time.Minute {
+		fe["timeout"] = "must be between 0 and 10m"
+	}
+	return fe
+}
+
+func validateMCP(servers []MCPServer) error {
+	seen := map[string]bool{}
+	for i, m := range servers {
+		if fe := ValidateMCPServer(m); len(fe) > 0 {
+			for k, v := range fe {
+				return fmt.Errorf("config: mcp.servers[%d].%s: %s", i, k, v)
+			}
+		}
+		if seen[m.Name] {
+			return fmt.Errorf("config: duplicate mcp server name %q", m.Name)
+		}
+		seen[m.Name] = true
+	}
+	return nil
 }
 
 // Logging configures runtime logging, tracing and the debug payload log.
@@ -302,6 +393,7 @@ func Defaults() *Config {
 				MusicExclude:    []string{"放假", "放心", "放松", "听说", "听话", "听见"},
 				DirectPlayScore: 85,
 				PollInterval:    time.Second, InterruptWindow: 3 * time.Second}},
+		Agent: Agent{MaxSteps: 6, TurnTimeout: 120 * time.Second, HistoryMessages: 40},
 		Logging: Logging{
 			Level:                "info",
 			TraceRetentionDays:   30,
@@ -405,6 +497,7 @@ func applyEnv(c *Config, lookup func(string) (string, bool)) error {
 			c.LLM.Temperature = f
 		}
 	}
+	dur("VOX_AGENT_TURN_TIMEOUT", &c.Agent.TurnTimeout)
 	str("VOX_TOOLS_DIR", &c.Tools.Dir)
 	str("VOX_FZQ_PATH", &c.Tools.FzqPath)
 	str("VOX_JQ_PATH", &c.Tools.JqPath)
@@ -492,6 +585,18 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("config: media.tag_mode must be filename_first|tags_first|filename_only, got %q", c.Media.TagMode)
 	}
+	if c.Agent.MaxSteps < 1 || c.Agent.MaxSteps > 50 {
+		return errors.New("config: agent.max_steps must be between 1 and 50")
+	}
+	if c.Agent.Temperature != nil && (*c.Agent.Temperature < 0 || *c.Agent.Temperature > 2) {
+		return errors.New("config: agent.temperature must be between 0 and 2")
+	}
+	if c.Agent.TurnTimeout < 0 || c.Agent.HistoryMessages < 0 {
+		return errors.New("config: agent.turn_timeout and agent.history_messages must be >= 0")
+	}
+	if err := validateMCP(c.MCP.Servers); err != nil {
+		return err
+	}
 	switch c.Logging.Level {
 	case "debug", "info", "warn", "error":
 	default:
@@ -558,6 +663,18 @@ func (c *Config) Clone() *Config {
 	cp.Speaker.Hook.WakeWords = append([]string(nil), c.Speaker.Hook.WakeWords...)
 	cp.Speaker.Hook.MusicTriggers = append([]string(nil), c.Speaker.Hook.MusicTriggers...)
 	cp.Speaker.Hook.MusicExclude = append([]string(nil), c.Speaker.Hook.MusicExclude...)
+	if c.Agent.Temperature != nil {
+		t := *c.Agent.Temperature
+		cp.Agent.Temperature = &t
+	}
+	cp.Agent.ToolsDisabled = append([]string(nil), c.Agent.ToolsDisabled...)
+	cp.MCP.Servers = make([]MCPServer, len(c.MCP.Servers))
+	for i, m := range c.MCP.Servers {
+		m.Headers, m.Env = cloneStrMap(m.Headers), cloneStrMap(m.Env)
+		m.Args = append([]string(nil), m.Args...)
+		m.ToolsAllow = append([]string(nil), m.ToolsAllow...)
+		cp.MCP.Servers[i] = m
+	}
 	cp.Sources = make([]Source, len(c.Sources))
 	for i, s := range c.Sources {
 		s.Keys = append([]string(nil), s.Keys...)
@@ -565,6 +682,17 @@ func (c *Config) Clone() *Config {
 		cp.Sources[i] = s
 	}
 	return &cp
+}
+
+func cloneStrMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 func cloneMap(m map[string]any) map[string]any {
@@ -597,6 +725,10 @@ func cloneValue(v any) any {
 func (c *Config) Redacted() *Config {
 	cp := c.Clone()
 	cp.LLM.APIKey = maskSecret(c.LLM.APIKey)
+	for i := range cp.MCP.Servers {
+		m := &cp.MCP.Servers[i]
+		m.Headers, m.Env = MaskValues(m.Headers), MaskValues(m.Env)
+	}
 	return cp
 }
 
@@ -612,6 +744,15 @@ func maskSecret(s string) string {
 		return strings.Repeat("*", len(r))
 	}
 	return "****" + string(r[len(r)-4:])
+}
+
+// MaskValues returns a copy of m with every value masked (see MaskSecret).
+func MaskValues(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = maskSecret(v)
+	}
+	return out
 }
 
 var miotTTSRe = regexp.MustCompile(`^[0-9]{1,3}-[0-9]{1,3}$`)

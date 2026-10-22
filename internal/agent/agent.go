@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/BBDXF/vox-mi-agent/internal/llm"
@@ -35,6 +36,62 @@ type Options struct {
 	ToolTimeout time.Duration
 	// Tracer receives trace rows and debug payloads (optional).
 	Tracer Tracer
+	// TurnTimeout bounds a whole Run (0 = unbounded).
+	TurnTimeout time.Duration
+	// HistoryMessages keeps only the last N stored messages as context
+	// (0 = all).
+	HistoryMessages int
+	// DisabledTools are tool names not offered to (nor callable by) the LLM.
+	DisabledTools []string
+}
+
+// Settings are the hot-reloadable knobs of a Runtime (see Runtime.Apply).
+type Settings struct {
+	SystemPrompt    string // empty = DefaultSystemPrompt
+	MaxSteps        int    // <= 0 = 6
+	Temperature     *float64
+	TurnTimeout     time.Duration
+	HistoryMessages int
+	DisabledTools   []string
+}
+
+type liveSettings struct {
+	Settings
+	disabled map[string]bool
+}
+
+// Apply replaces the live settings; running turns keep the snapshot they
+// started with.
+func (r *Runtime) Apply(s Settings) {
+	if s.SystemPrompt == "" {
+		s.SystemPrompt = DefaultSystemPrompt
+	}
+	if s.MaxSteps <= 0 {
+		s.MaxSteps = 6
+	}
+	ls := &liveSettings{Settings: s, disabled: map[string]bool{}}
+	ls.DisabledTools = append([]string(nil), s.DisabledTools...)
+	for _, n := range s.DisabledTools {
+		ls.disabled[n] = true
+	}
+	r.live.Store(ls)
+}
+
+func (r *Runtime) settings() *liveSettings { return r.live.Load() }
+
+// trimHistory keeps the last n messages, starting at a user message so tool
+// results are never orphaned.
+func trimHistory(h []llm.Message, n int) []llm.Message {
+	if n <= 0 || len(h) <= n {
+		return h
+	}
+	h = h[len(h)-n:]
+	for i, m := range h {
+		if m.Role == llm.RoleUser {
+			return h[i:]
+		}
+	}
+	return nil
 }
 
 // Input is one user turn.
@@ -56,8 +113,9 @@ type Observer struct {
 
 // Runtime runs agent turns. It is safe for concurrent use.
 type Runtime struct {
-	opt Options
-	log *slog.Logger
+	opt  Options
+	log  *slog.Logger
+	live atomic.Pointer[liveSettings]
 
 	mu     sync.Mutex
 	mem    map[string][]llm.Message // used when Store == nil
@@ -142,7 +200,10 @@ func New(opt Options) *Runtime {
 	if lg == nil {
 		lg = slog.New(slog.DiscardHandler)
 	}
-	return &Runtime{opt: opt, log: lg, mem: map[string][]llm.Message{}, active: map[*activeTurn]struct{}{}}
+	r := &Runtime{opt: opt, log: lg, mem: map[string][]llm.Message{}, active: map[*activeTurn]struct{}{}}
+	r.Apply(Settings{SystemPrompt: opt.SystemPrompt, MaxSteps: opt.MaxSteps, Temperature: opt.Temperature,
+		TurnTimeout: opt.TurnTimeout, HistoryMessages: opt.HistoryMessages, DisabledTools: opt.DisabledTools})
+	return r
 }
 
 // Run executes one user turn, emitting events as they occur. It returns a
@@ -154,6 +215,11 @@ func (r *Runtime) Run(ctx context.Context, in Input, emit func(Event)) error {
 	}
 	ts := &turnState{id: logx.NewID(), channel: ch, userText: in.Text, convID: in.ConversationID, start: time.Now()}
 	ctx = logx.WithTurnID(ctx, ts.id)
+	if d := r.settings().TurnTimeout; d > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, d)
+		defer cancel()
+	}
 	err := r.run(ctx, in, emit, ts)
 	r.finishTurn(ctx, ts, err)
 	return err
@@ -173,10 +239,12 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 		return err
 	}
 
+	cfg := r.settings()
 	convID, history, err := r.openConversation(pctx, in)
 	if err != nil {
 		return fail(err)
 	}
+	history = trimHistory(history, cfg.HistoryMessages)
 	ts.convID = convID
 	// make the turn cancellable by CancelConversation (e.g. conversation deletion)
 	ctx, cancelTurn := context.WithCancel(ctx)
@@ -193,6 +261,9 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 	var defs []llm.ToolDef
 	if r.opt.Tools != nil {
 		for _, t := range r.opt.Tools.List() {
+			if cfg.disabled[t.Name()] {
+				continue
+			}
 			defs = append(defs, llm.ToolDef{Name: t.Name(), Description: t.Description(), Parameters: t.Schema()})
 		}
 	}
@@ -205,14 +276,14 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 		}
 	}
 
-	for step := 0; step < r.opt.MaxSteps; step++ {
+	for step := 0; step < cfg.MaxSteps; step++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		stepNo := step + 1
 		ts.steps = stepNo
 		msgs := make([]llm.Message, 0, len(history)+1)
-		msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: r.opt.SystemPrompt})
+		msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: cfg.SystemPrompt})
 		msgs = append(msgs, history...)
 		stepStart := time.Now()
 		var stepFirst int64 // ms from stepStart to the first visible token
@@ -253,13 +324,13 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 				}
 				r.opt.Tracer.Payload(Payload{
 					TS: stepStart, TurnID: ts.id, Step: stepNo, Kind: "llm",
-					Request:  &PayloadRequest{Model: model, Temperature: r.opt.Temperature, Messages: msgs, Tools: defs},
+					Request:  &PayloadRequest{Model: model, Temperature: cfg.Temperature, Messages: msgs, Tools: defs},
 					Response: resp,
 				})
 			}
 		}
 		ch, err := r.opt.Provider.Stream(ctx, llm.Request{
-			Messages: msgs, Tools: defs, Temperature: r.opt.Temperature, Model: r.opt.Model,
+			Messages: msgs, Tools: defs, Temperature: cfg.Temperature, Model: r.opt.Model,
 		})
 		if err != nil {
 			recStep(err, "")
@@ -417,7 +488,7 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 			case argErrs[i] != "":
 				callErr = errors.New(argErrs[i])
 			default:
-				res, callErr = r.callTool(ctx, tc)
+				res, callErr = r.callTool(ctx, cfg, tc)
 			}
 			content := wrapResult(tc.Name, res, callErr)
 			ts.tools = append(ts.tools, tc.Name)
@@ -442,17 +513,17 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 			return err
 		}
 	}
-	return fail(fmt.Errorf("%w (%d)", ErrMaxSteps, r.opt.MaxSteps))
+	return fail(fmt.Errorf("%w (%d)", ErrMaxSteps, cfg.MaxSteps))
 }
 
 // callTool runs one tool with a per-call timeout, recovering panics, and
 // returns the JSON-encoded result.
-func (r *Runtime) callTool(ctx context.Context, tc llm.ToolCall) (res json.RawMessage, err error) {
+func (r *Runtime) callTool(ctx context.Context, cfg *liveSettings, tc llm.ToolCall) (res json.RawMessage, err error) {
 	if r.opt.Tools == nil {
 		return nil, fmt.Errorf("unknown tool %q", tc.Name)
 	}
 	t, ok := r.opt.Tools.Get(tc.Name)
-	if !ok {
+	if !ok || cfg.disabled[tc.Name] {
 		return nil, fmt.Errorf("unknown tool %q", tc.Name)
 	}
 	tctx, cancel := context.WithTimeout(ctx, r.opt.ToolTimeout)

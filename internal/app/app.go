@@ -20,6 +20,7 @@ import (
 	"github.com/BBDXF/vox-mi-agent/internal/config"
 	"github.com/BBDXF/vox-mi-agent/internal/llm"
 	"github.com/BBDXF/vox-mi-agent/internal/logx"
+	"github.com/BBDXF/vox-mi-agent/internal/mcp"
 	"github.com/BBDXF/vox-mi-agent/internal/media"
 	"github.com/BBDXF/vox-mi-agent/internal/mediaurl"
 	"github.com/BBDXF/vox-mi-agent/internal/speaker"
@@ -71,6 +72,7 @@ type App struct {
 	Mock      *speaker.Mock
 	Tools     *tools.Registry
 	Agent     *agent.Runtime
+	MCP       *mcp.Manager
 	Provider  *SwapProvider
 	Health    ToolStatuses // startup self-check; live value: HealthStatus()
 	Tracer    *trace.Recorder
@@ -198,6 +200,12 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 	a.Agent = agent.New(agent.Options{
 		Provider: a.Provider, Tools: reg, Store: st, Logger: a.Log, Tracer: a.Tracer,
 	})
+	a.Agent.Apply(agentSettings(c.Agent))
+	a.MCP = mcp.NewManager(reg, a.Log)
+	if servers := mcpServers(c.MCP.Servers); len(servers) > 0 {
+		// connecting never blocks startup; failures show in /api/mcp/status
+		go a.MCP.Reload(context.Background(), servers)
+	}
 	a.Hook = speaker.NewHook(speaker.HookDeps{Mgr: a.Speaker, Agent: a.Agent, Store: st, Tracer: a.Tracer, Log: a.Log,
 		Music: &speaker.MusicDeps{Search: a.Index.Search, Tracks: a.Library.Tracks, Lookup: a.Library.Lookup, URLFor: a.TrackURL,
 			MinScore: func() (v int) { a.withConfig(func(c *config.Config) { v = int(c.Search.MinScore) }); return }}})
@@ -239,6 +247,9 @@ func normalize(cfg *config.Config) (*config.Config, error) {
 
 // Close flushes the trace writers and releases resources.
 func (a *App) Close() error {
+	if a.MCP != nil {
+		a.MCP.Close()
+	}
 	if a.Hook != nil {
 		a.Hook.Stop()
 	}

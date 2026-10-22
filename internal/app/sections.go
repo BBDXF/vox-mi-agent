@@ -37,7 +37,7 @@ var sourceNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 var sections []*section
 
 func init() {
-	sections = []*section{llmSection(), mediaSection(), aliasesSection(), searchSection(),
+	sections = []*section{llmSection(), agentSection(), mcpSection(), mediaSection(), aliasesSection(), searchSection(),
 		sourcesSection(), toolsSection(), speakerSection(), loggingSection(), serverSection()}
 }
 

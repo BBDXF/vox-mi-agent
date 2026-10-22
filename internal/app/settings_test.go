@@ -54,7 +54,7 @@ func reload(t *testing.T, dir string) *config.Config {
 }
 
 func TestSchemaListsAllSections(t *testing.T) {
-	want := []string{"llm", "media", "aliases", "search", "sources", "tools", "speaker", "logging", "server"}
+	want := []string{"llm", "agent", "mcp", "media", "aliases", "search", "sources", "tools", "speaker", "logging", "server"}
 	sc := Schema()
 	if len(sc) != len(want) {
 		t.Fatalf("%d sections", len(sc))
