@@ -18,8 +18,8 @@ jobs:
     env:
       VOX_TOOLS_DIR: ${{ github.workspace }}/.tools
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - name: Fetch pinned tools
@@ -48,8 +48,8 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -60,7 +60,7 @@ jobs:
   docker-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - name: Build test image (empty extra-ca.crt in CI)
         uses: docker/build-push-action@v6
