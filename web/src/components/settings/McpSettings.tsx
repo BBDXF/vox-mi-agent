@@ -10,6 +10,7 @@ import {
   type McpServer, type McpStatusItem, type McpTestResult,
 } from '@/lib/api';
 import { Switch } from './AgentSettings';
+import { MCP_PRESETS, type McpPreset } from '@/lib/mcpPresets';
 
 const blank = (): McpServer => ({
   name: '', enabled: false, transport: 'http', url: '', headers: {}, command: '', args: [], env: {}, timeout: '15s', tools_allow: [],
@@ -37,8 +38,8 @@ function KV({ value, onChange, kp, vp }: { value: Record<string, string>; onChan
   );
 }
 
-function ServerEditor({ s, idx, errors, status, onChange, onRemove }: {
-  s: McpServer; idx: number; errors: Record<string, string>; status?: McpStatusItem;
+function ServerEditor({ s, idx, errors, status, highlight, onChange, onRemove }: {
+  s: McpServer; idx: number; errors: Record<string, string>; status?: McpStatusItem; highlight?: boolean;
   onChange: (s: McpServer) => void; onRemove: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -66,7 +67,8 @@ function ServerEditor({ s, idx, errors, status, onChange, onRemove }: {
   const tools = status?.tools || [];
 
   return (
-    <div className="rounded-lg border p-4 space-y-3">
+    <div ref={(el) => { if (el && highlight && !el.dataset.seen) { el.dataset.seen = '1'; el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.querySelector<HTMLInputElement>('input[data-key]')?.focus({ preventScroll: true }); } }}
+      className={`rounded-lg border p-4 space-y-3 ${highlight ? 'ring-2 ring-amber-500/60' : ''}`}>
       <div className="flex items-center gap-3">
         <Switch checked={s.enabled} onChange={(v) => set({ enabled: v })} label="启用" />
         <Input className="max-w-[200px] font-mono text-sm" placeholder="名称，如 web" value={s.name} onChange={(e) => set({ name: e.target.value })} />
@@ -113,7 +115,7 @@ function ServerEditor({ s, idx, errors, status, onChange, onRemove }: {
           <KV value={s.env || {}} onChange={(env) => set({ env })} kp="KEY" vp="值" /><E k="env" /></div>
       </>) : (<>
         <div><label className="text-xs font-medium">URL</label>
-          <Input className="font-mono text-xs" value={s.url} placeholder="https://example.com/mcp" onChange={(e) => set({ url: e.target.value })} /><E k="url" /></div>
+          <Input data-key className={`font-mono text-xs ${highlight ? 'border-amber-500' : ''}`} value={s.url} placeholder="https://example.com/mcp" onChange={(e) => set({ url: e.target.value })} /><E k="url" /></div>
         <div><label className="text-xs font-medium">请求头</label>
           <KV value={s.headers || {}} onChange={(headers) => set({ headers })} kp="Header" vp="值" /><E k="headers" /></div>
       </>)}
@@ -143,6 +145,8 @@ export function McpSettings() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [ver, setVer] = useState(0); // remount editors on reload
+  const [rts, setRts] = useState<{ name: string; installed: boolean; installing: boolean }[] | null>(null);
+  const [hl, setHl] = useState<number | null>(null);
 
   const loadStatus = () => getMcpStatus().then((r) => setStatus(r.servers || [])).catch(() => {});
   const load = async () => {
@@ -164,6 +168,31 @@ export function McpSettings() {
     } finally { setSaving(false); }
   };
 
+  const loadRts = () => fetch('api/runtimes').then((r) => r.json()).then((l) => setRts(Array.isArray(l) ? l : [])).catch(() => {});
+  useEffect(() => { loadRts(); }, []);
+  const installing = !!rts?.some((r) => r.installing);
+  useEffect(() => {
+    if (!installing) return;
+    const t = setInterval(loadRts, 2000);
+    return () => clearInterval(t);
+  }, [installing]);
+  const installRt = async (n: string) => {
+    try {
+      const r = await fetch(`api/runtimes/${n}/install`, { method: 'POST' });
+      if (!r.ok) throw new Error(`安装失败 (${r.status})`);
+    } catch (e: any) { toastError(e.message || '安装失败'); }
+    loadRts();
+  };
+  const addPreset = (p: McpPreset) => {
+    if (!servers) return;
+    let name = p.id, n = 1;
+    while (servers.some((s) => s.name === name)) name = `${p.id}${++n}`;
+    setServers([...servers, { ...blank(), ...structuredClone(p.server), name, enabled: false } as McpServer]);
+    setVer((v) => v + 1);
+    setHl(p.key ? servers.length : null);
+    if (p.key) success('请把尖括号占位值替换为你的密钥');
+  };
+
   if (!servers) return <div className="text-sm text-muted-foreground py-12 text-center">正在加载…</div>;
   return (
     <Card>
@@ -174,13 +203,45 @@ export function McpSettings() {
       <CardContent className="space-y-4">
         {servers.length === 0 && <p className="text-sm text-muted-foreground text-center py-6">尚未配置 MCP 服务器</p>}
         {servers.map((s, i) => (
-          <ServerEditor key={`${ver}-${i}`} s={s} idx={i} errors={errors}
+          <ServerEditor key={`${ver}-${i}`} s={s} idx={i} errors={errors} highlight={hl === i}
             status={status.find((x) => x.name === s.name)}
             onChange={(n) => setServers(servers.map((x, j) => j === i ? n : x))}
             onRemove={() => { setServers(servers.filter((_, j) => j !== i)); setVer((v) => v + 1); }} />
         ))}
         {errors.servers && <p className="text-xs text-destructive">{errors.servers}</p>}
         <Button type="button" variant="outline" className="gap-1.5" onClick={() => setServers([...servers, blank()])}><Plus className="w-4 h-4" />添加服务器</Button>
+
+        <div className="rounded-lg border bg-muted/30 p-3 space-y-2.5">
+          <div className="text-sm font-medium">常用 MCP</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {MCP_PRESETS.map((p) => {
+              const missing = p.needs && rts && rts.some((r) => r.name === p.needs && !r.installed);
+              const installing = p.needs && rts?.some((r) => r.name === p.needs && r.installing);
+              return (
+                <div key={p.id} className="rounded-md border bg-background p-2.5 flex flex-col gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-semibold">{p.id}</span>
+                    {p.needs && <span className="text-[10px] rounded bg-secondary px-1.5 py-0.5">需要 {p.needs}</span>}
+                    {p.key && <span className="text-[10px] rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 px-1.5 py-0.5">需要密钥</span>}
+                    <Button type="button" size="sm" variant="outline" className="ml-auto h-6 px-2 text-xs gap-1" onClick={() => addPreset(p)}>
+                      <Plus className="w-3 h-3" />添加
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{p.desc}</p>
+                  {missing && (
+                    <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400">
+                      <span>尚未安装 {p.needs}</span>
+                      <Button type="button" size="sm" className="h-6 px-2 text-xs gap-1" disabled={!!installing} onClick={() => installRt(p.needs!)}>
+                        {installing && <Loader2 className="w-3 h-3 animate-spin" />}安装 {p.needs}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground">首次启动需下载依赖，测试连接可能要 10–60 秒。添加后默认停用，填好密钥、测试通过后再启用并保存。</p>
+        </div>
       </CardContent>
       <CardFooter className="justify-end gap-2">
         <Button variant="outline" onClick={load} disabled={saving}>重置</Button>
