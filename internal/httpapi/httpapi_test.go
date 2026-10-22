@@ -684,6 +684,28 @@ func TestHealthcheckTCP(t *testing.T) {
 	<-done
 }
 
+func TestServeAllTwoListeners(t *testing.T) {
+	a, _ := newApp(t, llm.NewFake(), nil)
+	sock := filepath.Join(t.TempDir(), "sub", "app.sock")
+	lns, err := ListenAll("tcp://127.0.0.1:0,unix://" + sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- ServeAll(ctx, lns, New(a).Handler(), a.Log) }()
+	if err := Healthcheck(context.Background(), "tcp://"+lns[0].Addr().String()); err != nil {
+		t.Fatalf("tcp: %v", err)
+	}
+	if err := Healthcheck(context.Background(), "unix://"+sock); err != nil {
+		t.Fatalf("unix: %v", err)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 // fakeOpenAI is a tiny OpenAI-compatible server recording the last auth header.
 type fakeOpenAI struct {
 	srv      *httptest.Server

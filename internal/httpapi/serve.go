@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/BBDXF/vox-mi-agent/internal/config"
@@ -25,6 +26,9 @@ func Listen(listen string) (net.Listener, error) {
 		return nil, err
 	}
 	if network == "unix" {
+		if err := os.MkdirAll(filepath.Dir(addr), 0o755); err != nil {
+			return nil, fmt.Errorf("httpapi: mkdir socket dir: %w", err)
+		}
 		if fi, err := os.Lstat(addr); err == nil {
 			if fi.Mode()&os.ModeSocket == 0 {
 				return nil, fmt.Errorf("httpapi: %s exists and is not a socket", addr)
@@ -45,6 +49,48 @@ func Listen(listen string) (net.Listener, error) {
 		}
 	}
 	return ln, nil
+}
+
+// ListenAll opens every item of a comma-separated listen list; on any
+// failure the already opened listeners are closed.
+func ListenAll(listen string) ([]net.Listener, error) {
+	items, err := config.ValidateListen(listen)
+	if err != nil {
+		return nil, err
+	}
+	var lns []net.Listener
+	for _, it := range items {
+		ln, err := Listen(it)
+		if err != nil {
+			for _, l := range lns {
+				l.Close()
+			}
+			return nil, err
+		}
+		lns = append(lns, ln)
+	}
+	return lns, nil
+}
+
+// ServeAll serves h on all listeners; if one fails or ctx ends, all stop.
+func ServeAll(ctx context.Context, lns []net.Listener, h http.Handler, log *slog.Logger) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errc := make(chan error, len(lns))
+	for _, ln := range lns {
+		go func() {
+			err := Serve(ctx, ln, h, log)
+			cancel()
+			errc <- err
+		}()
+	}
+	var first error
+	for range lns {
+		if err := <-errc; err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 // Serve serves h on ln until ctx is cancelled, then shuts down gracefully
@@ -79,7 +125,7 @@ func Serve(ctx context.Context, ln net.Listener, h http.Handler, log *slog.Logge
 
 // Healthcheck GETs /healthz on the given listen URL (tcp or unix socket).
 func Healthcheck(ctx context.Context, listen string) error {
-	network, addr, err := config.ParseListen(listen)
+	network, addr, err := config.ParseListen(config.PrimaryListen(listen))
 	if err != nil {
 		return err
 	}

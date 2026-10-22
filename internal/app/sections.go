@@ -637,14 +637,14 @@ func serverSection() *section {
 		Description:     "监听地址、反向代理子路径与管理员校验。修改会写入配置文件，需重启服务后生效。",
 		RestartRequired: true,
 		fields: []*fieldDef{
-			withRestart(strField("listen", "监听地址：tcp://host:port 或 unix:///path/app.sock", func(c *config.Config) *string { return &c.Server.Listen })),
+			withRestart(strField("listen", "监听地址：tcp://host:port 或 unix:///path/app.sock；多个地址用逗号分隔", func(c *config.Config) *string { return &c.Server.Listen })),
 			withRestart(strField("base_path", "子路径，默认 /app/vox；访问根路径会跳转到这里，留空表示直接用根路径", func(c *config.Config) *string { return &c.Server.BasePath })),
 			withRestart(boolField("auth.require_admin", "要求请求头 X-Trim-Isadmin: true 才能访问 API", func(c *config.Config) *bool { return &c.Server.Auth.RequireAdmin })),
 		},
 		validate: func(a *App, old, n *config.Config, provided, changed keySet, fe fieldErrs) {
 			if provided["listen"] {
-				if _, _, err := config.ParseListen(n.Server.Listen); err != nil {
-					fe["listen"] = "must be tcp://host:port or unix:///path"
+				if _, err := config.ValidateListen(n.Server.Listen); err != nil {
+					fe["listen"] = "must be comma-separated tcp://host:port or unix:///path"
 				}
 			}
 			if bp := n.Server.BasePath; provided["base_path"] && bp != "" &&

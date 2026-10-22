@@ -439,11 +439,11 @@ func (a *App) publicBase() (string, error) {
 	if b := cfg.Speaker.PublicBaseURL; b != "" {
 		return b, nil
 	}
-	_, addr, err := config.ParseListen(a.Cfg.Server.Listen)
+	network, addr, err := config.ParseListen(config.PrimaryListen(a.Cfg.Server.Listen))
 	if err != nil {
 		return "", err
 	}
-	if network, _, _ := config.ParseListen(a.Cfg.Server.Listen); network != "tcp" {
+	if network != "tcp" {
 		return "", errors.New("speaker.public_base_url must be set when listening on a unix socket")
 	}
 	_, port, err := net.SplitHostPort(addr)

@@ -525,7 +525,7 @@ func (c *Config) Validate() error {
 	if _, ok := llm.PresetByID(c.LLM.Provider); !ok {
 		return fmt.Errorf("config: llm.provider %q is not a known provider", c.LLM.Provider)
 	}
-	if _, _, err := ParseListen(c.Server.Listen); err != nil {
+	if _, err := ValidateListen(c.Server.Listen); err != nil {
 		return err
 	}
 	if err := mediaurl.ValidateBase(c.Speaker.PublicBaseURL); err != nil {
@@ -563,6 +563,45 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: logging.level must be debug|info|warn|error, got %q", c.Logging.Level)
 	}
 	return nil
+}
+
+// SplitListen splits a comma-separated listen list, trimming blanks.
+func SplitListen(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ValidateListen checks every item of a comma-separated listen list.
+func ValidateListen(s string) ([]string, error) {
+	items := SplitListen(s)
+	if len(items) == 0 {
+		return nil, fmt.Errorf("config: server.listen %q: empty", s)
+	}
+	for _, it := range items {
+		if _, _, err := ParseListen(it); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+// PrimaryListen returns the first tcp item (else the first item).
+func PrimaryListen(s string) string {
+	items := SplitListen(s)
+	for _, it := range items {
+		if n, _, err := ParseListen(it); err == nil && n == "tcp" {
+			return it
+		}
+	}
+	if len(items) > 0 {
+		return items[0]
+	}
+	return s
 }
 
 // ParseListen splits a listen URL into network ("tcp"/"unix") and address.

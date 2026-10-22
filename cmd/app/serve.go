@@ -45,7 +45,7 @@ func cmdServe(ctx context.Context, args []string) error {
 	}
 	defer a.Close()
 
-	ln, err := httpapi.Listen(cfg.Server.Listen)
+	lns, err := httpapi.ListenAll(cfg.Server.Listen)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -56,7 +56,7 @@ func cmdServe(ctx context.Context, args []string) error {
 	a.Scheduler.Start(sctx)
 	a.StartSpeaker()
 	srv := httpapi.New(a)
-	err = httpapi.Serve(ctx, ln, srv.Handler(), log)
+	err = httpapi.ServeAll(ctx, lns, srv.Handler(), log)
 	cancel()
 	a.Scheduler.Wait()
 	return err

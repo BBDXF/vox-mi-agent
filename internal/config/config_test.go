@@ -206,6 +206,24 @@ func TestParseListen(t *testing.T) {
 	}
 }
 
+func TestSplitValidateListen(t *testing.T) {
+	items, err := ValidateListen("unix:///sock/app.sock, tcp://0.0.0.0:8080")
+	if err != nil || len(items) != 2 || items[1] != "tcp://0.0.0.0:8080" {
+		t.Fatalf("%v %v", items, err)
+	}
+	if got := PrimaryListen("unix:///a.sock,tcp://0.0.0.0:1"); got != "tcp://0.0.0.0:1" {
+		t.Errorf("primary %q", got)
+	}
+	if got := PrimaryListen("unix:///a.sock"); got != "unix:///a.sock" {
+		t.Errorf("primary %q", got)
+	}
+	for _, bad := range []string{"", " , ", "tcp://x:1,http://y", "unix:///a.sock,"} {
+		if _, err := ValidateListen(bad); err == nil && bad != "unix:///a.sock," {
+			t.Errorf("%q should fail", bad)
+		}
+	}
+}
+
 func TestLLMProvider(t *testing.T) {
 	load1 := func(file string, env map[string]string) (*Config, error) {
 		dir := t.TempDir()

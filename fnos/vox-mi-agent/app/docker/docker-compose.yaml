@@ -11,8 +11,9 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       VOX_PUBLIC_BASE_URL: ${VOX_PUBLIC_BASE_URL:-}
-      VOX_BASE_PATH: /app/vox
-    command: ["serve", "--listen", "tcp://0.0.0.0:8080", "--data", "/data"]
+      VOX_BASE_PATH: /app/vox-mi-agent
+    command: ["serve", "--listen", "unix:///sock/app.sock,tcp://0.0.0.0:8080", "--data", "/data"]
     volumes:
       - ${TRIM_PKGVAR:?}/data:/data
+      - ${TRIM_APPDEST:?}:/sock
       - ${VOX_MUSIC}:/music:ro
