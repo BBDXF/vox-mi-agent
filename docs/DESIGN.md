@@ -221,7 +221,7 @@ desktop_applaunchname=fnos-ai-agent.main
 
 - 后端只监听 Unix socket（本地开发可用 `--listen tcp://127.0.0.1:8080`）。
 - 路由：`/api/*`、`/sse/chat`、`/healthz`，其余返回前端静态文件（`/api`、`/sse` 下的 404 不回退到 `index.html`）。
-- 前缀：环境变量 `APP_BASE_PATH`（默认 `/app/fnos-ai-agent`，本地开发为空）；请求路径带该前缀时先剥掉，内部路由不含前缀。
+- 前缀：配置 `server.base_path` / 环境变量 `VOX_BASE_PATH`（默认空 = 根路径；fnOS 打包时再按网关实际行为设置）。请求路径带该前缀时先剥掉，不带前缀的请求照常处理，因此直接访问 `http://IP:端口/` 与经反向代理访问都可用。
 - 前端：Vite `base: './'`，API 请求使用相对路径。
 
 ### 5.3 鉴权
