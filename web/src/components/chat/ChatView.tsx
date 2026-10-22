@@ -1,35 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Plus,
-  Send,
-  Square,
-  Radio,
-  Monitor,
-  RefreshCw,
-  Sparkles,
-  MessageSquare,
-  Menu,
-  X,
-  Trash2,
-  Globe,
+  Send, Radio, RefreshCw, Menu, X, Trash2, ChevronRight, ChevronDown, Wifi, WifiOff, Mic, History,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { MessageBubble } from './MessageBubble';
 import { SpeakerTimeline } from './SpeakerTimeline';
-import { getSpeakerStatus, getSpeakerEvents, mockAsk, type SpeakerStatus, type MockEvent } from '@/lib/speakerApi';
 import {
-  type Conversation,
-  type Message,
-  type ToolCall,
-  getConversations,
-  createConversation,
-  deleteConversation,
-  deleteAllConversations,
-  getMessages,
-} from '@/lib/api';
-import { streamChat } from '@/lib/sse';
+  getSpeakerStatus, getSpeakerEvents, mockAsk,
+  type SpeakerStatus, type SpeakerDeviceStatus, type MockEvent,
+} from '@/lib/speakerApi';
+import { type Conversation, type Message, getConversations, deleteConversation, getMessages } from '@/lib/api';
 import { useToast } from '@/components/ui/toast';
 import { formatRelativeTime } from '@/lib/utils';
 
@@ -37,145 +18,66 @@ export interface ChatViewProps {
   targetConversationId?: string;
 }
 
+const DEBUG_ID = 'debug';
+const EXAMPLES = ['小爱同学，播放一首周杰伦的晴天', '播放海阔天空', '来点陈奕迅的歌', '我想听七里香', '今天天气怎么样', '问问 我的曲库有多少首歌'];
+
 export function ChatView({ targetConversationId }: ChatViewProps = {}) {
   const { toast, error: toastError } = useToast();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeConvId, setActiveConvId] = useState<string | null>(targetConversationId || null);
-  const [nextBefore, setNextBefore] = useState<string | undefined>(undefined);
-  const [loadingList, setLoadingList] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-
-  useEffect(() => {
-    if (targetConversationId) {
-      setActiveConvId(targetConversationId);
-    }
-  }, [targetConversationId]);
+  const [status, setStatus] = useState<SpeakerStatus | null>(null);
+  const [selected, setSelected] = useState<string>('device:' + DEBUG_ID); // 'device:<id>' | 'conv:<id>'
+  const [debugConvOverride, setDebugConvOverride] = useState<string | null>(null);
+  const [legacyOpen, setLegacyOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>([]);
-  const [loadingMessages, setLoadingMessages] = useState(false);
-  const [toolResults, setToolResults] = useState<
-    Record<string, { result?: unknown; error?: string; durationMs?: number }>
-  >({});
-
-  const [filter, setFilter] = useState<'all' | 'web' | 'speaker'>('all');
-  const [status, setStatus] = useState<SpeakerStatus | null>(null);
-  const [target, setTarget] = useState<string>('web'); // 'web' or device_id
-  const [nativeReply, setNativeReply] = useState(true);
-  const [spEvents, setSpEvents] = useState<MockEvent[]>([]);
-  const spAfterRef = useRef(0);
+  const [toolResults, setToolResults] = useState<Record<string, { result?: unknown; error?: string; durationMs?: number }>>({});
+  const [events, setEvents] = useState<MockEvent[]>([]);
+  const afterRef = useRef(0);
 
   const [input, setInput] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const toolStartRef = useRef<Record<string, number>>({});
+  const [nativeReply, setNativeReply] = useState(true);
+  const [sending, setSending] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
 
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Auto scroll to bottom
-  const scrollToBottom = useCallback((smooth = true) => {
-    messagesEndRef.current?.scrollIntoView({
-      behavior: smooth ? 'smooth' : 'auto',
-    });
-  }, []);
-
-  const isMock = status?.driver === 'mock';
-  const activeConv = conversations.find((c) => c.id === activeConvId);
-  const isSpeakerConv = activeConv?.channel === 'speaker';
-  const speakerDevices = status?.devices || [];
+  // ---------- data ----------
+  const loadConversations = useCallback(async () => {
+    try { setConversations((await getConversations({ limit: 100 })).items || []); } catch (e: any) { toastError(e.message || '获取对话列表失败'); }
+  }, [toastError]);
+  const loadStatus = useCallback(() => getSpeakerStatus().then(setStatus).catch(() => {}), []);
 
   useEffect(() => {
-    const load = () => getSpeakerStatus().then(setStatus).catch(() => {});
-    load();
-    const t = setInterval(load, 5000);
+    loadConversations(); loadStatus();
+    const t = setInterval(loadStatus, 4000);
     return () => clearInterval(t);
-  }, []);
+  }, [loadConversations, loadStatus]);
 
-  // keep composer target in sync with the selected conversation
+  // devices: debug always first, then the rest
+  const rawDevices: SpeakerDeviceStatus[] = status?.devices || [];
+  const debugDev: SpeakerDeviceStatus = rawDevices.find((d) => d.device_id === DEBUG_ID) || { device_id: DEBUG_ID, name: '调试音箱' };
+  const devices = [debugDev, ...rawDevices.filter((d) => d.device_id !== DEBUG_ID)];
+  const convOfDevice = (d: SpeakerDeviceStatus) =>
+    (d.device_id === DEBUG_ID && debugConvOverride) || d.conversation_id ||
+    conversations.find((c) => c.channel === 'speaker' && c.device_id === d.device_id)?.id;
+  const deviceConvIds = new Set(devices.map(convOfDevice).filter(Boolean) as string[]);
+  const legacy = conversations.filter((c) => !deviceConvIds.has(c.id));
+
+  let activeConvId: string | undefined;
+  let activeDevice: SpeakerDeviceStatus | undefined;
+  if (selected.startsWith('device:')) {
+    activeDevice = devices.find((d) => 'device:' + d.device_id === selected) || debugDev;
+    activeConvId = convOfDevice(activeDevice);
+  } else activeConvId = selected.slice(5);
+  const editable = activeDevice?.device_id === DEBUG_ID;
+  const activeTitle = activeDevice ? (activeDevice.device_id === DEBUG_ID ? '调试音箱' : activeDevice.name) : conversations.find((c) => c.id === activeConvId)?.title || '历史会话';
+
+  // external navigation (from logs page)
   useEffect(() => {
-    if (!activeConv) return;
-    if (activeConv.channel === 'speaker') {
-      if (isMock && activeConv.device_id) setTarget(activeConv.device_id);
-    } else setTarget('web');
-  }, [activeConvId, isMock]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Fetch initial conversations
-  const fetchConversationsList = useCallback(async () => {
-    setLoadingList(true);
-    try {
-      const res = await getConversations({ limit: 50 });
-      setConversations(res.items);
-      setNextBefore(res.next_before);
-      if (res.items.length > 0 && !activeConvId) {
-        setActiveConvId(res.items[0].id);
-      }
-    } catch (err: any) {
-      toastError(err.message || '获取对话列表失败');
-    } finally {
-      setLoadingList(false);
-    }
-  }, [activeConvId, toastError]);
-
-  useEffect(() => {
-    fetchConversationsList();
-  }, [fetchConversationsList]);
-
-  // Load more conversations
-  const handleLoadMore = async () => {
-    if (!nextBefore || loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const res = await getConversations({ limit: 50, before: nextBefore });
-      setConversations((prev) => [...prev, ...res.items]);
-      setNextBefore(res.next_before);
-    } catch (err: any) {
-      toastError(err.message || '加载更多对话失败');
-    } finally {
-      setLoadingMore(false);
-    }
-  };
-
-  // Fetch messages when active conversation changes
-  useEffect(() => {
-    if (!activeConvId) {
-      setMessages([]);
-      return;
-    }
-
-    let isSubscribed = true;
-    setLoadingMessages(true);
-    setToolResults({});
-
-    getMessages(activeConvId)
-      .then((res) => {
-        if (!isSubscribed) return;
-        setMessages(res.items || []);
-
-        // Prepopulate tool results from messages with role === 'tool'
-        const resultsMap: Record<string, { result?: unknown; error?: string; durationMs?: number }> = {};
-        for (const msg of res.items || []) {
-          if (msg.role === 'tool' && msg.tool_call_id) {
-            resultsMap[msg.tool_call_id] = { result: msg.content };
-          }
-        }
-        setToolResults(resultsMap);
-      })
-      .catch((err: any) => {
-        if (!isSubscribed) return;
-        toastError(err.message || '获取对话消息失败');
-      })
-      .finally(() => {
-        if (isSubscribed) {
-          setLoadingMessages(false);
-          setTimeout(() => scrollToBottom(false), 50);
-        }
-      });
-
-    return () => {
-      isSubscribed = false;
-    };
-  }, [activeConvId, scrollToBottom, toastError]);
+    if (!targetConversationId) return;
+    setSelected('conv:' + targetConversationId);
+    setLegacyOpen(true);
+  }, [targetConversationId]);
 
   const reloadMessages = useCallback(async (id: string) => {
     try {
@@ -183,629 +85,184 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
       setMessages(res.items || []);
       const map: Record<string, { result?: unknown }> = {};
       for (const m of res.items || []) if (m.role === 'tool' && m.tool_call_id) map[m.tool_call_id] = { result: m.content };
-      setToolResults((prev) => ({ ...prev, ...map }));
+      setToolResults(map);
     } catch { /* ignore */ }
   }, []);
 
-  // Poll speaker events for the active speaker conversation
+  // messages + events when the conversation changes
   useEffect(() => {
-    setSpEvents([]);
-    spAfterRef.current = 0;
-    if (!activeConvId || !isSpeakerConv) return;
+    setMessages([]); setToolResults({}); setEvents([]); afterRef.current = 0;
+    if (!activeConvId) return;
     const convId = activeConvId;
-    const dev = activeConv?.device_id;
+    reloadMessages(convId);
     let stop = false;
     const tick = async () => {
       try {
-        const r = await getSpeakerEvents(spAfterRef.current, dev);
+        const r = await getSpeakerEvents(afterRef.current, convId);
         if (stop) return;
-        const evs = (r.events || []).filter((e) => e.conversation_id ? e.conversation_id === convId : !dev || e.device_id === dev);
-        if (r.last_seq != null) spAfterRef.current = r.last_seq;
+        if (r.last_seq != null) afterRef.current = r.last_seq;
+        const evs = (r.events || []).filter((e) => !e.conversation_id || e.conversation_id === convId);
         if (evs.length) {
-          setSpEvents((p) => [...p, ...evs]);
-          if (evs.some((e) => e.kind === 'reply')) { reloadMessages(convId); fetchConversationsList(); }
+          setEvents((p) => [...p, ...evs]);
+          if (evs.some((e) => e.kind === 'reply' || e.kind === 'turn_end')) { reloadMessages(convId); loadConversations(); }
         }
       } catch { /* backend may not support yet */ }
     };
     tick();
     const t = setInterval(tick, 700);
     return () => { stop = true; clearInterval(t); };
-  }, [activeConvId, isSpeakerConv]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeConvId, reloadMessages, loadConversations]);
 
-  // Scroll on message updates
-  useEffect(() => {
-    scrollToBottom(false);
-  }, [messages, spEvents.length, scrollToBottom]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [events.length, messages.length]);
 
-  // Create new conversation
-  const handleNewChat = async () => {
-    if (isStreaming) {
-      abortControllerRef.current?.abort();
-      setIsStreaming(false);
-    }
+  // ---------- actions ----------
+  const send = async (t?: string) => {
+    const text = (t ?? input).trim();
+    if (!text || sending || !editable) return;
+    setSending(true);
     try {
-      const conv = await createConversation({ title: '新对话' });
-      const newConvObj: Conversation = {
-        id: conv.id,
-        title: conv.title || '新对话',
-        channel: 'web',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      setConversations((prev) => [newConvObj, ...prev]);
-      setActiveConvId(conv.id);
-      setMessages([]);
-      setToolResults({});
-      setMobileSidebarOpen(false);
-    } catch (err: any) {
-      toastError(err.message || '创建对话失败');
-    }
-  };
-
-  const startEmptyConversation = async () => {
-    setMessages([]);
-    setToolResults({});
-    try {
-      await handleNewChat();
-    } catch {
-      /* handled inside */
-    }
-  };
-
-  const handleDeleteOne = async (c: Conversation) => {
-    if (!window.confirm(`确定删除会话「${c.title || '无标题会话'}」吗？\n会话、消息及其追踪记录将一并删除。`)) return;
-    try {
-      if (c.id === activeConvId) abortControllerRef.current?.abort();
-      await deleteConversation(c.id);
-      setConversations((prev) => prev.filter((x) => x.id !== c.id));
-      if (c.id === activeConvId) {
-        setIsStreaming(false);
-        await startEmptyConversation();
-      }
-      toast({ type: 'success', title: '已删除会话', message: '会话及其追踪记录已移除' });
-    } catch (err: any) {
-      toastError(err.message || '删除会话失败');
-    }
-  };
-
-  const handleClearAll = async () => {
-    if (!window.confirm('确定清空全部会话吗？\n所有会话、消息及其追踪记录将一并删除，且无法恢复。')) return;
-    try {
-      abortControllerRef.current?.abort();
-      const res = await deleteAllConversations();
-      setConversations([]);
-      setNextBefore(undefined);
-      setIsStreaming(false);
-      await startEmptyConversation();
-      toast({ type: 'success', title: `已清空 ${res.deleted} 个会话`, message: '所有会话及追踪记录已移除' });
-    } catch (err: any) {
-      toastError(err.message || '清空会话失败');
-    }
-  };
-
-  // Stop generation
-  const handleStop = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    setIsStreaming(false);
-  };
-
-  // Send message
-  const handleSend = async (overrideText?: string) => {
-    const textToSend = (overrideText ?? input).trim();
-    if (!textToSend || isStreaming) return;
-
-    if (target !== 'web') {
-      if (!isMock) return;
+      const r = await mockAsk(text, DEBUG_ID, nativeReply);
       setInput('');
-      try {
-        const r = await mockAsk(textToSend, target, nativeReply);
-        await fetchConversationsList();
-        const cid = r.conversation_id || speakerDevices.find((d) => d.device_id === target)?.conversation_id;
-        if (cid) setActiveConvId(cid);
-      } catch (err: any) {
-        toastError(err.message || '发送给模拟音箱失败');
-      }
-      return;
-    }
+      if (r.conversation_id) setDebugConvOverride(r.conversation_id);
+      loadStatus(); loadConversations();
+    } catch (e: any) { toastError(e.message || '发送失败'); }
+    finally { setSending(false); }
+  };
 
-    setInput('');
-    const currentConvId = isSpeakerConv ? null : activeConvId;
-    if (isSpeakerConv) { setMessages([]); setToolResults({}); }
-
-    const userMsgId = 'u_' + Date.now();
-    const userMsg: Message = {
-      id: userMsgId,
-      role: 'user',
-      content: textToSend,
-      created_at: new Date().toISOString(),
-    };
-
-    const assistantMsgId = 'a_' + (Date.now() + 1);
-    const initialAssistantMsg: Message = {
-      id: assistantMsgId,
-      role: 'assistant',
-      content: '',
-      tool_calls: [],
-      created_at: new Date().toISOString(),
-      streaming: true,
-    };
-
-    setMessages((prev) => [...prev, userMsg, initialAssistantMsg]);
-    setIsStreaming(true);
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
+  const del = async (id: string, label: string, isDevice: boolean) => {
+    if (!window.confirm(`确定删除「${label}」${isDevice ? '的历史记录' : ''}吗？\n消息及其追踪记录将一并删除。`)) return;
     try {
-      await streamChat({
-        conversationId: currentConvId || undefined,
-        message: textToSend,
-        signal: controller.signal,
-        callbacks: {
-          onConversation: (data) => {
-            if (!currentConvId || currentConvId !== data.id) {
-              setActiveConvId(data.id);
-              fetchConversationsList();
-            }
-          },
-          onToken: (data) => {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsgId
-                  ? { ...m, content: m.content + data.text }
-                  : m
-              )
-            );
-          },
-          onSentence: (data) => {
-            // If tokens are not provided, append sentence
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsgId && !m.content.includes(data.text)
-                  ? { ...m, content: m.content + (m.content ? '\n' : '') + data.text }
-                  : m
-              )
-            );
-          },
-          onToolCall: (data) => {
-            toolStartRef.current[data.id] = Date.now();
-            const newTc: ToolCall = {
-              id: data.id,
-              name: data.name,
-              arguments: data.arguments,
-            };
-            setMessages((prev) =>
-              prev.map((m) => {
-                if (m.id !== assistantMsgId) return m;
-                const existing = m.tool_calls || [];
-                if (existing.some((t) => t.id === newTc.id)) return m;
-                return { ...m, tool_calls: [...existing, newTc] };
-              })
-            );
-          },
-          onToolResult: (data) => {
-            setToolResults((prev) => ({
-              ...prev,
-              [data.id]: {
-                result: data.result,
-                error: data.error,
-                durationMs:
-                  data.duration_ms ??
-                  (toolStartRef.current[data.id]
-                    ? Date.now() - toolStartRef.current[data.id]
-                    : undefined),
-              },
-            }));
-          },
-          onDone: (data) => {
-            setMessages((prev) => {
-              const updated = prev.map((m) =>
-                m.id === assistantMsgId
-                  ? {
-                      ...m,
-                      streaming: false,
-                      timings: data.timings,
-                    }
-                  : m
-              );
-              return updated;
-            });
-            setIsStreaming(false);
-            abortControllerRef.current = null;
-          },
-          onError: (data) => {
-            toast({
-              type: 'error',
-              title: '生成出错',
-              message: data.message,
-            });
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsgId
-                  ? {
-                      ...m,
-                      streaming: false,
-                      content:
-                        m.content +
-                        `\n\n> ⚠️ **流式传输异常中断**: ${data.message}`,
-                    }
-                  : m
-              )
-            );
-            setIsStreaming(false);
-            abortControllerRef.current = null;
-          },
-        },
-      });
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        toastError(err.message || '对话请求异常');
-      }
-    } finally {
-      setIsStreaming(false);
-      abortControllerRef.current = null;
-    }
+      await deleteConversation(id);
+      if (debugConvOverride === id) setDebugConvOverride(null);
+      if (id === activeConvId) { setMessages([]); setEvents([]); if (!isDevice) setSelected('device:' + DEBUG_ID); }
+      await Promise.all([loadConversations(), loadStatus()]);
+      toast({ type: 'success', title: '已删除', message: label });
+    } catch (e: any) { toastError(e.message || '删除失败'); }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  const calledIds = new Set<string>(
-    messages.flatMap((m) => (m.tool_calls || []).map((t) => t.id))
-  );
-
-  const webPrompts = [
-    '播放周杰伦的晴天',
-    '检索本地曲库中的无损音频',
-    '查一下明天出门的天气',
-    '检查本地 fzq 和 jq 工具链状态',
-  ];
-  const speakerPrompts = ['小爱同学，播放一首周杰伦的晴天', '播放海阔天空', '来点陈奕迅的歌', '我想听七里香', '今天天气怎么样', '问问 我的曲库有多少首歌'];
-  const quickPrompts = target === 'web' ? webPrompts : speakerPrompts;
-  const readOnlySpeaker = isSpeakerConv && !isMock;
-  const visibleConversations = conversations.filter((c) =>
-    filter === 'all' ? true : filter === 'speaker' ? c.channel === 'speaker' : c.channel !== 'speaker');
+  const calledIds = new Set<string>(messages.flatMap((m) => (m.tool_calls || []).map((t) => t.id)));
+  const showEmpty = messages.length === 0 && events.length === 0;
+  const pick = (key: string) => { setSelected(key); setMobileSidebarOpen(false); };
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-background">
-      {/* Mobile Sidebar Overlay */}
-      {mobileSidebarOpen && (
-        <div
-          className="fixed inset-0 bg-background/80 backdrop-blur-sm z-30 lg:hidden"
-          onClick={() => setMobileSidebarOpen(false)}
-        />
-      )}
+      {mobileSidebarOpen && <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-30 lg:hidden" onClick={() => setMobileSidebarOpen(false)} />}
 
-      {/* Conversation List Sidebar */}
-      <aside
-        className={`fixed inset-y-0 left-0 z-40 w-72 lg:static lg:w-72 border-r bg-card/60 backdrop-blur flex flex-col shrink-0 transition-transform duration-200 ease-in-out ${
-          mobileSidebarOpen
-            ? 'translate-x-0'
-            : '-translate-x-full lg:translate-x-0'
-        }`}
-      >
-        {/* Header */}
-        <div className="p-3 border-b flex items-center justify-between gap-2">
-          <Button
-            onClick={handleNewChat}
-            className="flex-1 gap-2 shadow-sm font-medium"
-            size="sm"
-          >
-            <Plus className="w-4 h-4" />
-            新建对话
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={fetchConversationsList}
-            disabled={loadingList}
-            title="刷新对话列表"
-            className="shrink-0"
-          >
-            <RefreshCw
-              className={`w-4 h-4 text-muted-foreground ${
-                loadingList ? 'animate-spin' : ''
-              }`}
-            />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setMobileSidebarOpen(false)}
-            className="lg:hidden shrink-0"
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
-
-        {conversations.length > 0 && (
-          <div className="px-3 py-1.5 border-b flex items-center justify-between text-[11px] text-muted-foreground">
-            <span>共 {conversations.length}{nextBefore ? '+' : ''} 个会话</span>
-            <button
-              type="button"
-              onClick={handleClearAll}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:text-destructive hover:bg-destructive/10 transition-colors"
-            >
-              <Trash2 className="w-3 h-3" />
-              清空全部
-            </button>
+      <aside className={`fixed inset-y-0 left-0 z-40 w-72 lg:static border-r bg-card/60 backdrop-blur flex flex-col shrink-0 transition-transform duration-200 ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+        <div className="p-3 border-b flex items-center justify-between">
+          <span className="text-sm font-semibold flex items-center gap-2"><Radio className="w-4 h-4 text-primary" />音箱</span>
+          <div className="flex gap-1">
+            <Button variant="ghost" size="icon" title="刷新" onClick={() => { loadConversations(); loadStatus(); }}><RefreshCw className="w-4 h-4 text-muted-foreground" /></Button>
+            <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileSidebarOpen(false)}><X className="w-4 h-4" /></Button>
           </div>
-        )}
-
-        <div className="px-3 py-1.5 border-b flex gap-1.5">
-          {([['all', '全部'], ['web', '网页'], ['speaker', '音箱']] as const).map(([k, l]) => (
-            <button key={k} type="button" onClick={() => setFilter(k)}
-              className={`text-[11px] px-2.5 py-0.5 rounded-full border ${filter === k ? 'bg-primary text-primary-foreground border-primary' : 'text-muted-foreground hover:bg-muted'}`}>{l}</button>
-          ))}
         </div>
 
-        {/* List items */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {conversations.length === 0 && !loadingList && (
-            <div className="text-center py-10 px-4 text-muted-foreground text-xs">
-              暂无历史对话记录，点击上方按钮发起对话
-            </div>
-          )}
-
-          {visibleConversations.map((c) => {
-            const isActive = c.id === activeConvId;
+          {devices.map((d) => {
+            const key = 'device:' + d.device_id;
+            const cid = convOfDevice(d);
+            const conv = conversations.find((c) => c.id === cid);
+            const isDebug = d.device_id === DEBUG_ID;
+            const active = selected === key;
             return (
-              <div
-                key={c.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => {
-                  setActiveConvId(c.id);
-                  setMobileSidebarOpen(false);
-                }}
-                className={`group/item relative cursor-pointer w-full text-left p-2.5 rounded-lg text-xs transition-all flex flex-col gap-1.5 ${
-                  isActive
-                    ? 'bg-primary/10 text-primary font-medium border border-primary/20 shadow-xs'
-                    : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-1 w-full">
-                  <span className="truncate font-sans text-[13px] text-foreground">
-                    {c.title || '无标题会话'}
-                  </span>
-                  {c.channel === 'speaker' ? (
-                    <Badge
-                      variant="outline"
-                      className="text-[9px] px-1 py-0 h-4 gap-0.5 text-indigo-500 border-indigo-200 dark:border-indigo-800 shrink-0"
-                    >
-                      <Radio className="w-2.5 h-2.5" />
-                      {c.device_name || c.device_id || '音箱'}
-                    </Badge>
-                  ) : (
-                    <Badge
-                      variant="secondary"
-                      className="text-[9px] px-1 py-0 h-4 gap-0.5 shrink-0"
-                    >
-                      <Monitor className="w-2.5 h-2.5" />
-                      网页
-                    </Badge>
-                  )}
+              <div key={key} role="button" tabIndex={0} onClick={() => pick(key)}
+                className={`group/item relative cursor-pointer p-2.5 rounded-lg text-xs border transition-all ${active ? 'bg-primary/10 border-primary/30' : 'border-transparent hover:bg-muted/70'}`}>
+                <div className="flex items-center gap-2">
+                  <Radio className={`w-4 h-4 shrink-0 ${isDebug ? 'text-primary' : 'text-indigo-500'}`} />
+                  <span className="font-medium text-[13px] truncate flex-1">{isDebug ? '调试音箱' : d.name}</span>
+                  {isDebug ? <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4">可对话</Badge>
+                    : d.online === false ? <WifiOff className="w-3 h-3 text-muted-foreground" /> : <Wifi className="w-3 h-3 text-emerald-500" />}
                 </div>
-                <div className="flex items-center justify-between text-[10px] text-muted-foreground/80">
-                  <span className="font-mono">{c.id.slice(0, 10)}</span>
-                  <span>{formatRelativeTime(c.updated_at || c.created_at)}</span>
+                <div className="mt-1 text-[10px] text-muted-foreground flex justify-between pl-6">
+                  <span>{isDebug ? '对它说话来测试' : `${d.hardware || ''} · 只读`}</span>
+                  <span>{conv ? formatRelativeTime(conv.updated_at || conv.created_at) : '暂无记录'}</span>
                 </div>
-                <button
-                  type="button"
-                  title="删除会话"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteOne(c);
-                  }}
-                  className="absolute right-1.5 top-1.5 p-1 rounded bg-card/90 border border-border text-muted-foreground opacity-0 group-hover/item:opacity-100 focus:opacity-100 hover:text-destructive hover:border-destructive/40 transition-opacity"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {cid && (
+                  <button type="button" title="清空该设备历史" onClick={(e) => { e.stopPropagation(); del(cid, isDebug ? '调试音箱' : d.name, true); }}
+                    className="absolute right-1.5 top-1.5 p-1 rounded bg-card/90 border text-muted-foreground opacity-0 group-hover/item:opacity-100 hover:text-destructive transition-opacity">
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                )}
               </div>
             );
           })}
 
-          {/* Load More Button */}
-          {nextBefore && (
+          {legacy.length > 0 && (
             <div className="pt-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleLoadMore}
-                disabled={loadingMore}
-                className="w-full text-xs"
-              >
-                {loadingMore ? '加载中...' : '加载更多历史对话'}
-              </Button>
+              <button type="button" onClick={() => setLegacyOpen(!legacyOpen)} className="w-full flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-muted-foreground hover:text-foreground">
+                {legacyOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                <History className="w-3 h-3" />历史网页会话 ({legacy.length})
+              </button>
+              {legacyOpen && legacy.map((c) => (
+                <div key={c.id} role="button" tabIndex={0} onClick={() => pick('conv:' + c.id)}
+                  className={`group/item relative cursor-pointer p-2 rounded-lg text-xs ${selected === 'conv:' + c.id ? 'bg-primary/10 border border-primary/20' : 'hover:bg-muted/70 border border-transparent'}`}>
+                  <div className="truncate text-[13px] pr-6">{c.title || '无标题会话'}</div>
+                  <div className="text-[10px] text-muted-foreground flex justify-between"><span className="font-mono">{c.id.slice(0, 10)}</span><span>{formatRelativeTime(c.updated_at || c.created_at)}</span></div>
+                  <button type="button" title="删除会话" onClick={(e) => { e.stopPropagation(); del(c.id, c.title || '无标题会话', false); }}
+                    className="absolute right-1.5 top-1.5 p-1 rounded bg-card/90 border text-muted-foreground opacity-0 group-hover/item:opacity-100 hover:text-destructive transition-opacity">
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </div>
       </aside>
 
-      {/* Main Chat Area */}
-      <main className="flex-1 flex flex-col min-w-0 h-full relative">
-        {/* Chat Header */}
-        <header className="h-13 border-b px-4 flex items-center justify-between bg-card/40 backdrop-blur shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="lg:hidden shrink-0 -ml-2"
-              onClick={() => setMobileSidebarOpen(true)}
-            >
-              <Menu className="w-4 h-4" />
-            </Button>
-            {isSpeakerConv ? <Radio className="w-4 h-4 text-indigo-500 shrink-0" /> : <MessageSquare className="w-4 h-4 text-primary shrink-0" />}
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold truncate text-foreground flex items-center gap-2">
-                <span>
-                  {conversations.find((c) => c.id === activeConvId)?.title ||
-                    '在线对话调试'}
-                </span>
-                {activeConvId && (
-                  <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline-block">
-                    ID: {activeConvId}
-                  </span>
-                )}
-              </h2>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            {isStreaming && (
-              <Badge variant="warning" className="gap-1 animate-pulse">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
-                正在响应中
-              </Badge>
-            )}
-            <span className="text-xs text-muted-foreground hidden md:inline-block">
-              {messages.length} 条消息
-            </span>
-          </div>
+      <main className="flex-1 flex flex-col min-w-0 h-full">
+        <header className="h-13 border-b px-4 flex items-center gap-2 bg-card/40 backdrop-blur shrink-0">
+          <Button variant="ghost" size="icon" className="lg:hidden shrink-0 -ml-2" onClick={() => setMobileSidebarOpen(true)}><Menu className="w-4 h-4" /></Button>
+          <Radio className="w-4 h-4 text-primary shrink-0" />
+          <h2 className="text-sm font-semibold truncate">{activeTitle}</h2>
+          {!editable && <Badge variant="outline" className="text-[10px]">只读</Badge>}
+          {status?.driver && status.driver !== 'mock' && editable && <span className="text-[11px] text-amber-600">当前驱动为 {status.driver}，调试音箱可能不响应</span>}
+          {activeConvId && <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline ml-auto">ID: {activeConvId}</span>}
         </header>
 
-        {/* Message Stream Scroll Area */}
-        <div className="flex-1 overflow-y-auto divide-y divide-border/20 py-3">
-          {loadingMessages ? (
-            <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
-              <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-              正在加载历史消息...
-            </div>
-          ) : messages.length === 0 && !(isSpeakerConv && spEvents.length > 0) ? (
+        <div className="flex-1 overflow-y-auto py-3">
+          {showEmpty ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-6 text-muted-foreground">
-              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
-                <Sparkles className="w-6 h-6 text-primary" />
-              </div>
-              <h3 className="font-medium text-foreground text-sm mb-1">
-                小爱音箱 AI 伴侣调试通道
-              </h3>
-              <p className="text-xs max-w-sm text-muted-foreground mb-4">
-                在此发送指令可直接测试 LLM 推理、本地工具调用 (fzq 拼音检索、音箱播放流驱动) 与事件流。
-              </p>
-              <div className="flex flex-wrap gap-2 justify-center max-w-md">
-                {quickPrompts.map((p, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleSend(p)}
-                    className="text-xs px-2.5 py-1.5 rounded-md border border-border bg-card hover:bg-muted text-foreground transition-colors"
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3"><Mic className="w-6 h-6 text-primary" /></div>
+              <h3 className="font-medium text-foreground text-sm mb-1">{editable ? '对调试音箱说点什么' : '暂无记录'}</h3>
+              <p className="text-xs max-w-sm mb-4">{editable ? '每次提问都会展示完整流程：检测 → 打断 → 大模型 → 工具 → 播报 → 播放。' : '该音箱收到提问后，处理流程会实时显示在这里。'}</p>
+              {editable && (
+                <div className="flex flex-wrap gap-2 justify-center max-w-md">
+                  {EXAMPLES.map((p) => <button key={p} onClick={() => send(p)} className="text-xs px-2.5 py-1.5 rounded-md border bg-card hover:bg-muted text-foreground">{p}</button>)}
+                </div>
+              )}
             </div>
           ) : (
             <>
-              {isSpeakerConv ? (
-                <SpeakerTimeline messages={messages} events={spEvents} toolResults={toolResults} calledIds={calledIds} conversationId={activeConvId || undefined} />
-              ) : messages.map((msg) => (
-                <MessageBubble
-                  key={msg.id}
-                  orphanTool={msg.role === 'tool' && !calledIds.has(msg.tool_call_id || '')}
-                  message={msg}
-                  toolResultsMap={toolResults}
-                  isStreaming={msg.streaming && isStreaming}
-                  conversationId={activeConvId || undefined}
-                />
-              ))}
-              <div ref={messagesEndRef} className="h-4" />
+              <SpeakerTimeline messages={messages} events={events} toolResults={toolResults} calledIds={calledIds} conversationId={activeConvId} />
+              <div ref={endRef} className="h-4" />
             </>
           )}
         </div>
 
-        {/* Message Input Bottom Area */}
         <div className="border-t bg-card/60 backdrop-blur p-3 shrink-0">
-          <div className="max-w-4xl mx-auto flex flex-col gap-2">
-            {/* Quick Chips on bottom */}
-            {messages.length > 0 && !isStreaming && (
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-[11px] text-muted-foreground">
-                <span className="shrink-0 text-muted-foreground/70 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-primary" /> 快速调试:
-                </span>
-                {quickPrompts.slice(0, 3).map((prompt, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleSend(prompt)}
-                    className="shrink-0 px-2 py-0.5 rounded-full border border-border/80 bg-background hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Target switch */}
-            <div className="flex flex-wrap items-center gap-2 text-[11px]">
-              <div className="inline-flex rounded-md border overflow-hidden">
-                <button type="button" onClick={() => setTarget('web')} className={`px-2.5 py-1 flex items-center gap-1 ${target === 'web' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}><Globe className="w-3 h-3" />网页</button>
-                {(speakerDevices.length ? speakerDevices : []).map((d) => (
-                  <button key={d.device_id} type="button" disabled={!isMock}
-                    title={isMock ? undefined : '真实音箱请直接对音箱说话'}
-                    onClick={() => setTarget(d.device_id)}
-                    className={`px-2.5 py-1 flex items-center gap-1 border-l ${target === d.device_id ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent`}>
-                    <Radio className="w-3 h-3" />音箱: {d.name}
-                  </button>
-                ))}
-              </div>
-              {!isMock && <span className="text-muted-foreground">真实音箱请直接对音箱说话{readOnlySpeaker && '（当前为只读实时视图，在此发送将新建网页对话）'}</span>}
-              {target !== 'web' && (
-                <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer">
-                  <input type="checkbox" role="switch" checked={nativeReply} onChange={(e) => setNativeReply(e.target.checked)} className="accent-primary w-3.5 h-3.5" />模拟小爱原生回复
-                </label>
+          {editable ? (
+            <div className="max-w-4xl mx-auto flex flex-col gap-2">
+              {!showEmpty && (
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]">
+                  {EXAMPLES.map((p) => <button key={p} onClick={() => send(p)} disabled={sending} className="shrink-0 px-2 py-0.5 rounded-full border bg-background hover:bg-muted text-muted-foreground hover:text-foreground">{p}</button>)}
+                </div>
               )}
-            </div>
-
-            {/* Input Box */}
-            <div className="relative flex items-end gap-2 bg-background rounded-xl border border-input focus-within:ring-1 focus-within:ring-ring p-1.5 shadow-xs">
-              <Textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={target === 'web' ? '发送调试指令给小爱音箱 AI 伴侣... (Enter 发送，Shift+Enter 换行)' : '对音箱说话… (Enter 发送)'}
-                className="border-0 focus-visible:ring-0 shadow-none min-h-[44px] max-h-36 py-2 px-3 text-sm bg-transparent"
-                rows={1}
-                disabled={isStreaming}
-              />
-
-              <div className="flex items-center gap-1.5 shrink-0 pr-1 pb-1">
-                {isStreaming ? (
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    onClick={handleStop}
-                    className="gap-1.5 h-8 px-3 text-xs shadow-sm"
-                  >
-                    <Square className="w-3.5 h-3.5 fill-current" />
-                    停止生成
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => handleSend()}
-                    disabled={!input.trim()}
-                    className="gap-1.5 h-8 px-3 text-xs shadow-sm"
-                  >
-                    <span>发送</span>
-                    <Send className="w-3.5 h-3.5" />
-                  </Button>
-                )}
+              <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer w-fit">
+                <input type="checkbox" role="switch" checked={nativeReply} onChange={(e) => setNativeReply(e.target.checked)} className="accent-primary w-3.5 h-3.5" />模拟小爱原生回复
+              </label>
+              <div className="flex items-end gap-2 bg-background rounded-xl border border-input focus-within:ring-1 focus-within:ring-ring p-1.5">
+                <Textarea value={input} onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                  placeholder="对调试音箱说话… (Enter 发送，Shift+Enter 换行)"
+                  className="border-0 focus-visible:ring-0 shadow-none min-h-[44px] max-h-36 py-2 px-3 text-sm bg-transparent" rows={1} />
+                <Button type="button" size="sm" onClick={() => send()} disabled={!input.trim() || sending} className="gap-1.5 h-8 px-3 text-xs mb-1 mr-1">发送<Send className="w-3.5 h-3.5" /></Button>
               </div>
             </div>
-
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground/70 px-1">
-              <span>Enter 发送，Shift + Enter 换行</span>
-              <span className="hidden sm:inline">POST sse/chat 流式解析驱动</span>
+          ) : (
+            <div className="text-center text-xs text-muted-foreground py-2">
+              {activeDevice ? '真实音箱请直接对音箱说话，这里只显示记录' : '历史会话仅供查看'}
             </div>
-          </div>
+          )}
         </div>
       </main>
     </div>

@@ -706,6 +706,7 @@ func speakerSection() *section {
 			enumField("driver", "驱动：mock（内存虚拟音箱，可在界面模拟提问）、log（仅输出日志）、xiaomi（小米小爱音箱）", []string{"mock", "log", "xiaomi"}, func(c *config.Config) *string { return &c.Speaker.Driver }),
 			strField("public_base_url", "音箱访问本服务的地址，如 http://192.168.1.10:8081（无结尾斜杠）；留空则自动取本机首个非回环 IPv4 + 服务端口（Docker 桥接模式下通常不可达，请显式设置）", func(c *config.Config) *string { return &c.Speaker.PublicBaseURL }),
 			durField("url_ttl", "签名媒体 URL 有效期（如 1h，最小 1m）", func(c *config.Config) *time.Duration { return &c.Speaker.URLTTL }),
+			boolField("debug_device", "调试音箱：始终可用的虚拟设备 debug（与驱动无关；聊天页的输入都经它走完整的音箱流程）。关闭则隐藏", func(c *config.Config) *bool { return &c.Speaker.DebugDevice }),
 			intField("volume_default", "默认音量（0–100，默认 30）：仅在测试面板「音量」未指定数值时使用，不会自动应用到音箱；0 = 不设置（不改动音箱音量）", func(c *config.Config) *int { return &c.Speaker.VolumeDefault }),
 			devices,
 			enumField("hook.mode", "对话接管：music（默认，只接管点歌请求，置信命中时不经大模型直接播放）、keyword（去掉唤醒词后以 hook.keywords 前缀开头才接管）、all（接管全部提问）、off（只播报不监听）", []string{"music", "keyword", "all", "off"}, func(c *config.Config) *string { return &c.Speaker.Hook.Mode }),

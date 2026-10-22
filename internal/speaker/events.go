@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const eventRing = 2000
+const eventRing = 5000
 
 // MockEvent is one entry of the speaker event log (all drivers).
 // (Name kept for history; see SpeakerEvent.)
@@ -31,6 +31,9 @@ type MockEvent struct {
 	ConversationID string `json:"conversation_id,omitempty"`
 	// TurnID is the hook turn the event belongs to, when known.
 	TurnID string `json:"turn_id,omitempty"`
+	// Data carries kind-specific details of the flow events (turn_start,
+	// llm_start, llm_end, tool_call, tool_result, turn_end).
+	Data map[string]any `json:"data,omitempty"`
 }
 
 // SpeakerEvent is the neutral name of MockEvent.

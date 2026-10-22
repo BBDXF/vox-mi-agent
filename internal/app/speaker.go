@@ -43,6 +43,7 @@ func (a *App) applySpeaker(c *config.Config) {
 	default:
 		drv = a.Mock
 	}
+	a.Speaker.SetDebug(a.Mock, c.Speaker.DebugDevice)
 	a.Speaker.Set(drv, speakerDevices(c), c.Speaker.VolumeDefault)
 	a.applyHook(c)
 }

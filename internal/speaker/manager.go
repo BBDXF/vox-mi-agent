@@ -10,16 +10,24 @@ import (
 	"github.com/andy/vox-mi-agent/internal/tools/audio"
 )
 
-// Manager routes speaker operations to the active driver. It implements
-// audio.Player (PlayByURL / volume on the default device).
+// DebugDeviceID is the always-available mock device (调试音箱).
+const DebugDeviceID = "debug"
+
+// Manager routes speaker operations by device id: the debug device goes to
+// the debug (mock) driver, every other device to the configured driver. It
+// implements audio.Player (PlayByURL / volume on the default device).
 type Manager struct {
 	mu      sync.RWMutex
-	drv     Driver // what callers use (inner, wrapped to log its actions)
+	drv     Driver // configured driver as callers use it (wrapped to log its actions)
 	inner   Driver
+	debug   Driver // debug device driver (nil = the configured driver handles it)
+	debugOn bool
 	events  *EventLog
 	devices []Device // configured devices
 	volume  int
+	ver     int
 	log     *slog.Logger
+	rt      *router
 }
 
 var _ audio.Player = (*Manager)(nil)
@@ -29,7 +37,8 @@ func NewManager(log *slog.Logger) *Manager {
 	if log == nil {
 		log = slog.Default()
 	}
-	m := &Manager{log: log, events: NewEventLog()}
+	m := &Manager{log: log, events: NewEventLog(), debugOn: true}
+	m.rt = &router{m: m}
 	m.setDriverLocked(NewLog(log))
 	return m
 }
@@ -38,6 +47,7 @@ func (m *Manager) setDriverLocked(d Driver) {
 	if d == m.inner && m.drv != nil {
 		return
 	}
+	m.ver++
 	m.inner = d
 	if _, ok := d.(selfRecorder); ok {
 		if mk, ok := d.(interface{ UseLog(*EventLog) }); ok {
@@ -49,10 +59,27 @@ func (m *Manager) setDriverLocked(d Driver) {
 	m.drv = &recordingDriver{Driver: d, log: m.events}
 }
 
+// SetDebug installs the debug device driver (a self-recording mock) and
+// whether the device is enabled (speaker.debug_device).
+func (m *Manager) SetDebug(d Driver, enabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.debug != d || m.debugOn != enabled {
+		m.ver++
+	}
+	m.debug, m.debugOn = d, enabled
+	if mk, ok := d.(interface{ UseLog(*EventLog) }); ok {
+		mk.UseLog(m.events)
+	}
+}
+
+// Version changes whenever the driver set or the debug setting changes.
+func (m *Manager) Version() int { m.mu.RLock(); defer m.mu.RUnlock(); return m.ver }
+
 // Log returns the shared event log (all drivers).
 func (m *Manager) Log() *EventLog { return m.events }
 
-// Set swaps the driver and device list (hot reload).
+// Set swaps the configured driver and device list (hot reload).
 func (m *Manager) Set(drv Driver, devices []Device, volumeDefault int) {
 	m.mu.Lock()
 	m.setDriverLocked(drv)
@@ -61,8 +88,57 @@ func (m *Manager) Set(drv Driver, devices []Device, volumeDefault int) {
 	m.mu.Unlock()
 }
 
-// Driver returns the active driver.
-func (m *Manager) Driver() Driver { m.mu.RLock(); defer m.mu.RUnlock(); return m.drv }
+// Driver returns the routing driver (by device id).
+func (m *Manager) Driver() Driver { return m.rt }
+
+// target is the driver that handles deviceID.
+func (m *Manager) target(deviceID string) Driver {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if deviceID == DebugDeviceID && m.debug != nil {
+		return m.debug
+	}
+	return m.drv
+}
+
+// router implements Driver by delegating per device id.
+type router struct{ m *Manager }
+
+func (r *router) Name() string {
+	r.m.mu.RLock()
+	defer r.m.mu.RUnlock()
+	return r.m.inner.Name()
+}
+func (r *router) DeviceList(ctx context.Context) ([]Device, error) {
+	r.m.mu.RLock()
+	d := r.m.drv
+	r.m.mu.RUnlock()
+	return d.DeviceList(ctx)
+}
+func (r *router) GetLatestAsk(ctx context.Context, d Device, since time.Time) (*Ask, error) {
+	return r.m.target(d.DeviceID).GetLatestAsk(ctx, d, since)
+}
+func (r *router) TextToSpeech(ctx context.Context, d Device, t string) error {
+	return r.m.target(d.DeviceID).TextToSpeech(ctx, d, t)
+}
+func (r *router) PlayByURL(ctx context.Context, d Device, u string) error {
+	return r.m.target(d.DeviceID).PlayByURL(ctx, d, u)
+}
+func (r *router) PlayerSetVolume(ctx context.Context, d Device, v int) error {
+	return r.m.target(d.DeviceID).PlayerSetVolume(ctx, d, v)
+}
+func (r *router) PlayerPause(ctx context.Context, d Device) error {
+	return r.m.target(d.DeviceID).PlayerPause(ctx, d)
+}
+func (r *router) PlayerPlay(ctx context.Context, d Device) error {
+	return r.m.target(d.DeviceID).PlayerPlay(ctx, d)
+}
+func (r *router) PlayerStop(ctx context.Context, d Device) error {
+	return r.m.target(d.DeviceID).PlayerStop(ctx, d)
+}
+func (r *router) PlayerGetStatus(ctx context.Context, d Device) (Status, error) {
+	return r.m.target(d.DeviceID).PlayerGetStatus(ctx, d)
+}
 
 // VolumeDefault returns speaker.volume_default.
 func (m *Manager) VolumeDefault() int { m.mu.RLock(); defer m.mu.RUnlock(); return m.volume }
@@ -74,26 +150,66 @@ func (m *Manager) Configured() []Device {
 	return append([]Device(nil), m.devices...)
 }
 
-// Devices returns the effective enabled devices: the configured enabled ones;
-// with the mock / log driver and none configured, the driver's built-in ones.
-func (m *Manager) Devices() []Device {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (m *Manager) debugDeviceLocked() (Device, bool) {
+	if m.debug == nil || !m.debugOn {
+		return Device{}, false
+	}
+	if s, ok := m.debug.(interface{ StaticDevices() []Device }); ok {
+		for _, d := range s.StaticDevices() {
+			if d.DeviceID == DebugDeviceID {
+				return d, true
+			}
+		}
+	}
+	return Device{DeviceID: DebugDeviceID, Name: "调试音箱", Hardware: "LX06", Enabled: true, PlayMode: "auto", TTSMode: "auto"}, true
+}
+
+func (m *Manager) listLocked(onlyEnabled bool) []Device {
 	var out []Device
-	for _, d := range m.devices {
-		if d.Enabled {
+	seen := map[string]bool{}
+	add := func(d Device) {
+		if !seen[d.DeviceID] {
+			seen[d.DeviceID] = true
 			out = append(out, d)
 		}
 	}
-	if len(out) == 0 && len(m.devices) == 0 {
-		if s, ok := m.inner.(interface{ StaticDevices() []Device }); ok {
-			out = s.StaticDevices()
+	for _, d := range m.devices {
+		if d.DeviceID != DebugDeviceID && (d.Enabled || !onlyEnabled) {
+			add(d)
 		}
+	}
+	if len(m.devices) == 0 {
+		if s, ok := m.inner.(interface{ StaticDevices() []Device }); ok {
+			for _, d := range s.StaticDevices() {
+				if d.DeviceID != DebugDeviceID || m.debug == nil {
+					add(d)
+				}
+			}
+		}
+	}
+	if d, ok := m.debugDeviceLocked(); ok {
+		add(d)
 	}
 	return out
 }
 
-// Resolve finds a device by id ("" = the first enabled device).
+// Devices returns the effective enabled devices: configured real devices
+// first (or the log driver's pseudo device), then the debug device.
+func (m *Manager) Devices() []Device {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.listLocked(true)
+}
+
+// AllDevices is Devices including configured-but-disabled ones.
+func (m *Manager) AllDevices() []Device {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.listLocked(false)
+}
+
+// Resolve finds a device by id ("" = the first enabled device: a real one if
+// any, else the debug device).
 func (m *Manager) Resolve(id string) (Device, error) {
 	if id == "" {
 		l := m.Devices()
@@ -102,12 +218,7 @@ func (m *Manager) Resolve(id string) (Device, error) {
 		}
 		return l[0], nil
 	}
-	for _, d := range m.Configured() {
-		if d.DeviceID == id {
-			return d, nil
-		}
-	}
-	for _, d := range m.Devices() {
+	for _, d := range m.AllDevices() {
 		if d.DeviceID == id {
 			return d, nil
 		}
@@ -197,7 +308,7 @@ func (m *Manager) NoteAsk(deviceID, query string, lag time.Duration, handled boo
 // NoteAskSeen records the ask itself for drivers that do not log it (the
 // mock logs asks when injected).
 func (m *Manager) NoteAskSeen(deviceID, query string, at time.Time) {
-	if _, ok := m.Driver().(selfRecorder); ok {
+	if _, ok := m.target(deviceID).(selfRecorder); ok {
 		return
 	}
 	m.events.Record(MockEvent{Device: deviceID, Kind: EvAsk, Text: query, TS: at})

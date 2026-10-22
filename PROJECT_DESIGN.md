@@ -438,6 +438,30 @@ Agent ──Player/Speaker 接口──▶ speaker.Manager ──▶ Driver: moc
 - 用户在 Agent 播报中再次提问 → 取消当前轮（复用会话取消钩子），按新问题处理。
 - 每台设备对应一个固定会话（channel=`speaker`，标题为设备名），历史连续。
 
+#### 6.7.3a 调试音箱与事件流
+
+- **调试音箱**：虚拟设备 `debug`（名称「调试音箱」，型号 LX06）始终可用，与 `speaker.driver` 无关（配置 `speaker.debug_device`，默认 true，可隐藏）。`Manager` 按设备 id 路由：`debug` → mock 驱动实例，其余设备 → 配置的驱动（xiaomi/log）；`driver: mock` 仅表示没有真实设备。无 `device_id` 的播放/音量默认指向第一个真实设备，没有则指向 `debug`。统一聊天界面的输入走 `POST /api/speaker/mock/ask`（默认设备 `debug`，任意驱动均可），真实音箱的对话只读地出现在同一事件流中。
+- **事件流**（`GET /api/speaker/events?after=&device_id=&conversation_id=` → `{events,last_seq}`；`/api/speaker/mock/events` 为别名；环形缓冲 5000 条，所有驱动共用）。每条事件：`seq, ts, device_id, kind, conversation_id?, turn_id?, latency_ms?`（自该设备最近一次提问起，ms），其余字段按 kind：
+
+| kind | 字段 |
+|---|---|
+| `ask` | `text`（用户提问；真实音箱的 `ts` 为设备记录时间） |
+| `ask_detected` | `text, handled, route(direct\|artist_random\|agent\|ignored), latency_ms=检测延迟` |
+| `native_reply` | `text="（小爱原生回复）"`；仅调试音箱开启 native_reply 且该提问被忽略时 |
+| `turn_start` | `route`，`data:{route,text}` |
+| `llm_start` | `data:{model,step}` |
+| `llm_end` | `data:{step,latency_ms=首 token,duration_ms,tokens?:{prompt,completion},error?}` |
+| `tool_call` | `data:{name,args(JSON 对象),call_id}` |
+| `tool_result` | `data:{call_id,name,ok,duration_ms,result?(JSON，>2KB 时截断为字符串并 truncated:true),error?}` |
+| `pause` / `play` / `stop` | — |
+| `volume` | `volume` |
+| `tts` | `text`（逐句；不再单独记录 sentence 事件） |
+| `reply` | `text`（本轮完整回复） |
+| `play_url` | `url, title?, artist?` |
+| `turn_end` | `data:{duration_ms,canceled}` |
+
+  `direct` / `artist_random` 路由为同样的时间线补记合成的 `search_audio`、`play_audio` 的 `tool_call`/`tool_result`（无 llm 事件）。
+
 #### 6.7.4 型号差异
 
 - `play_music` 型号（Yonsm 超集）：LX04 LX05 L05B L05C L06 L06A X08A X10A X08C X08E X8F X4B OH2 OH2P X6A；其余用 `play_url`。

@@ -42,6 +42,16 @@ type Input struct {
 	ConversationID string // empty = new conversation
 	Channel        string // web|cli|speaker (default cli)
 	Text           string
+	// Observer (optional) receives live LLM step boundaries.
+	Observer *Observer
+}
+
+// Observer receives live LLM step boundaries of a turn (the speaker hook
+// turns them into timeline events). Callbacks must not block.
+type Observer struct {
+	LLMStart func(step int, model string)
+	// LLMEnd gets the llm trace row of the step (durations, tokens, error).
+	LLMEnd func(step int, row store.TraceRow)
 }
 
 // Runtime runs agent turns. It is safe for concurrent use.
@@ -210,6 +220,9 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 		var stepFinish string
 		var stepCalls []llm.ToolCall
 		model := r.model()
+		if o := in.Observer; o != nil && o.LLMStart != nil {
+			o.LLMStart(stepNo, model)
+		}
 		// recStep records the llm trace row (+ payload) of this step.
 		recStep := func(err error, text string) {
 			status := statusOf(err, ctx.Err())
@@ -228,6 +241,9 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 				row.Error = err.Error()
 			}
 			r.trace(row)
+			if o := in.Observer; o != nil && o.LLMEnd != nil {
+				o.LLMEnd(stepNo, row)
+			}
 			log.Debug("llm step", "step", stepNo, "model", model, "status", status,
 				"duration_ms", row.DurationMS, "first_token_ms", stepFirst, "finish", stepFinish, "tool_calls", len(stepCalls))
 			if r.payloadOn() {

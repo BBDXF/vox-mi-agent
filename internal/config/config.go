@@ -199,10 +199,13 @@ type Speaker struct {
 	URLTTL time.Duration `yaml:"url_ttl" json:"url_ttl"`
 	// VolumeDefault is the volume used by the speaker "volume" test action when
 	// none is given (default 30; 0 = unset). It is never applied automatically.
-	VolumeDefault int           `yaml:"volume_default" json:"volume_default"`
-	Xiaomi        SpeakerXiaomi `yaml:"xiaomi" json:"xiaomi"`
-	Hook          SpeakerHook   `yaml:"hook" json:"hook"`
-	Mock          SpeakerMock   `yaml:"mock" json:"mock"`
+	VolumeDefault int `yaml:"volume_default" json:"volume_default"`
+	// DebugDevice enables the always-available mock device "debug" (调试音箱),
+	// independent of the driver.
+	DebugDevice bool          `yaml:"debug_device" json:"debug_device"`
+	Xiaomi      SpeakerXiaomi `yaml:"xiaomi" json:"xiaomi"`
+	Hook        SpeakerHook   `yaml:"hook" json:"hook"`
+	Mock        SpeakerMock   `yaml:"mock" json:"mock"`
 }
 
 // SpeakerXiaomi holds the Xiaomi driver settings (the account itself lives in
@@ -287,7 +290,7 @@ func Defaults() *Config {
 			Limit:      5,
 			Candidates: 500,
 		},
-		Speaker: Speaker{Driver: "mock", URLTTL: time.Hour, VolumeDefault: 30,
+		Speaker: Speaker{Driver: "mock", URLTTL: time.Hour, VolumeDefault: 30, DebugDevice: true,
 			Hook: SpeakerHook{Mode: "music", Keywords: []string{"问问"},
 				WakeWords:       []string{"小爱同学", "小爱"},
 				MusicTriggers:   []string{"播放", "放一首", "放首", "放一下", "放", "来一首", "来首", "来点", "我想听", "想听", "听一下", "听听", "听"},

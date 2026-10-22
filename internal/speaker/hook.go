@@ -4,6 +4,7 @@ import (
 	"context"
 	crand "crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"math/rand/v2"
@@ -84,7 +85,7 @@ type Hook struct {
 
 	mu      sync.Mutex
 	cur     HookSettings
-	curDrv  Driver
+	curVer  int
 	curDevs []Device
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
@@ -128,17 +129,17 @@ func (h *Hook) Status() HookStatus {
 // Apply (re)starts the pollers for the manager's current driver and enabled
 // devices. It is a no-op when nothing changed. Mode "off" stops everything.
 func (h *Hook) Apply(s HookSettings) {
-	drv, devs := h.d.Mgr.Driver(), h.d.Mgr.Devices()
+	drv, devs, ver := h.d.Mgr.Driver(), h.d.Mgr.Devices(), h.d.Mgr.Version()
 	h.mu.Lock()
-	if h.running == (s.Mode != "off") && reflect.DeepEqual(s, h.cur) && drv == h.curDrv && reflect.DeepEqual(devs, h.curDevs) {
+	if h.running == (s.Mode != "off") && reflect.DeepEqual(s, h.cur) && ver == h.curVer && reflect.DeepEqual(devs, h.curDevs) {
 		h.mu.Unlock()
 		return
 	}
 	h.mu.Unlock()
 	h.Stop()
 	h.mu.Lock()
-	h.cur, h.curDrv, h.curDevs = s, drv, devs
-	if s.Mode == "off" || s.Mode == "" || len(devs) == 0 || drv == nil || drv.Name() == "log" {
+	h.cur, h.curVer, h.curDevs = s, ver, devs
+	if s.Mode == "off" || s.Mode == "" || len(devs) == 0 {
 		h.mu.Unlock()
 		return
 	}
@@ -230,6 +231,9 @@ type decision struct {
 	searchMS int64
 	toolArgs string
 	toolSum  string
+	toolName string         // synthetic search tool name (search_audio)
+	toolIn   map[string]any // synthetic tool_call args
+	toolRes  map[string]any // synthetic tool_result
 }
 
 // decide routes an ask according to the mode.
@@ -281,7 +285,9 @@ func (h *Hook) resolveMusic(ctx context.Context, s HookSettings, content string)
 			t := cands[h.randn(len(cands))]
 			return decision{route: RouteArtistRandom, track: t, searchMS: time.Since(start).Milliseconds(),
 				reply:    "好的，随机播放" + artist + "的《" + t.Title + "》",
-				toolArgs: "artist:" + artist, toolSum: itoa(len(cands)) + " tracks, picked " + t.Title}, true
+				toolArgs: "artist:" + artist, toolSum: itoa(len(cands)) + " tracks, picked " + t.Title,
+				toolIn:  map[string]any{"query": content},
+				toolRes: map[string]any{"count": len(cands), "artist": artist, "picked": map[string]any{"id": t.ID, "title": t.Title}}}, true
 		}
 	}
 	if m.Search == nil || m.Lookup == nil {
@@ -310,7 +316,9 @@ func (h *Hook) resolveMusic(ctx context.Context, s HookSettings, content string)
 		reply = "好的，播放" + tr.Artist + "的《" + tr.Title + "》"
 	}
 	return decision{route: RouteDirect, track: tr, reply: reply, searchMS: ms, toolArgs: content,
-		toolSum: tr.Title + " score=" + strconv.FormatFloat(hits[0].Score, 'f', 0, 64)}, true
+		toolSum: tr.Title + " score=" + strconv.FormatFloat(hits[0].Score, 'f', 0, 64),
+		toolIn:  map[string]any{"query": content},
+		toolRes: map[string]any{"count": len(hits), "ambiguous": amb, "top": map[string]any{"id": tr.ID, "title": tr.Title, "artist": tr.Artist, "score": hits[0].Score}}}, true
 }
 
 func (h *Hook) randn(n int) int {
@@ -341,6 +349,9 @@ func (h *Hook) handle(ctx context.Context, drv Driver, dev Device, s HookSetting
 	h.d.Mgr.NoteAsk(dev.DeviceID, ask.Query, time.Since(ask.Time), ok, d.route, tid)
 	h.d.Log.Info("speaker hook: ask", "device", dev.DeviceID, "query", ask.Query, "handled", ok, "route", d.route)
 	if !ok {
+		if ask.Native && dev.DeviceID == DebugDeviceID {
+			h.d.Mgr.Log().Record(MockEvent{Device: dev.DeviceID, Kind: EvNativeReply, Text: "（小爱原生回复）", TurnID: tid})
+		}
 		return
 	}
 	if cerr != nil {
@@ -379,7 +390,13 @@ func (h *Hook) runDirect(ctx context.Context, drv Driver, dev Device, s HookSett
 	sp := &spans{h: h, id: tid, conv: conv, query: ask.Query, t0: t0, marks: map[string]int64{}}
 	sp.markMS("ask_detected", max(0, min(time.Since(ask.Time).Milliseconds(), 60000)), store.TraceOK)
 	status, errMsg := store.TraceOK, ""
+	h.flow(dev.DeviceID, tid, EvTurnStart, d.route, map[string]any{"route": d.route, "text": ask.Query})
+	callID := "call_" + tid
+	h.flow(dev.DeviceID, tid, EvToolCall, "", map[string]any{"name": "search_audio", "args": d.toolIn, "call_id": callID + "_s"})
+	h.flow(dev.DeviceID, tid, EvToolResult, "", map[string]any{"call_id": callID + "_s", "name": "search_audio", "ok": true,
+		"duration_ms": d.searchMS, "result": d.toolRes})
 	defer func() {
+		h.flow(dev.DeviceID, tid, EvTurnEnd, "", map[string]any{"duration_ms": time.Since(t0).Milliseconds(), "canceled": ctx.Err() != nil})
 		if ctx.Err() != nil {
 			status = store.TraceCanceled
 		}
@@ -430,7 +447,15 @@ func (h *Hook) runDirect(ctx context.Context, drv Driver, dev Device, s HookSett
 	u, err := h.d.Music.URLFor(d.track)
 	if err == nil {
 		start := time.Now()
+		h.flow(dev.DeviceID, tid, EvToolCall, "", map[string]any{"name": "play_audio", "args": map[string]any{"id": d.track.ID}, "call_id": callID + "_p"})
 		err = drv.PlayByURL(WithPlayMeta(ctx, d.track.Title, d.track.Artist), dev, u)
+		res := map[string]any{"call_id": callID + "_p", "name": "play_audio", "ok": err == nil, "duration_ms": time.Since(start).Milliseconds()}
+		if err != nil {
+			res["error"] = err.Error()
+		} else {
+			res["result"] = map[string]any{"status": "playing", "title": d.track.Title, "artist": d.track.Artist}
+		}
+		h.flow(dev.DeviceID, tid, EvToolResult, "", res)
 		if tr := h.d.Tracer; tr != nil {
 			row := store.TraceRow{TS: start, ConversationID: conv, TurnID: sp.id, Step: 2, Kind: store.TraceTool, Name: "play_audio",
 				Status: store.TraceOK, DurationMS: time.Since(start).Milliseconds(), Args: d.track.ID, ResultSummary: "played", Channel: store.ChannelSpeaker}
@@ -445,6 +470,24 @@ func (h *Hook) runDirect(ctx context.Context, drv Driver, dev Device, s HookSett
 		h.d.Log.Warn("speaker hook: direct play failed", "device", dev.DeviceID, "err", err)
 	}
 	h.d.Log.Info("speaker turn", "device", dev.DeviceID, "turn_id", sp.id, "route", d.route, "search_ms", d.searchMS, "total_ms", time.Since(t0).Milliseconds())
+}
+
+// flow records a timeline event of a hook turn.
+func (h *Hook) flow(dev, tid, kind, route string, data map[string]any) {
+	h.d.Mgr.Log().Record(MockEvent{Device: dev, Kind: kind, TurnID: tid, Route: route, Data: data})
+}
+
+const resultMax = 2048
+
+// resultData renders a tool result (truncated to resultMax bytes).
+func resultData(raw []byte) (any, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	if len(raw) <= resultMax && json.Valid(raw) {
+		return json.RawMessage(raw), false
+	}
+	return store.TruncateText(string(raw), resultMax), true
 }
 
 func newTurnID() string {
@@ -576,6 +619,10 @@ func (h *Hook) runTurn(ctx context.Context, drv Driver, dev Device, s HookSettin
 	sp := &spans{h: h, id: tid, conv: conv, query: text, t0: t0, marks: map[string]int64{}}
 	// Detection lag since the device recorded the ask (clock skew clamped).
 	sp.markMS("ask_detected", max(0, min(time.Since(ask.Time).Milliseconds(), 60000)), store.TraceOK)
+	h.flow(dev.DeviceID, tid, EvTurnStart, RouteAgent, map[string]any{"route": RouteAgent, "text": text})
+	defer func() {
+		h.flow(dev.DeviceID, tid, EvTurnEnd, "", map[string]any{"duration_ms": time.Since(t0).Milliseconds(), "canceled": ctx.Err() != nil})
+	}()
 
 	firstSentence := make(chan struct{})
 	var firstOnce sync.Once
@@ -590,8 +637,49 @@ func (h *Hook) runTurn(ctx context.Context, drv Driver, dev Device, s HookSettin
 	sent := make(chan string, 64)
 	go func() {
 		defer close(sent)
-		err := h.d.Agent.Run(WithPlayQueue(ctx, pq), agent.Input{ConversationID: conv, Channel: store.ChannelSpeaker, Text: text}, func(ev agent.Event) {
+		callStart := map[string]time.Time{}
+		obs := &agent.Observer{
+			LLMStart: func(step int, model string) {
+				h.flow(dev.DeviceID, tid, EvLLMStart, "", map[string]any{"model": model, "step": step})
+			},
+			LLMEnd: func(step int, row store.TraceRow) {
+				d := map[string]any{"step": step, "latency_ms": row.FirstTokenMS, "duration_ms": row.DurationMS}
+				if row.PromptTokens+row.CompletionTokens > 0 {
+					d["tokens"] = map[string]any{"prompt": row.PromptTokens, "completion": row.CompletionTokens}
+				}
+				if row.Error != "" {
+					d["error"] = row.Error
+				}
+				h.flow(dev.DeviceID, tid, EvLLMEnd, "", d)
+			},
+		}
+		in := agent.Input{ConversationID: conv, Channel: store.ChannelSpeaker, Text: text, Observer: obs}
+		err := h.d.Agent.Run(WithPlayQueue(ctx, pq), in, func(ev agent.Event) {
 			switch ev.Type {
+			case agent.EventToolCall:
+				if tc, ok := ev.Data.(agent.ToolCallData); ok {
+					callStart[tc.ID] = time.Now()
+					var args any = map[string]any{}
+					if len(tc.Arguments) > 0 && json.Valid(tc.Arguments) {
+						args = json.RawMessage(tc.Arguments)
+					}
+					h.flow(dev.DeviceID, tid, EvToolCall, "", map[string]any{"name": tc.Name, "args": args, "call_id": tc.ID})
+				}
+			case agent.EventToolResult:
+				if tr, ok := ev.Data.(agent.ToolResultData); ok {
+					d := map[string]any{"call_id": tr.ID, "name": tr.Name, "ok": tr.Error == "",
+						"duration_ms": time.Since(callStart[tr.ID]).Milliseconds()}
+					if v, trunc := resultData(tr.Result); v != nil {
+						d["result"] = v
+						if trunc {
+							d["truncated"] = true
+						}
+					}
+					if tr.Error != "" {
+						d["error"] = tr.Error
+					}
+					h.flow(dev.DeviceID, tid, EvToolResult, "", d)
+				}
 			case agent.EventToken:
 				sp.mark("llm_first_token", t0, store.TraceOK)
 			case agent.EventSentence:

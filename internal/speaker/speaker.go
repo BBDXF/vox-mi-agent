@@ -35,6 +35,8 @@ type Ask struct {
 	Query    string    `json:"query"`
 	Time     time.Time `json:"time"`
 	Answer   string    `json:"answer,omitempty"` // the speaker's native answer, if any
+	// Native is set by the mock when it simulates a native assistant reply.
+	Native bool `json:"native,omitempty"`
 }
 
 // Status is the player state.

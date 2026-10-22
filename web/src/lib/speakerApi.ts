@@ -36,9 +36,11 @@ export interface SpeakerTestReq {
 export interface SpeakerTestRes { ok: boolean; action?: string; error?: string; elapsed_ms?: number; volume?: number; status?: { status: number; volume: number } }
 export interface MockEvent {
   seq: number; ts: number | string; device_id?: string; conversation_id?: string; turn_id?: string;
-  kind: 'ask' | 'pause' | 'stop' | 'play' | 'tts' | 'play_url' | 'volume' | 'reply' | 'ask_detected';
+  kind: string;
   text?: string; url?: string; volume?: number; latency_ms?: number;
-  title?: string; artist?: string; route?: 'direct' | 'artist_random' | 'agent' | 'ignored'; handled?: boolean;
+  title?: string; artist?: string; route?: 'direct' | 'artist_random' | 'agent' | 'ignored' | string; handled?: boolean;
+  model?: string; duration_ms?: number; error?: string; canceled?: boolean;
+  call_id?: string; name?: string; args?: unknown; ok?: boolean; result?: unknown;
 }
 
 async function req<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
@@ -79,8 +81,14 @@ export const xiaomiRetry = () => acct('api/speaker/xiaomi/retry', {});
 export const xiaomiLogout = () => acct('api/speaker/xiaomi/logout', {});
 export const discoverDevices = () => req<{ driver?: string; devices: any[] }>('api/speaker/devices/discover');
 export const speakerTest = (b: SpeakerTestReq) => req<SpeakerTestRes>('api/speaker/test', 'POST', b);
-export const getSpeakerEvents = (after: number, device_id?: string) =>
-  req<{ events: MockEvent[]; last_seq?: number }>(`api/speaker/events?after=${after}${device_id ? '&device_id=' + encodeURIComponent(device_id) : ''}`);
+// Flow events carry details in `data`; flatten them (top-level fields win,
+// so latency_ms stays "ms since the ask").
+const flattenEvents = (r: { events: MockEvent[]; last_seq?: number }) => ({
+  ...r,
+  events: (r.events || []).map((e: any) => (e && e.data ? { ...e.data, ...e } : e)),
+});
+export const getSpeakerEvents = (after: number, conversation_id?: string) =>
+  req<{ events: MockEvent[]; last_seq?: number }>(`api/speaker/events?after=${after}${conversation_id ? '&conversation_id=' + encodeURIComponent(conversation_id) : ''}`).then(flattenEvents);
 export const mockAsk = (text: string, device_id?: string, native_reply = true) =>
   req<{ ok?: boolean; conversation_id?: string }>('api/speaker/mock/ask', 'POST', { text, device_id, native_reply });
 export const getMockEvents = (after: number) =>

@@ -19,6 +19,14 @@ const (
 	EvAsk         = "ask"
 	EvAskDetected = "ask_detected" // recorded by the hook: latency_ms = detection lag, handled + route
 	EvReply       = "reply"
+	// Flow events of hook turns (data in MockEvent.Data).
+	EvTurnStart   = "turn_start"
+	EvLLMStart    = "llm_start"
+	EvLLMEnd      = "llm_end"
+	EvToolCall    = "tool_call"
+	EvToolResult  = "tool_result"
+	EvTurnEnd     = "turn_end"
+	EvNativeReply = "native_reply" // simulated native reply of an ignored ask (debug device)
 )
 
 // ErrInjected is returned by the mock when fault injection fires.
@@ -47,13 +55,12 @@ type Mock struct {
 	NativeReply bool
 }
 
-// NewMock creates a mock driver with devices mock-1 and mock-2.
+// NewMock creates the mock driver with the single built-in device "debug".
 func NewMock() *Mock {
 	t := true
 	return &Mock{
 		devices: []Device{
-			{DeviceID: "mock-1", Name: "Mock Living Room", Hardware: "LX06", Enabled: true, PlayMode: "auto", TTSMode: "auto", Online: &t},
-			{DeviceID: "mock-2", Name: "Mock Bedroom", Hardware: "L05B", Enabled: true, PlayMode: "auto", TTSMode: "auto", Online: &t},
+			{DeviceID: DebugDeviceID, Name: "调试音箱", Hardware: "LX06", Enabled: true, PlayMode: "auto", TTSMode: "auto", Online: &t},
 		},
 		asks: map[string][]Ask{}, log: NewEventLog(), playing: map[string]time.Time{}, paused: map[string]bool{},
 		volume: map[string]int{}, rng: rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -128,7 +135,7 @@ func (m *Mock) InjectAsk(deviceID, text string) Ask {
 		now = m.lastAsk.Add(time.Millisecond)
 	}
 	m.lastAsk = now
-	a := Ask{DeviceID: deviceID, Query: text, Time: now}
+	a := Ask{DeviceID: deviceID, Query: text, Time: now, Native: m.NativeReply}
 	m.asks[deviceID] = append(m.asks[deviceID], a)
 	m.record(MockEvent{Device: deviceID, Kind: EvAsk, Text: text})
 	if m.NativeReply {

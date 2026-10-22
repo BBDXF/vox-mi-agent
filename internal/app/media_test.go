@@ -45,7 +45,20 @@ func newTestApp(t *testing.T, mod func(*config.Config)) (*App, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { a.Close() })
+	t.Cleanup(func() {
+		// Background syncs write into the data dir: let them finish before
+		// the TempDir cleanup removes it.
+		deadline := time.Now().Add(15 * time.Second)
+		for idle := 0; idle < 5 && time.Now().Before(deadline); {
+			if a.Syncer.Status().Running {
+				idle = 0
+			} else {
+				idle++
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		a.Close()
+	})
 	return a, dir
 }
 

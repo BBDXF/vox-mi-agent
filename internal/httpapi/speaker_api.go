@@ -15,6 +15,7 @@ import (
 type speakerDeviceView struct {
 	DeviceID          string  `json:"device_id"`
 	ConversationID    *string `json:"conversation_id"` // null until the first handled ask
+	Debug             bool    `json:"debug,omitempty"` // the always-available mock device
 	Name              string  `json:"name"`
 	Hardware          string  `json:"hardware"`
 	Enabled           bool    `json:"enabled"`
@@ -25,17 +26,14 @@ type speakerDeviceView struct {
 
 func (s *Server) speakerStatus(w http.ResponseWriter, r *http.Request) {
 	a := s.app
-	devs := a.Speaker.Configured()
-	if len(devs) == 0 {
-		devs = a.Speaker.Devices()
-	}
+	devs := a.Speaker.AllDevices()
 	views := make([]speakerDeviceView, 0, len(devs))
 	for _, d := range devs {
 		var conv *string
 		if id := a.Hook.LookupConversation(d.DeviceID); id != "" {
 			conv = &id
 		}
-		views = append(views, speakerDeviceView{DeviceID: d.DeviceID, ConversationID: conv, Name: d.Name, Hardware: d.Hardware, Enabled: d.Enabled, Online: d.Online,
+		views = append(views, speakerDeviceView{DeviceID: d.DeviceID, ConversationID: conv, Debug: d.DeviceID == speaker.DebugDeviceID, Name: d.Name, Hardware: d.Hardware, Enabled: d.Enabled, Online: d.Online,
 			PlayModeEffective: xiaomi.PlayMode(d.PlayMode, d.Hardware), TTSModeEffective: xiaomi.TTSMode(d.TTSMode)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -206,17 +204,20 @@ func (s *Server) mockAsk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if s.app.Speaker.Driver().Name() != "mock" {
-		writeError(w, http.StatusConflict, "speaker.driver is not mock")
-		return
-	}
 	if strings.TrimSpace(in.Text) == "" {
 		writeError(w, http.StatusBadRequest, "text is required")
 		return
 	}
+	if in.DeviceID == "" {
+		in.DeviceID = speaker.DebugDeviceID
+	}
 	dev, err := s.app.Speaker.Resolve(in.DeviceID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if dev.DeviceID != speaker.DebugDeviceID && s.app.Speaker.Driver().Name() != "mock" {
+		writeError(w, http.StatusConflict, "only the debug device (or the mock driver's devices) accepts simulated asks")
 		return
 	}
 	conv, err := s.app.Hook.Conversation(r.Context(), dev)

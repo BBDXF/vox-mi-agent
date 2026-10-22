@@ -2,9 +2,12 @@ package speaker
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/andy/vox-mi-agent/internal/tools"
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -129,7 +132,9 @@ func (r *rig) start(mode string, kws ...string) {
 func kinds(ev []MockEvent) []string {
 	var k []string
 	for _, e := range ev {
-		if e.Kind != EvAskDetected {
+		switch e.Kind {
+		case EvAskDetected, EvTurnStart, EvTurnEnd, EvLLMStart, EvLLMEnd, EvToolCall, EvToolResult:
+		default:
 			k = append(k, e.Kind)
 		}
 	}
@@ -163,7 +168,7 @@ func TestMockDriverBasics(t *testing.T) {
 	m.CharsPerSec = 0
 	ctx := context.Background()
 	devs, _ := m.DeviceList(ctx)
-	if len(devs) != 2 {
+	if len(devs) != 1 {
 		t.Fatalf("%v", devs)
 	}
 	d := devs[0]
@@ -210,7 +215,7 @@ func TestMockDriverBasics(t *testing.T) {
 
 func TestMockFaultInjection(t *testing.T) {
 	m := NewMock()
-	d := Device{DeviceID: "mock-1"}
+	d := Device{DeviceID: "debug"}
 	m.Configure(0, 1)
 	if err := m.TextToSpeech(context.Background(), d, "x"); err != ErrInjected {
 		t.Fatalf("%v", err)
@@ -240,7 +245,7 @@ func TestManagerPlayerAndDevices(t *testing.T) {
 	}
 	_ = mgr.Speak(context.Background(), "hello")
 	ev := m.Events(0)
-	if len(ev) != 3 || ev[0].Kind != EvPlayURL || ev[0].Device != "mock-1" || ev[0].URL != "http://x/a.mp3" || ev[1].Volume != 30 || ev[2].Text != "hello" {
+	if len(ev) != 3 || ev[0].Kind != EvPlayURL || ev[0].Device != "debug" || ev[0].URL != "http://x/a.mp3" || ev[1].Volume != 30 || ev[2].Text != "hello" {
 		t.Fatalf("%+v", ev)
 	}
 	// Configured devices: first enabled wins; none enabled -> ErrNoDevice.
@@ -271,15 +276,15 @@ func TestHookKeywordMode(t *testing.T) {
 	ag := &fakeAgent{sentences: []string{"好的。"}}
 	r := newRig(t, ag)
 	r.start("keyword", "请", "问问")
-	r.mock.InjectAsk("mock-1", "播放音乐") // not for us
+	r.mock.InjectAsk("debug", "播放音乐") // not for us
 	time.Sleep(60 * time.Millisecond)
 	if len(ag.Inputs()) != 0 || count(r.mock.Events(0), EvPause) != 0 {
 		t.Fatal("non-keyword ask must be left to the speaker")
 	}
-	if la := r.hook.Status().LastAsk; la == nil || la.Handled || la.Query != "播放音乐" || la.Device != "mock-1" {
+	if la := r.hook.Status().LastAsk; la == nil || la.Handled || la.Query != "播放音乐" || la.Device != "debug" {
 		t.Fatalf("%+v", la)
 	}
-	r.mock.InjectAsk("mock-1", "请讲个笑话")
+	r.mock.InjectAsk("debug", "请讲个笑话")
 	waitFor(t, "tts", func() bool { return count(r.mock.Events(0), EvTTS) == 1 })
 	in := ag.Inputs()
 	if len(in) != 1 || in[0].Text != "讲个笑话" || in[0].Channel != "speaker" || in[0].ConversationID == "" {
@@ -293,9 +298,9 @@ func TestHookKeywordMode(t *testing.T) {
 func TestHookAllAndOffAndStartTime(t *testing.T) {
 	ag := &fakeAgent{sentences: []string{"嗯。"}}
 	r := newRig(t, ag)
-	r.mock.InjectAsk("mock-1", "历史问题") // before start: never handled
+	r.mock.InjectAsk("debug", "历史问题") // before start: never handled
 	r.start("all")
-	r.mock.InjectAsk("mock-1", "随便问问")
+	r.mock.InjectAsk("debug", "随便问问")
 	waitFor(t, "tts", func() bool { return count(r.mock.Events(0), EvTTS) == 1 })
 	in := ag.Inputs()
 	if len(in) != 1 || in[0].Text != "随便问问" {
@@ -309,7 +314,7 @@ func TestHookAllAndOffAndStartTime(t *testing.T) {
 	if r.hook.Status().Running {
 		t.Fatal("off must stop")
 	}
-	r.mock.InjectAsk("mock-1", "没人听")
+	r.mock.InjectAsk("debug", "没人听")
 	time.Sleep(50 * time.Millisecond)
 	if len(ag.Inputs()) != 1 {
 		t.Fatal("off mode must not listen")
@@ -327,7 +332,7 @@ func TestHookInterruptSequence(t *testing.T) {
 	slow := &stubborn{Mock: r.mock}
 	r.mgr.Set(slow, nil, 0)
 	r.start("all")
-	r.mock.InjectAsk("mock-1", "你好")
+	r.mock.InjectAsk("debug", "你好")
 	waitFor(t, "two tts", func() bool { return count(r.mock.Events(0), EvTTS) == 2 })
 	k := kinds(r.mock.Events(0))
 	if k[0] != "ask" || k[1] != "pause" {
@@ -394,7 +399,7 @@ func TestHookSequentialSentencesWaitForPlayback(t *testing.T) {
 	theMgr = r.mgr
 	r.mock.SetCharsPerSec(50) // 10 chars -> ~200ms of playback
 	r.start("all")
-	r.mock.InjectAsk("mock-1", "q")
+	r.mock.InjectAsk("debug", "q")
 	waitFor(t, "first tts", func() bool { return count(r.mock.Events(0), EvTTS) >= 1 })
 	t1 := time.Now()
 	waitFor(t, "second tts", func() bool { return count(r.mock.Events(0), EvTTS) == 2 })
@@ -408,12 +413,12 @@ func TestHookNewAskCancelsRunningTurn(t *testing.T) {
 	ag := &fakeAgent{sentences: []string{"回答。"}, delay: 300 * time.Millisecond}
 	r := newRig(t, ag)
 	r.start("all")
-	r.mock.InjectAsk("mock-1", "第一个问题")
+	r.mock.InjectAsk("debug", "第一个问题")
 	waitFor(t, "agent started", func() bool { return len(ag.Inputs()) == 1 })
 	ag.mu.Lock()
 	ag.delay = 0
 	ag.mu.Unlock()
-	r.mock.InjectAsk("mock-1", "第二个问题")
+	r.mock.InjectAsk("debug", "第二个问题")
 	waitFor(t, "second turn answered", func() bool { return len(ag.Inputs()) == 2 && count(r.mock.Events(0), EvTTS) == 1 })
 	ag.mu.Lock()
 	defer ag.mu.Unlock()
@@ -428,10 +433,10 @@ func TestHookNewAskCancelsRunningTurn(t *testing.T) {
 func TestHookConversationPerDevicePersisted(t *testing.T) {
 	ag := &fakeAgent{sentences: []string{"好。"}}
 	r := newRig(t, ag)
-	r.mgr.Set(r.mock, []Device{{DeviceID: "mock-1", Name: "客厅", Enabled: true}, {DeviceID: "mock-2", Name: "卧室", Enabled: true}}, 0)
+	r.mgr.Set(r.mock, []Device{{DeviceID: "dev-a", Name: "客厅", Enabled: true}, {DeviceID: "dev-b", Name: "卧室", Enabled: true}}, 0)
 	r.start("all")
-	r.mock.InjectAsk("mock-1", "a")
-	r.mock.InjectAsk("mock-2", "b")
+	r.mock.InjectAsk("dev-a", "a")
+	r.mock.InjectAsk("dev-b", "b")
 	waitFor(t, "both", func() bool { return len(ag.Inputs()) == 2 })
 	in := ag.Inputs()
 	if in[0].ConversationID == in[1].ConversationID {
@@ -443,13 +448,13 @@ func TestHookConversationPerDevicePersisted(t *testing.T) {
 			t.Fatalf("%+v %v", c, err)
 		}
 	}
-	v, err := r.st.GetSetting(context.Background(), "speaker.conversation.mock-1")
+	v, err := r.st.GetSetting(context.Background(), "speaker.conversation.dev-a")
 	if err != nil || (v != in[0].ConversationID && v != in[1].ConversationID) {
 		t.Fatalf("%q %v", v, err)
 	}
 	// A new hook (restart) reuses the persisted conversation.
 	h2 := NewHook(HookDeps{Mgr: r.mgr, Agent: ag, Store: r.st, Log: quiet})
-	id, err := h2.conversation(context.Background(), Device{DeviceID: "mock-1", Name: "客厅"})
+	id, err := h2.conversation(context.Background(), Device{DeviceID: "dev-a", Name: "客厅"})
 	if err != nil || id != v {
 		t.Fatalf("%q %q %v", id, v, err)
 	}
@@ -468,7 +473,7 @@ func TestHookEndToEndFakeLLM(t *testing.T) {
 	h.RecheckEvery, h.StatusPoll, h.StartGrace = 10*time.Millisecond, 5*time.Millisecond, 20*time.Millisecond
 	defer h.Stop()
 	h.Apply(HookSettings{Mode: "keyword", Keywords: []string{"请"}, PollInterval: 5 * time.Millisecond, InterruptWindow: 100 * time.Millisecond})
-	m.InjectAsk("mock-1", "请问今天天气怎么样")
+	m.InjectAsk("debug", "请问今天天气怎么样")
 	waitFor(t, "tts x2", func() bool { return count(m.Events(0), EvTTS) == 2 })
 	ev := m.Events(0)
 	k := kinds(ev)
@@ -513,8 +518,8 @@ func TestHookApplyIsIdempotent(t *testing.T) {
 	// log driver never polls
 	r.mgr.Set(NewLog(quiet), nil, 0)
 	r.hook.Apply(s)
-	if r.hook.Status().Running {
-		t.Fatal("log driver must not run the hook")
+	if !r.hook.Status().Running {
+		t.Fatal("hook keeps running (debug device) with the log driver")
 	}
 }
 
@@ -524,7 +529,7 @@ func TestHookDefersPlayAudioUntilReplySpoken(t *testing.T) {
 	theMgr = r.mgr
 	r.mock.SetCharsPerSec(50)
 	r.start("all")
-	r.mock.InjectAsk("mock-1", "放首歌")
+	r.mock.InjectAsk("debug", "放首歌")
 	waitFor(t, "play_url", func() bool { return count(r.mock.Events(0), EvPlayURL) == 1 })
 	ev := r.mock.Events(0)
 	k := kinds(ev)
@@ -553,8 +558,10 @@ func TestHookDefersPlayAudioUntilReplySpoken(t *testing.T) {
 	if ag.status != "queued" {
 		t.Fatalf("tool status %q", ag.status)
 	}
-	if ev[len(ev)-1].URL != "http://h/song.mp3" {
-		t.Fatalf("%+v", ev[len(ev)-1])
+	for _, e := range ev {
+		if e.Kind == EvPlayURL && e.URL != "http://h/song.mp3" {
+			t.Fatalf("%+v", e)
+		}
 	}
 }
 
@@ -564,12 +571,12 @@ func TestHookCancelledTurnDropsPendingPlay(t *testing.T) {
 	theMgr = r.mgr
 	r.mock.SetCharsPerSec(10) // ~1.4s of speech
 	r.start("all")
-	r.mock.InjectAsk("mock-1", "放首歌")
+	r.mock.InjectAsk("debug", "放首歌")
 	waitFor(t, "tts", func() bool { return count(r.mock.Events(0), EvTTS) == 1 })
 	ag.mu.Lock()
 	ag.sentences, ag.noPlay = []string{"好。"}, true
 	ag.mu.Unlock()
-	r.mock.InjectAsk("mock-1", "算了") // cancels the first turn
+	r.mock.InjectAsk("debug", "算了") // cancels the first turn
 	waitFor(t, "second tts", func() bool { return count(r.mock.Events(0), EvTTS) == 2 })
 	time.Sleep(300 * time.Millisecond)
 	if n := count(r.mock.Events(0), EvPlayURL); n != 0 {
@@ -624,7 +631,7 @@ func TestMockEventLatency(t *testing.T) {
 	r := newRig(t, ag)
 	theMgr = r.mgr
 	r.start("all")
-	r.mock.InjectAsk("mock-1", "q")
+	r.mock.InjectAsk("debug", "q")
 	waitFor(t, "reply", func() bool { return count(r.mock.Events(0), EvReply) == 1 })
 	var det, pause, tts bool
 	for _, e := range r.mock.Events(0) {
@@ -784,7 +791,7 @@ func TestMusicDirectPlayNoLLM(t *testing.T) {
 	m.hook.d.Agent = rt
 	m.hits = []media.Hit{{ID: "a1", Title: "晴天", Artist: "周杰伦", Score: 95}}
 	m.startMusic()
-	m.mock.InjectAsk("mock-1", "小爱同学播放周杰伦的晴天")
+	m.mock.InjectAsk("debug", "小爱同学播放周杰伦的晴天")
 	waitFor(t, "play_url", func() bool { return count(m.mock.Events(0), EvPlayURL) == 1 })
 	if fake.Calls() != 0 {
 		t.Fatalf("LLM must not be called, got %d", fake.Calls())
@@ -820,7 +827,7 @@ func TestMusicDirectPlayNoLLM(t *testing.T) {
 		t.Fatalf("%+v", la)
 	}
 	// conversation + traces
-	v, err := st.GetSetting(context.Background(), "speaker.conversation.mock-1")
+	v, err := st.GetSetting(context.Background(), "speaker.conversation.debug")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -860,7 +867,7 @@ func TestMusicArtistRandom(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		m.hook.Rand = func(n int) int { return i % n }
 		m.startMusic()
-		m.mock.InjectAsk("mock-1", "来点周杰伦的歌")
+		m.mock.InjectAsk("debug", "来点周杰伦的歌")
 		waitFor(t, "play", func() bool { return count(m.mock.Events(0), EvPlayURL) == i+1 })
 		ev := m.mock.Events(0)
 		for _, e := range ev {
@@ -903,7 +910,7 @@ func TestMusicFallsBackToAgent(t *testing.T) {
 			m := newMusicRig(t, ag)
 			m.hits, m.amb = tc.hits, tc.amb
 			m.startMusic()
-			m.mock.InjectAsk("mock-1", "小爱同学播放晴天")
+			m.mock.InjectAsk("debug", "小爱同学播放晴天")
 			waitFor(t, "agent speech", func() bool { return count(m.mock.Events(0), EvTTS) == 1 })
 			in := ag.Inputs()
 			if len(in) != 1 || in[0].Text != "小爱同学播放晴天" { // the original query
@@ -925,7 +932,7 @@ func TestMusicModeIgnoresNonMusic(t *testing.T) {
 	m := newMusicRig(t, ag)
 	m.startMusic()
 	for _, q := range []string{"暂停", "下一首", "小爱同学今天天气怎么样", "放假安排", "声音大一点"} {
-		m.mock.InjectAsk("mock-1", q)
+		m.mock.InjectAsk("debug", q)
 		waitFor(t, "detected", func() bool {
 			la := m.hook.Status().LastAsk
 			return la != nil && la.Query == q
@@ -953,7 +960,7 @@ func TestKeywordModeStripsWakeWord(t *testing.T) {
 	ag := &fakeAgent{sentences: []string{"好。"}}
 	r := newRig(t, ag)
 	r.hook.Apply(HookSettings{Mode: "keyword", Keywords: []string{"问问"}, WakeWords: wakeDefault, PollInterval: 5 * time.Millisecond, InterruptWindow: 50 * time.Millisecond})
-	r.mock.InjectAsk("mock-1", "小爱同学，问问明天天气")
+	r.mock.InjectAsk("debug", "小爱同学，问问明天天气")
 	waitFor(t, "agent", func() bool { return len(ag.Inputs()) == 1 })
 	if in := ag.Inputs(); in[0].Text != "明天天气" {
 		t.Fatalf("%+v", in)
@@ -990,13 +997,13 @@ func TestEventLogAllDriversWithConversationAndTurn(t *testing.T) {
 	m.CharsPerSec = 0
 	r.mgr.Set(m, nil, 0)
 	r.start("all")
-	m.InjectAsk("mock-1", "q")
+	m.InjectAsk("debug", "q")
 	waitFor(t, "reply", func() bool { return count(r.mgr.Log().Events(0, "", ""), EvReply) == 1 })
-	conv := r.hook.LookupConversation("mock-1")
+	conv := r.hook.LookupConversation("debug")
 	if conv == "" {
 		t.Fatal("conversation should exist")
 	}
-	got := r.mgr.Log().Events(0, "mock-1", conv)
+	got := r.mgr.Log().Events(0, "debug", conv)
 	var turn string
 	for _, e := range got {
 		if e.Kind == EvAsk {
@@ -1015,7 +1022,7 @@ func TestEventLogAllDriversWithConversationAndTurn(t *testing.T) {
 	if turn == "" {
 		t.Fatal("no turn ids")
 	}
-	if n := len(r.mgr.Log().Events(0, "mock-2", "")); n != 0 {
+	if n := len(r.mgr.Log().Events(0, "dev-b", "")); n != 0 {
 		t.Fatalf("device filter: %d", n)
 	}
 	if n := len(r.mgr.Log().Events(0, "", "nope")); n != 0 {
@@ -1070,5 +1077,251 @@ func TestEventLogRing(t *testing.T) {
 	ev := l.Events(0, "", "")
 	if len(ev) != eventRing || ev[0].Seq != 51 || l.LastSeq() != int64(eventRing+50) {
 		t.Fatalf("%d %d", len(ev), ev[0].Seq)
+	}
+}
+
+// ---- debug device routing + flow events ----
+
+func TestManagerRoutesDebugDeviceToMock(t *testing.T) {
+	dbg := NewMock()
+	dbg.CharsPerSec = 0
+	real := &recDriver{Log: *NewLog(quiet)}
+	mgr := NewManager(quiet)
+	mgr.SetDebug(dbg, true)
+	mgr.Set(real, []Device{{DeviceID: "R1", Name: "Real", Enabled: true}, {DeviceID: "R2", Enabled: false}}, 0)
+	devs := mgr.Devices()
+	if len(devs) != 2 || devs[0].DeviceID != "R1" || devs[1].DeviceID != DebugDeviceID || devs[1].Name != "调试音箱" || devs[1].Hardware != "LX06" {
+		t.Fatalf("%+v", devs)
+	}
+	if all := mgr.AllDevices(); len(all) != 3 {
+		t.Fatalf("%+v", all)
+	}
+	if d, _ := mgr.Resolve(""); d.DeviceID != "R1" {
+		t.Fatalf("default target must be the real device: %+v", d)
+	}
+	ctx := context.Background()
+	rd, _ := mgr.Resolve("R1")
+	dd, _ := mgr.Resolve(DebugDeviceID)
+	_ = mgr.Driver().TextToSpeech(ctx, dd, "to debug")
+	_ = mgr.Driver().TextToSpeech(ctx, rd, "to real")
+	ev := mgr.Log().Events(0, "", "")
+	if len(ev) != 2 || ev[0].Device != "debug" || ev[1].Device != "R1" {
+		t.Fatalf("%+v", ev)
+	}
+	if got := mgr.Driver().Name(); got != "fake-xiaomi" {
+		t.Fatalf("driver name %q", got)
+	}
+	// ask detection of the debug device works while the real driver is active
+	dbg.InjectAsk(DebugDeviceID, "hi")
+	if a, _ := mgr.Driver().GetLatestAsk(ctx, dd, time.Time{}); a == nil || a.Query != "hi" {
+		t.Fatalf("%+v", a)
+	}
+	if a, _ := mgr.Driver().GetLatestAsk(ctx, rd, time.Time{}); a != nil {
+		t.Fatal("real driver has no ask")
+	}
+	// hidden when disabled
+	v := mgr.Version()
+	mgr.SetDebug(dbg, false)
+	if mgr.Version() == v {
+		t.Fatal("version must change")
+	}
+	if devs = mgr.Devices(); len(devs) != 1 || devs[0].DeviceID != "R1" {
+		t.Fatalf("%+v", devs)
+	}
+	if _, err := mgr.Resolve(DebugDeviceID); err == nil {
+		t.Fatal("debug device must be hidden")
+	}
+	// driver=mock-like setup: only the debug device
+	m2 := NewManager(quiet)
+	m2.SetDebug(dbg, true)
+	m2.Set(dbg, nil, 0)
+	if devs = m2.Devices(); len(devs) != 1 || devs[0].DeviceID != DebugDeviceID {
+		t.Fatalf("%+v", devs)
+	}
+}
+
+type echoTool struct{ big bool }
+
+func (echoTool) Name() string            { return "echo" }
+func (echoTool) Description() string     { return "echo" }
+func (echoTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (e echoTool) Call(_ context.Context, a json.RawMessage) (any, error) {
+	if e.big {
+		return map[string]any{"blob": strings.Repeat("x", 5000)}, nil
+	}
+	return map[string]any{"echo": json.RawMessage(a)}, nil
+}
+
+func flowOf(ev []MockEvent) []string {
+	var k []string
+	for _, e := range ev {
+		if e.Kind != EvAsk && e.Kind != EvAskDetected && e.Kind != EvPause && e.Kind != EvReply {
+			k = append(k, e.Kind)
+		}
+	}
+	return k
+}
+
+func TestFlowEventsAgentTurnWithTool(t *testing.T) {
+	st := openStore(t)
+	reg := tools.NewRegistry()
+	reg.Register(echoTool{})
+	fake := llm.NewFake(
+		llm.FakeTurn{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"q":"晴天"}`)}}},
+		llm.FakeTurn{Text: "找到了。"})
+	rt := agent.New(agent.Options{Provider: fake, Tools: reg, Store: st, Logger: quiet})
+	m := NewMock()
+	m.CharsPerSec = 0
+	mgr := NewManager(quiet)
+	mgr.SetDebug(m, true)
+	mgr.Set(m, nil, 0)
+	h := NewHook(HookDeps{Mgr: mgr, Agent: rt, Store: st, Log: quiet})
+	h.RecheckEvery, h.StatusPoll, h.StartGrace = 10*time.Millisecond, 5*time.Millisecond, 20*time.Millisecond
+	defer h.Stop()
+	h.Apply(HookSettings{Mode: "all", PollInterval: 5 * time.Millisecond, InterruptWindow: 50 * time.Millisecond})
+	m.InjectAsk(DebugDeviceID, "查晴天")
+	waitFor(t, "turn_end", func() bool { return count(m.Events(0), EvTurnEnd) == 1 })
+	ev := m.Events(0)
+	want := "turn_start,llm_start,llm_end,tool_call,tool_result,llm_start,llm_end,tts,turn_end"
+	if got := strings.Join(flowOf(ev), ","); got != want {
+		t.Fatalf("flow %s want %s", got, want)
+	}
+	var tid string
+	for _, e := range ev {
+		if e.Kind == EvAsk {
+			continue
+		}
+		if e.TurnID == "" || (tid != "" && e.TurnID != tid) || e.ConversationID == "" {
+			t.Fatalf("ids: %+v", e)
+		}
+		tid = e.TurnID
+		switch e.Kind {
+		case EvTurnStart:
+			if e.Route != RouteAgent || e.Data["route"] != RouteAgent {
+				t.Fatalf("%+v", e)
+			}
+		case EvLLMStart:
+			if e.Data["model"] == nil {
+				t.Fatalf("%+v", e)
+			}
+		case EvLLMEnd:
+			if _, ok := e.Data["latency_ms"]; !ok {
+				t.Fatalf("%+v", e)
+			}
+			if _, ok := e.Data["duration_ms"]; !ok {
+				t.Fatalf("%+v", e)
+			}
+		case EvToolCall:
+			b, _ := json.Marshal(e.Data)
+			if e.Data["name"] != "echo" || e.Data["call_id"] != "c1" || string(b) != `{"args":{"q":"晴天"},"call_id":"c1","name":"echo"}` {
+				t.Fatalf("%s", b)
+			}
+		case EvToolResult:
+			b, _ := json.Marshal(e.Data)
+			if e.Data["ok"] != true || e.Data["call_id"] != "c1" || e.Data["name"] != "echo" || !strings.Contains(string(b), `"result":{"echo":{"q":"晴天"}}`) || e.Data["duration_ms"] == nil {
+				t.Fatalf("%s", b)
+			}
+		case EvTurnEnd:
+			if e.Data["canceled"] != false || e.Data["duration_ms"] == nil {
+				t.Fatalf("%+v", e)
+			}
+		}
+	}
+}
+
+func TestResultDataTruncates(t *testing.T) {
+	small, tr := resultData([]byte(`{"a":1}`))
+	if tr || string(small.(json.RawMessage)) != `{"a":1}` {
+		t.Fatalf("%v %v", small, tr)
+	}
+	big, tr := resultData([]byte(`{"blob":"` + strings.Repeat("x", 5000) + `"}`))
+	if !tr || len(big.(string)) > resultMax+4 {
+		t.Fatalf("%d %v", len(big.(string)), tr)
+	}
+	if v, _ := resultData(nil); v != nil {
+		t.Fatal("empty result")
+	}
+}
+
+func TestFlowEventsDirectRoute(t *testing.T) {
+	ag := &fakeAgent{}
+	m := newMusicRig(t, ag)
+	m.hits = []media.Hit{{ID: "a1", Title: "晴天", Artist: "周杰伦", Score: 95}}
+	m.startMusic()
+	m.mock.InjectAsk("debug", "播放晴天")
+	waitFor(t, "turn_end", func() bool { return count(m.mock.Events(0), EvTurnEnd) == 1 })
+	ev := m.mock.Events(0)
+	if got := strings.Join(flowOf(ev), ","); got != "turn_start,tool_call,tool_result,tts,tool_call,play_url,tool_result,turn_end" {
+		t.Fatalf("%s", got)
+	}
+	for _, e := range ev {
+		switch e.Kind {
+		case EvTurnStart:
+			if e.Route != RouteDirect {
+				t.Fatalf("%+v", e)
+			}
+		case EvToolCall:
+			if e.Data["call_id"] == nil || (e.Data["name"] != "search_audio" && e.Data["name"] != "play_audio") {
+				t.Fatalf("%+v", e)
+			}
+		case EvToolResult:
+			if e.Data["ok"] != true || e.Data["call_id"] == nil {
+				t.Fatalf("%+v", e)
+			}
+		}
+	}
+}
+
+func TestIgnoredAskNativeReplyEvent(t *testing.T) {
+	ag := &fakeAgent{}
+	m := newMusicRig(t, ag)
+	m.startMusic()
+	m.mock.SetNativeReply(true)
+	m.mock.InjectAsk("debug", "今天天气怎么样")
+	waitFor(t, "native", func() bool { return count(m.mock.Events(0), EvNativeReply) == 1 })
+	ev := m.mock.Events(0)
+	if k := strings.Join(kindsRaw(ev), ","); k != "ask,ask_detected,native_reply" {
+		t.Fatal(k)
+	}
+	if ev[2].Text != "（小爱原生回复）" || ev[1].Handled == nil || *ev[1].Handled || ev[1].Route != RouteIgnored || ev[2].TurnID == "" {
+		t.Fatalf("%+v", ev)
+	}
+	// without native_reply: no event
+	m.mock.SetNativeReply(false)
+	m.mock.InjectAsk("debug", "明天呢")
+	waitFor(t, "second ask", func() bool { return count(m.mock.Events(0), EvAskDetected) == 2 })
+	time.Sleep(30 * time.Millisecond)
+	if count(m.mock.Events(0), EvNativeReply) != 1 {
+		t.Fatal("native_reply only when simulated")
+	}
+}
+
+func kindsRaw(ev []MockEvent) []string {
+	var k []string
+	for _, e := range ev {
+		k = append(k, e.Kind)
+	}
+	return k
+}
+
+func TestFlowTurnEndCanceled(t *testing.T) {
+	ag := &fakeAgent{sentences: []string{"回答。"}, delay: 300 * time.Millisecond}
+	r := newRig(t, ag)
+	r.start("all")
+	r.mock.InjectAsk("debug", "第一个")
+	waitFor(t, "agent started", func() bool { return len(ag.Inputs()) == 1 })
+	ag.mu.Lock()
+	ag.delay = 0
+	ag.mu.Unlock()
+	r.mock.InjectAsk("debug", "第二个")
+	waitFor(t, "two turn_end", func() bool { return count(r.mock.Events(0), EvTurnEnd) == 2 })
+	var ends []bool
+	for _, e := range r.mock.Events(0) {
+		if e.Kind == EvTurnEnd {
+			ends = append(ends, e.Data["canceled"].(bool))
+		}
+	}
+	if !ends[0] || ends[1] {
+		t.Fatalf("%v", ends)
 	}
 }

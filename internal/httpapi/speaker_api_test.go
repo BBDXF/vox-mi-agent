@@ -95,7 +95,7 @@ func TestSpeakerStatusTestAndMockE2E(t *testing.T) {
 	}
 	devs := st["devices"].([]any)
 	d0 := devs[0].(map[string]any)
-	if len(devs) != 2 || d0["device_id"] != "mock-1" || d0["play_mode_effective"] != "url" || d0["tts_mode_effective"] != "mina" || devs[1].(map[string]any)["play_mode_effective"] != "music" {
+	if len(devs) != 1 || d0["device_id"] != "debug" || d0["debug"] != true || d0["name"] != "调试音箱" || d0["play_mode_effective"] != "url" || d0["tts_mode_effective"] != "mina" {
 		t.Fatalf("%s", b)
 	}
 	if st["hook"].(map[string]any)["running"] != false {
@@ -105,7 +105,7 @@ func TestSpeakerStatusTestAndMockE2E(t *testing.T) {
 	// test actions
 	for _, c := range []struct{ body string }{
 		{`{"action":"tts","text":"hello"}`}, {`{"action":"play_url","url":"http://h/a.mp3"}`}, {`{"action":"pause"}`},
-		{`{"action":"play"}`}, {`{"action":"stop"}`}, {`{"action":"volume","volume":33,"device_id":"mock-2"}`},
+		{`{"action":"play"}`}, {`{"action":"stop"}`}, {`{"action":"volume","volume":33,"device_id":"debug"}`},
 	} {
 		resp, b = e.do(t, "POST", "/api/speaker/test", c.body)
 		r := jsonOf(t, b)
@@ -159,7 +159,7 @@ func TestSpeakerStatusTestAndMockE2E(t *testing.T) {
 	}
 	_, b = e.do(t, "GET", "/api/speaker/status", "")
 	la := jsonOf(t, b)["hook"].(map[string]any)["last_ask"].(map[string]any)
-	if la["query"] != "你好" || la["handled"] != true || la["device"] != "mock-1" {
+	if la["query"] != "你好" || la["handled"] != true || la["device"] != "debug" {
 		t.Fatalf("%s", b)
 	}
 	if resp, _ = e.do(t, "POST", "/api/speaker/mock/ask", `{"text":""}`); resp.StatusCode != 400 {
@@ -293,7 +293,7 @@ func TestSpeakerEventsConversationsAndStatus(t *testing.T) {
 		}
 	}
 	e.app.StartSpeaker()
-	resp, b := e.do(t, "POST", "/api/speaker/mock/ask", `{"text":"你好","device_id":"mock-2"}`)
+	resp, b := e.do(t, "POST", "/api/speaker/mock/ask", `{"text":"你好","device_id":"debug"}`)
 	ask := jsonOf(t, b)
 	conv, _ := ask["conversation_id"].(string)
 	if resp.StatusCode != 200 || conv == "" {
@@ -302,27 +302,41 @@ func TestSpeakerEventsConversationsAndStatus(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	var evs []any
 	for time.Now().Before(deadline) {
-		_, b = e.do(t, "GET", "/api/speaker/events?device_id=mock-2&conversation_id="+conv, "")
+		_, b = e.do(t, "GET", "/api/speaker/events?device_id=debug&conversation_id="+conv, "")
 		evs = jsonOf(t, b)["events"].([]any)
-		if len(evs) > 0 && evs[len(evs)-1].(map[string]any)["kind"] == "reply" {
+		if len(evs) > 0 && evs[len(evs)-1].(map[string]any)["kind"] == "turn_end" {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if len(evs) == 0 || evs[len(evs)-1].(map[string]any)["kind"] != "reply" {
+	if len(evs) == 0 || evs[len(evs)-1].(map[string]any)["kind"] != "turn_end" {
 		t.Fatalf("%s", b)
 	}
 	for _, x := range evs {
 		m := x.(map[string]any)
-		if m["device_id"] != "mock-2" || m["conversation_id"] != conv {
+		if m["device_id"] != "debug" || m["conversation_id"] != conv {
 			t.Fatalf("%v", m)
 		}
 		if k := m["kind"]; k != "ask" && m["turn_id"] == nil {
 			t.Fatalf("%v lacks turn_id", m)
 		}
 	}
+	var kinds []string
+	for _, x := range evs {
+		kinds = append(kinds, x.(map[string]any)["kind"].(string))
+	}
+	// pause runs concurrently with the LLM call: its position is not fixed
+	var flow []string
+	for _, k := range kinds {
+		if k != "pause" {
+			flow = append(flow, k)
+		}
+	}
+	if got := strings.Join(flow, ","); got != "ask,ask_detected,turn_start,llm_start,llm_end,tts,reply,turn_end" || len(flow) != len(kinds)-1 {
+		t.Fatalf("flow: %v", kinds)
+	}
 	// filters + alias + after
-	if _, b = e.do(t, "GET", "/api/speaker/events?device_id=mock-1", ""); len(jsonOf(t, b)["events"].([]any)) != 0 {
+	if _, b = e.do(t, "GET", "/api/speaker/events?device_id=nope", ""); len(jsonOf(t, b)["events"].([]any)) != 0 {
 		t.Fatalf("%s", b)
 	}
 	_, b1 := e.do(t, "GET", "/api/speaker/events", "")
@@ -334,11 +348,11 @@ func TestSpeakerEventsConversationsAndStatus(t *testing.T) {
 	if _, b = e.do(t, "GET", "/api/speaker/events?after="+strconv.Itoa(int(last)), ""); len(jsonOf(t, b)["events"].([]any)) != 0 {
 		t.Fatalf("%s", b)
 	}
-	// status now has the conversation id for mock-2 only
+	// status now has the conversation id for debug only
 	_, b = e.do(t, "GET", "/api/speaker/status", "")
 	for _, d := range jsonOf(t, b)["devices"].([]any) {
 		m := d.(map[string]any)
-		if (m["device_id"] == "mock-2") != (m["conversation_id"] == conv) {
+		if (m["device_id"] == "debug") != (m["conversation_id"] == conv) {
 			t.Fatalf("%s", b)
 		}
 	}
@@ -352,7 +366,7 @@ func TestSpeakerEventsConversationsAndStatus(t *testing.T) {
 		switch m["channel"] {
 		case "speaker":
 			found = true
-			if m["id"] != conv || m["device_id"] != "mock-2" || m["device_name"] != "Mock Bedroom" {
+			if m["id"] != conv || m["device_id"] != "debug" || m["device_name"] != "调试音箱" {
 				t.Fatalf("%v", m)
 			}
 		default:
@@ -364,5 +378,55 @@ func TestSpeakerEventsConversationsAndStatus(t *testing.T) {
 	}
 	if !found || !web {
 		t.Fatalf("%s", b)
+	}
+}
+
+func TestDebugDeviceWorksWithAnyDriver(t *testing.T) {
+	xm := miniXiaomi(t, false)
+	e := spkEnv(t, xm, llm.NewFake(llm.FakeTurn{Text: "好的。"}))
+	if resp, b := e.do(t, "PUT", "/api/settings/speaker", `{"driver":"xiaomi","xiaomi.devices":[{"device_id":"R1","name":"客厅","enabled":true}]}`); resp.StatusCode != 200 {
+		t.Fatalf("%s", b)
+	}
+	e.app.StartSpeaker()
+	_, b := e.do(t, "GET", "/api/speaker/status", "")
+	st := jsonOf(t, b)
+	devs := st["devices"].([]any)
+	if st["driver"] != "xiaomi" || len(devs) != 2 || devs[0].(map[string]any)["device_id"] != "R1" || devs[1].(map[string]any)["device_id"] != "debug" || devs[1].(map[string]any)["debug"] != true {
+		t.Fatalf("%s", b)
+	}
+	// default device of mock/ask is debug
+	resp, b := e.do(t, "POST", "/api/speaker/mock/ask", `{"text":"你好"}`)
+	if resp.StatusCode != 200 || jsonOf(t, b)["ask"].(map[string]any)["device_id"] != "debug" || jsonOf(t, b)["conversation_id"] == "" {
+		t.Fatalf("%d %s", resp.StatusCode, b)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_, b = e.do(t, "GET", "/api/speaker/events?device_id=debug", "")
+		if strings.Contains(string(b), `"turn_end"`) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !strings.Contains(string(b), `"kind":"tts"`) {
+		t.Fatalf("%s", b)
+	}
+	// a real device cannot be driven with simulated asks
+	if resp, _ = e.do(t, "POST", "/api/speaker/mock/ask", `{"text":"x","device_id":"R1"}`); resp.StatusCode != 409 {
+		t.Fatal(resp.StatusCode)
+	}
+	// test action without device goes to the real device (not logged in -> 502), debug explicitly works
+	if resp, _ = e.do(t, "POST", "/api/speaker/test", `{"action":"tts","text":"x","device_id":"debug"}`); resp.StatusCode != 200 {
+		t.Fatal(resp.StatusCode)
+	}
+	// hide the debug device
+	if resp, b = e.do(t, "PUT", "/api/settings/speaker", `{"debug_device":false}`); resp.StatusCode != 200 {
+		t.Fatalf("%s", b)
+	}
+	_, b = e.do(t, "GET", "/api/speaker/status", "")
+	if devs = jsonOf(t, b)["devices"].([]any); len(devs) != 1 {
+		t.Fatalf("%s", b)
+	}
+	if resp, _ = e.do(t, "POST", "/api/speaker/mock/ask", `{"text":"x"}`); resp.StatusCode != 400 {
+		t.Fatal(resp.StatusCode)
 	}
 }
