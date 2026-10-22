@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Bot, Save, Loader2 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,8 +26,15 @@ export function AgentSettings() {
   const [hist, setHist] = useState('40');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = taRef.current; if (!el) return;
+    el.style.height = 'auto'; el.style.height = el.scrollHeight + 2 + 'px';
+  }, [prompt, editing]);
 
   const apply = (d: AS) => {
+    setEditing((d.system_prompt || '').trim() !== '');
     setData(d); setPrompt(d.system_prompt || ''); setMaxSteps(String(d.max_steps));
     setTemp(d.temperature == null ? '' : String(d.temperature)); setTimeoutV(d.turn_timeout);
     setHist(String(d.history_messages));
@@ -54,7 +61,7 @@ export function AgentSettings() {
   };
 
   if (!data) return <div className="text-sm text-muted-foreground py-12 text-center">正在加载…</div>;
-  const custom = prompt.trim() !== '';
+  const proseCls = 'rounded-lg border bg-muted/40 px-4 py-3 text-sm leading-[1.7] whitespace-pre-wrap break-words font-sans [tab-size:2]';
   const Err = ({ k }: { k: string }) => errors[k] ? <p className="text-xs text-destructive mt-1">{errors[k]}</p> : null;
 
   return (
@@ -67,16 +74,27 @@ export function AgentSettings() {
         <section className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <label className="text-sm font-medium">系统提示词
-              <span className="ml-2 text-xs font-normal text-muted-foreground">当前使用：{custom ? '自定义' : '默认'}</span>
+              <span className="ml-2 text-xs font-normal text-muted-foreground">当前使用：{editing ? '自定义' : '默认'}</span>
             </label>
             <div className="flex gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => setPrompt('')} disabled={!custom}>使用默认</Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => setPrompt(data.default_system_prompt)}>以默认为基础编辑</Button>
+              {editing
+                ? <Button type="button" variant="outline" size="sm" onClick={() => { setPrompt(''); setEditing(false); }}>恢复默认</Button>
+                : <Button type="button" variant="outline" size="sm" onClick={() => { setPrompt(data.default_system_prompt); setEditing(true); }}>编辑</Button>}
             </div>
           </div>
-          <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={data.default_system_prompt} rows={14}
-            className="w-full rounded-md border bg-background p-3 font-mono text-xs leading-relaxed outline-none focus:ring-2 focus:ring-ring resize-y" />
-          <p className="text-xs text-muted-foreground">留空表示使用默认提示词。</p>
+          {editing ? (
+            <textarea ref={taRef} value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={12} spellCheck={false}
+              className={`${proseCls} block w-full resize-y overflow-y-auto outline-none focus:ring-2 focus:ring-ring`} style={{ minHeight: '18rem', maxHeight: '70vh' }} />
+          ) : (
+            <div>
+              <div className="mb-1.5 text-xs font-medium text-muted-foreground">默认提示词（只读）</div>
+              <div className={`${proseCls} overflow-y-auto`} style={{ maxHeight: '70vh' }}>{data.default_system_prompt}</div>
+            </div>
+          )}
+          <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+            <span>工具说明由系统自动提供，无需写在这里。{editing ? '清空后保存将使用默认提示词。' : ''}</span>
+            <span>{(editing ? prompt : data.default_system_prompt).length} 字</span>
+          </div>
           <Err k="system_prompt" />
         </section>
 
