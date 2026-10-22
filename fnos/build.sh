@@ -16,9 +16,9 @@ sed -i "s/@VERSION@/$V/" "$B/manifest" "$B/app/docker/.env"
 cp "$ROOT/LICENSE" "$B/LICENSE"
 chmod +x "$B"/cmd/*
 if command -v fnpack >/dev/null 2>&1; then
-  (cd "$OUT" && fnpack build vox-mi-agent)
+  (cd "$B" && fnpack build && mv ./*.fpk "$OUT/vox-mi-agent_$V.fpk")
 else
   tar -C "$OUT" -czf "$OUT/vox-mi-agent_$V.tar.gz" vox-mi-agent
-  echo "fnpack not found: made tarball only. Install fnpack, then: cd $OUT && fnpack build vox-mi-agent"
+  echo "fnpack not found: made tarball only. Install fnpack, then: cd $B && fnpack build"
 fi
 ls -l "$OUT"

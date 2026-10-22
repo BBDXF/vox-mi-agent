@@ -1,1 +1,1 @@
-[{"stepTitle":"卸载","items":[{"type":"switch","field":"wizard_keep_data","label":"保留数据","initValue":true}]}]
+[{"stepTitle":"卸载","items":[{"type":"switch","field":"wizard_keep_data","label":"保留数据","initValue":"true"}]}]

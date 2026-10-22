@@ -62,6 +62,14 @@ function fmtEb(v: any): string {
 export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardProps) {
   const { success, error: toastError } = useToast();
 
+  const locked: Record<string, string> = (currentSettings as any).env_locked || {};
+  const isLocked = (k: string) => Boolean(locked[k]);
+  const lockHint = (k: string) => (
+    <span className="text-[11px] text-amber-600 dark:text-amber-400 block">
+      由环境变量 {locked[k]} 管理，在部署配置中修改（飞牛：应用设置）
+    </span>
+  );
+
   // Provider presets
   const [providers, setProviders] = useState<LLMProvider[]>([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
@@ -167,7 +175,7 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
 
   // Handle switching provider
   const handleSelectProvider = (preset: LLMProvider) => {
-    if (preset.id === selectedProviderId) return;
+    if (preset.id === selectedProviderId || isLocked('provider')) return;
 
     setSelectedProviderId(preset.id);
     setSaveError(null);
@@ -270,25 +278,24 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
     setSaveError(null);
 
     try {
-      const payload: UpdateLLMRequest = {
-        provider: selectedProviderId,
-        model: model.trim(),
-      };
-      if (timeoutStr.trim()) payload.timeout = timeoutStr.trim();
+      const payload: UpdateLLMRequest = {};
+      if (!isLocked('provider')) payload.provider = selectedProviderId;
+      if (!isLocked('model')) payload.model = model.trim();
+      if (timeoutStr.trim() && !isLocked('timeout')) payload.timeout = timeoutStr.trim();
       const ebText = extraBodyStr.trim();
-      try {
+      if (!isLocked('extra_body')) try {
         payload.extra_body = ebText ? JSON.parse(ebText) : {};
         if (typeof payload.extra_body !== 'object' || Array.isArray(payload.extra_body)) throw new Error();
       } catch {
         throw new Error('extra_body 必须是合法的 JSON 对象');
       }
 
-      if (baseUrl.trim()) {
+      if (baseUrl.trim() && !isLocked('base_url')) {
         payload.base_url = baseUrl.trim();
       }
 
       // Only include api_key if typed
-      if (apiKeyInput.trim()) {
+      if (apiKeyInput.trim() && !isLocked('api_key')) {
         payload.api_key = apiKeyInput.trim();
       }
 
@@ -365,7 +372,8 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+          {isLocked('provider') && lockHint('provider')}
+          <div className={cn('grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5', isLocked('provider') && 'opacity-60 pointer-events-none')}>
             {providers.map((preset) => {
               const isSelected = selectedProviderId === preset.id;
               return (
@@ -505,8 +513,10 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
                   placeholder={currentPreset.base_url || 'http://localhost:11434/v1'}
                   className="font-mono text-xs shadow-xs"
                   required
+                  disabled={isLocked('base_url')}
                 />
               )}
+              {isLocked('base_url') && lockHint('base_url')}
 
               <span className="text-[11px] text-muted-foreground block">
                 {!currentPreset.base_url_editable
@@ -556,6 +566,7 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
                     }
                     className="font-mono text-xs pr-8 shadow-xs"
                     required
+                    disabled={isLocked('model')}
                   />
                   {modelsList.length > 0 && (
                     <button
@@ -590,6 +601,7 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
                 </Button>
               </div>
 
+              {isLocked('model') && lockHint('model')}
               {modelsFetchError ? (
                 <span className="text-[11px] text-destructive flex items-center gap-1">
                   <AlertCircle className="w-3 h-3 shrink-0" />
@@ -716,9 +728,11 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
                   : `请输入 ${currentPreset.name} API Key`
               }
               autoComplete="new-password"
+              disabled={isLocked('api_key')}
               className="font-mono text-xs shadow-xs"
             />
 
+            {isLocked('api_key') && lockHint('api_key')}
             <span className="text-[11px] text-muted-foreground block">
               {!isProviderChanged && hasApiKeyOnServer
                 ? '出于安全考虑，已保存的密钥以脱敏形式展现且不回填明文。留空提交将继续沿用现有密钥。'
@@ -731,8 +745,9 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
           {/* Timeout */}
           <div className="space-y-1.5 pt-2">
             <label className="text-xs font-semibold text-foreground">请求超时 (timeout)</label>
-            <Input value={timeoutStr} onChange={(e) => setTimeoutStr(e.target.value)} placeholder="如 60s、2m；留空使用默认" className="font-mono text-xs shadow-xs" />
+            <Input disabled={isLocked('timeout')} value={timeoutStr} onChange={(e) => setTimeoutStr(e.target.value)} placeholder="如 60s、2m；留空使用默认" className="font-mono text-xs shadow-xs" />
             <span className="text-[11px] text-muted-foreground block">范围 0 ~ 10m。</span>
+            {isLocked('timeout') && lockHint('timeout')}
           </div>
 
           {/* extra_body */}
@@ -742,10 +757,12 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
               value={extraBodyStr}
               onChange={(e) => setExtraBodyStr(e.target.value)}
               rows={4}
+              disabled={isLocked('extra_body')}
               placeholder='{"enable_thinking": false}'
               className="w-full rounded-md border bg-background p-3 font-mono text-xs outline-none focus:ring-2 focus:ring-ring resize-y"
             />
             <span className="text-[11px] text-muted-foreground block">JSON 对象，会合并进每次模型请求体；留空表示不添加。</span>
+            {isLocked('extra_body') && lockHint('extra_body')}
           </div>
         </form>
 

@@ -333,9 +333,9 @@ export interface SettingsResponse {
 }
 
 export interface UpdateLLMRequest {
-  provider: string;
+  provider?: string;
   base_url?: string;
-  model: string;
+  model?: string;
   api_key?: string;
   timeout?: string;
   extra_body?: Record<string, any>;

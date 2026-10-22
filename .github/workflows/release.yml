@@ -39,13 +39,20 @@ jobs:
         # `make build` re-runs `make web` (idempotent); binaries land in dist/linux_<arch>/app
         run: make build VERSION="${VERSION}" COMMIT="${GITHUB_SHA::7}"
 
+      - name: Build fnOS package (.fpk)
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/fnpack https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64
+          sudo chmod +x /usr/local/bin/fnpack
+          sh fnos/build.sh "${GITHUB_REF_NAME}"
+          mkdir -p release && cp dist/fpk/*.fpk release/
+
       - name: Package release assets
         run: |
           mkdir -p release
           for arch in amd64 arm64; do
             tar -C "dist/linux_${arch}" -czf "release/app_${VERSION}_linux_${arch}.tar.gz" app
           done
-          (cd release && sha256sum ./*.tar.gz | sed 's#\./##' > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          (cd release && sha256sum ./*.tar.gz ./*.fpk | sed 's#\./##' > SHA256SUMS.txt && cat SHA256SUMS.txt)
 
       - name: Release notes (CHANGELOG section + commits)
         run: |
@@ -65,6 +72,7 @@ jobs:
         with:
           files: |
             release/*.tar.gz
+            release/*.fpk
             release/SHA256SUMS.txt
           body_path: notes.md
           prerelease: ${{ contains(github.ref_name, '-') }}
