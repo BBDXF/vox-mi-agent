@@ -71,6 +71,10 @@ type Agent struct {
 	TurnTimeout time.Duration `yaml:"turn_timeout" json:"turn_timeout"`
 	// HistoryMessages is the number of stored messages kept as context (0 = all).
 	HistoryMessages int `yaml:"history_messages" json:"history_messages"`
+	// IdleReset: speaker conversations start a fresh context after this much
+	// silence (0 = off). ContextTokens: estimated token budget (0 = off).
+	IdleReset     time.Duration `yaml:"idle_reset" json:"idle_reset"`
+	ContextTokens int           `yaml:"context_tokens" json:"context_tokens"`
 	// ToolsDisabled lists built-in tool names hidden from the LLM.
 	ToolsDisabled []string `yaml:"tools_disabled" json:"tools_disabled"`
 }
@@ -363,7 +367,7 @@ func Defaults() *Config {
 				MusicExclude:    []string{"放假", "放心", "放松", "听说", "听话", "听见"},
 				DirectPlayScore: 85,
 				PollInterval:    time.Second, InterruptWindow: 3 * time.Second}},
-		Agent: Agent{MaxSteps: 6, TurnTimeout: 120 * time.Second, HistoryMessages: 40,
+		Agent: Agent{MaxSteps: 6, TurnTimeout: 120 * time.Second, HistoryMessages: 40, IdleReset: 30 * time.Minute, ContextTokens: 16000,
 			ToolsDisabled: []string{"run_shell"}}, // run_shell is opt-in
 		Logging: Logging{
 			Level:                "info",
@@ -547,7 +551,7 @@ func (c *Config) Validate() error {
 	if c.Agent.Temperature != nil && (*c.Agent.Temperature < 0 || *c.Agent.Temperature > 2) {
 		return errors.New("config: agent.temperature must be between 0 and 2")
 	}
-	if c.Agent.TurnTimeout < 0 || c.Agent.HistoryMessages < 0 {
+	if c.Agent.TurnTimeout < 0 || c.Agent.HistoryMessages < 0 || c.Agent.IdleReset < 0 || c.Agent.ContextTokens < 0 {
 		return errors.New("config: agent.turn_timeout and agent.history_messages must be >= 0")
 	}
 	if err := validateMCP(c.MCP.Servers); err != nil {

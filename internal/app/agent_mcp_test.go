@@ -54,7 +54,7 @@ func TestAgentSectionRoundTripAndValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got["default_system_prompt"] != agent.DefaultSystemPrompt || got["system_prompt"] != "" ||
-		got["max_steps"] != 6 || got["temperature"] != nil || got["history_messages"] != 40 {
+		got["max_steps"] != 6 || got["temperature"] != nil || got["history_messages"] != 40 || got["idle_reset"] != "30m" || got["context_tokens"] != 16000 {
 		t.Fatalf("defaults: %+v", got)
 	}
 	tl := got["available_tools"].([]map[string]string)
@@ -89,6 +89,8 @@ func TestAgentSectionRoundTripAndValidation(t *testing.T) {
 		`{"tools_disabled":["nope"]}`:     "tools_disabled",
 		`{"history_messages":-1}`:         "history_messages",
 		`{"turn_timeout":"5h"}`:           "turn_timeout",
+		`{"idle_reset":"25h"}`:            "idle_reset",
+		`{"context_tokens":100}`:          "context_tokens",
 		`{"tools_disabled":"play_audio"}`: "tools_disabled",
 	} {
 		if fe := putFields(t, a, "agent", js); fe[key] == "" {

@@ -24,6 +24,8 @@ export function AgentSettings() {
   const [temp, setTemp] = useState('');
   const [timeout, setTimeoutV] = useState('2m');
   const [hist, setHist] = useState('40');
+  const [idle, setIdle] = useState('30m');
+  const [ctxTok, setCtxTok] = useState('16000');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -38,6 +40,7 @@ export function AgentSettings() {
     setData(d); setPrompt(d.system_prompt || ''); setMaxSteps(String(d.max_steps));
     setTemp(d.temperature == null ? '' : String(d.temperature)); setTimeoutV(d.turn_timeout);
     setHist(String(d.history_messages));
+    setIdle(d.idle_reset); setCtxTok(String(d.context_tokens));
   };
   const load = () => getAgentSettings().then(apply).catch((e) => toastError(e.message || '加载失败'));
   useEffect(() => { load(); }, []);
@@ -51,6 +54,8 @@ export function AgentSettings() {
         temperature: temp.trim() === '' ? null : Number(temp),
         turn_timeout: timeout.trim(),
         history_messages: Number(hist),
+        idle_reset: idle.trim(),
+        context_tokens: Number(ctxTok),
       });
       success('智能体设置已保存并生效');
       await load();
@@ -118,6 +123,16 @@ export function AgentSettings() {
             <label className="text-sm font-medium">历史消息数</label>
             <Input type="number" min={0} max={1000} value={hist} onChange={(e) => setHist(e.target.value)} />
             <p className="text-xs text-muted-foreground mt-1">0 = 全部，最大 1000</p><Err k="history_messages" />
+          </div>
+          <div>
+            <label className="text-sm font-medium">空闲重置</label>
+            <Input value={idle} placeholder="30m" onChange={(e) => setIdle(e.target.value)} />
+            <p className="text-xs text-muted-foreground mt-1">空闲重置：音箱超过该时长没对话，下一句从新上下文开始；如 30m，0 = 关闭</p><Err k="idle_reset" />
+          </div>
+          <div>
+            <label className="text-sm font-medium">上下文预算</label>
+            <Input type="number" min={0} max={1000000} value={ctxTok} onChange={(e) => setCtxTok(e.target.value)} />
+            <p className="text-xs text-muted-foreground mt-1">上下文预算：发送给模型的估算 token 上限；0 = 不限，否则 2000–1000000</p><Err k="context_tokens" />
           </div>
         </div></section>
       </CardContent>

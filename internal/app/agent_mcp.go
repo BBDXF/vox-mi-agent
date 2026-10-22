@@ -25,6 +25,7 @@ func agentSettings(c config.Agent) agent.Settings {
 	}
 	return agent.Settings{SystemPrompt: c.SystemPrompt, MaxSteps: c.MaxSteps, Temperature: t,
 		TurnTimeout: c.TurnTimeout, HistoryMessages: c.HistoryMessages,
+		IdleReset: c.IdleReset, ContextTokens: c.ContextTokens,
 		DisabledTools: append([]string(nil), c.ToolsDisabled...)}
 }
 
@@ -78,6 +79,8 @@ func agentSection() *section {
 			temp,
 			durField("turn_timeout", "单轮对话总超时（如 120s；0 表示不限，最大 1h）", func(c *config.Config) *time.Duration { return &c.Agent.TurnTimeout }),
 			intField("history_messages", "作为上下文保留的最近消息条数（0 表示全部，最大 1000）", func(c *config.Config) *int { return &c.Agent.HistoryMessages }),
+			durField("idle_reset", "空闲重置：音箱超过该时长没对话，下一句从新上下文开始（0 表示关闭，最大 24h）", func(c *config.Config) *time.Duration { return &c.Agent.IdleReset }),
+			intField("context_tokens", "上下文预算：发送给模型的估算 token 上限（0 表示不限，否则 2000–1000000）", func(c *config.Config) *int { return &c.Agent.ContextTokens }),
 			stringsField("tools_disabled", "禁用的内置工具名称（不会发送给 LLM）；见 available_tools",
 				func(c *config.Config) *[]string { return &c.Agent.ToolsDisabled }),
 		},
@@ -101,6 +104,12 @@ func agentSection() *section {
 		}
 		if provided["history_messages"] && (g.HistoryMessages < 0 || g.HistoryMessages > 1000) {
 			fe["history_messages"] = "must be between 0 and 1000"
+		}
+		if provided["idle_reset"] && (g.IdleReset < 0 || g.IdleReset > 24*time.Hour) {
+			fe["idle_reset"] = "must be between 0 and 24h"
+		}
+		if provided["context_tokens"] && g.ContextTokens != 0 && (g.ContextTokens < 2000 || g.ContextTokens > 1000000) {
+			fe["context_tokens"] = "must be 0 or between 2000 and 1000000"
 		}
 		if provided["tools_disabled"] {
 			known := map[string]bool{}

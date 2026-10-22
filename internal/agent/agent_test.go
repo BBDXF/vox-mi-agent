@@ -417,3 +417,82 @@ func TestTrimHistoryStartsAtUser(t *testing.T) {
 		t.Errorf("%+v", got)
 	}
 }
+
+func TestApplyIdle(t *testing.T) {
+	now := time.Now()
+	u := func(c string) llm.Message { return llm.Message{Role: llm.RoleUser, Content: c} }
+	a := func(c string) llm.Message { return llm.Message{Role: llm.RoleAssistant, Content: c} }
+	h := []llm.Message{u("1"), a("a"), u("2"), a("b")}
+	ts := []time.Time{now.Add(-60 * time.Minute), now.Add(-59 * time.Minute), now.Add(-3 * time.Minute), now.Add(-2 * time.Minute)}
+	got := applyIdle(h, ts, 10*time.Minute, now)
+	if len(got) != 2 || got[0].Content != "2" {
+		t.Fatalf("split: %+v", got)
+	}
+	if got := applyIdle(h, ts, 0, now); len(got) != 4 {
+		t.Fatal("off")
+	}
+	if got := applyIdle(h, ts, time.Minute, now); len(got) != 0 {
+		t.Fatalf("stale: %+v", got)
+	}
+}
+
+func TestFitBudgetKeepsTurns(t *testing.T) {
+	big := strings.Repeat("字", 100)
+	h := []llm.Message{
+		{Role: llm.RoleUser, Content: big}, {Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "c", Name: "t"}}},
+		{Role: llm.RoleTool, ToolCallID: "c", Content: big}, {Role: llm.RoleAssistant, Content: big},
+		{Role: llm.RoleUser, Content: "q"}, {Role: llm.RoleAssistant, Content: "a"},
+	}
+	got := fitBudget(h, 10, 150)
+	if len(got) != 2 || got[0].Content != "q" {
+		t.Fatalf("%+v", got)
+	}
+	if got := fitBudget(h, 10, 100000); len(got) != 6 {
+		t.Fatal("fits")
+	}
+}
+
+func TestTruncateToolResults(t *testing.T) {
+	h := []llm.Message{{Role: llm.RoleTool, Content: strings.Repeat("字", 3000)}, {Role: llm.RoleTool, Content: "short"}}
+	got := truncateToolResults(h)
+	if !strings.HasSuffix(got[0].Content, "…(已截断)") || len([]rune(got[0].Content)) > 1600 || got[1].Content != "short" {
+		t.Fatalf("%d", len([]rune(got[0].Content)))
+	}
+	if len([]rune(h[0].Content)) != 3000 {
+		t.Fatal("mutated input")
+	}
+}
+
+func TestContextOverflowRetry(t *testing.T) {
+	rt := New(Options{Provider: llm.NewFake()})
+	conv := "c1"
+	// seed longer history so halving is possible
+	rt.mu.Lock()
+	rt.mem[conv] = []llm.Message{{Role: llm.RoleUser, Content: "1"}, {Role: llm.RoleAssistant, Content: "x"},
+		{Role: llm.RoleUser, Content: "2"}, {Role: llm.RoleAssistant, Content: "y"}}
+	rt.mu.Unlock()
+	f2 := llm.NewFake(
+		llm.FakeTurn{Err: errors.New("400: context_length_exceeded")},
+		llm.FakeTurn{Err: errors.New("maximum context length is 8192 tokens")},
+		llm.FakeTurn{Text: "好的。"},
+	)
+	rt.opt.Provider = f2
+	var c2 collector
+	if err := rt.Run(context.Background(), Input{ConversationID: conv, Text: "now"}, c2.emit); err != nil {
+		t.Fatal(err)
+	}
+	reqs := f2.Requests()
+	if len(reqs) != 3 {
+		t.Fatalf("calls %d", len(reqs))
+	}
+	// system + 4 history + user; then halved (2 + user); then none (user only)
+	if n := len(reqs[0].Messages); n != 6 {
+		t.Fatalf("first %d", n)
+	}
+	if n := len(reqs[1].Messages); n != 4 {
+		t.Fatalf("second %d", n)
+	}
+	if n := len(reqs[2].Messages); n != 2 {
+		t.Fatalf("third %d", n)
+	}
+}

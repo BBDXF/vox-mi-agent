@@ -41,6 +41,11 @@ type Options struct {
 	// HistoryMessages keeps only the last N stored messages as context
 	// (0 = all).
 	HistoryMessages int
+	// IdleReset (speaker channel only) starts a fresh context after this
+	// much silence (0 = off). ContextTokens is the estimated token budget
+	// of a request (0 = off).
+	IdleReset     time.Duration
+	ContextTokens int
 	// DisabledTools are tool names not offered to (nor callable by) the LLM.
 	DisabledTools []string
 }
@@ -52,6 +57,8 @@ type Settings struct {
 	Temperature     *float64
 	TurnTimeout     time.Duration
 	HistoryMessages int
+	IdleReset       time.Duration
+	ContextTokens   int
 	DisabledTools   []string
 }
 
@@ -202,7 +209,7 @@ func New(opt Options) *Runtime {
 	}
 	r := &Runtime{opt: opt, log: lg, mem: map[string][]llm.Message{}, active: map[*activeTurn]struct{}{}}
 	r.Apply(Settings{SystemPrompt: opt.SystemPrompt, MaxSteps: opt.MaxSteps, Temperature: opt.Temperature,
-		TurnTimeout: opt.TurnTimeout, HistoryMessages: opt.HistoryMessages, DisabledTools: opt.DisabledTools})
+		TurnTimeout: opt.TurnTimeout, HistoryMessages: opt.HistoryMessages, IdleReset: opt.IdleReset, ContextTokens: opt.ContextTokens, DisabledTools: opt.DisabledTools})
 	return r
 }
 
@@ -240,23 +247,21 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 	}
 
 	cfg := r.settings()
-	convID, history, err := r.openConversation(pctx, in)
+	convID, prior, times, err := r.openConversation(pctx, in)
 	if err != nil {
 		return fail(err)
 	}
-	history = trimHistory(history, cfg.HistoryMessages)
+	if ts.channel == store.ChannelSpeaker {
+		prior = applyIdle(prior, times, cfg.IdleReset, time.Now())
+	}
+	prior = trimHistory(prior, cfg.HistoryMessages)
+	prior = truncateToolResults(prior)
 	ts.convID = convID
 	// make the turn cancellable by CancelConversation (e.g. conversation deletion)
 	ctx, cancelTurn := context.WithCancel(ctx)
 	defer cancelTurn()
 	defer r.register(convID, cancelTurn)()
 	emit(Event{Type: EventConversation, Data: ConversationData{ID: convID}})
-
-	userMsg := llm.Message{Role: llm.RoleUser, Content: in.Text}
-	if err := r.persist(pctx, convID, userMsg); err != nil {
-		return fail(err)
-	}
-	history = append(history, userMsg)
 
 	var defs []llm.ToolDef
 	if r.opt.Tools != nil {
@@ -267,6 +272,20 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 			defs = append(defs, llm.ToolDef{Name: t.Name(), Description: t.Description(), Parameters: t.Schema()})
 		}
 	}
+
+	userMsg := llm.Message{Role: llm.RoleUser, Content: in.Text}
+	if cfg.ContextTokens > 0 {
+		fixed := estTokens(cfg.SystemPrompt) + estTokens(in.Text) + 8
+		for _, d := range defs {
+			fixed += estTokens(d.Name) + estTokens(d.Description) + estTokens(string(d.Parameters))
+		}
+		prior = fitBudget(prior, fixed, cfg.ContextTokens)
+	}
+	overflowTries := 0
+	if err := r.persist(pctx, convID, userMsg); err != nil {
+		return fail(err)
+	}
+	cur := []llm.Message{userMsg}
 
 	tm, usage := &ts.tm, &ts.usage
 	since := func() int64 { return time.Since(start).Milliseconds() }
@@ -282,9 +301,29 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 		}
 		stepNo := step + 1
 		ts.steps = stepNo
-		msgs := make([]llm.Message, 0, len(history)+1)
+		msgs := make([]llm.Message, 0, len(prior)+len(cur)+1)
 		msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: cfg.SystemPrompt})
-		msgs = append(msgs, history...)
+		msgs = append(msgs, prior...)
+		msgs = append(msgs, cur...)
+		// shrink drops history after a context-length error; false = nothing to drop.
+		shrink := func(err error) bool {
+			if overflowTries >= 2 || len(prior) == 0 || !isContextOverflow(err) {
+				return false
+			}
+			overflowTries++
+			before := len(prior)
+			if overflowTries == 1 {
+				prior = trimHistory(prior, before/2)
+			} else {
+				prior = nil
+			}
+			log.Warn("context overflow, retrying with less history", "err", err, "from", before, "to", len(prior))
+			r.trace(store.TraceRow{TS: time.Now(), ConversationID: convID, TurnID: ts.id, Step: stepNo,
+				Kind: store.TraceLLM, Name: r.model(), Status: store.TraceOK, Channel: ts.channel,
+				Args:          fmt.Sprintf("context overflow retry %d: history %d -> %d", overflowTries, before, len(prior)),
+				ResultSummary: "context_overflow_retry"})
+			return true
+		}
 		stepStart := time.Now()
 		var stepFirst int64 // ms from stepStart to the first visible token
 		var stepUsage *llm.Usage
@@ -336,6 +375,10 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 			recStep(err, "")
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			if shrink(err) {
+				step--
+				continue
 			}
 			log.Error("llm stream failed", "err", err)
 			return fail(err)
@@ -427,6 +470,10 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 		}
 		if streamEr != nil {
 			recStep(streamEr, text.String())
+			if text.Len() == 0 && len(calls) == 0 && shrink(streamEr) {
+				step--
+				continue
+			}
 			if text.Len() > 0 {
 				_ = r.persist(pctx, convID, llm.Message{Role: llm.RoleAssistant, Content: text.String()})
 			}
@@ -475,7 +522,7 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 		if err := r.persist(pctx, convID, asst); err != nil {
 			return fail(err)
 		}
-		history = append(history, asst)
+		cur = append(cur, asst)
 
 		for i, tc := range calls {
 			emit(Event{Type: EventToolCall, Data: ToolCallData{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments}})
@@ -506,7 +553,7 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 			if err := r.persist(pctx, convID, toolMsg); err != nil {
 				return fail(err)
 			}
-			history = append(history, toolMsg)
+			cur = append(cur, toolMsg)
 			emit(Event{Type: EventToolResult, Data: tr})
 		}
 		if err := ctx.Err(); err != nil {
@@ -565,7 +612,7 @@ func wrapResult(name string, res json.RawMessage, err error) string {
 }
 
 // openConversation resolves/creates the conversation and loads its history.
-func (r *Runtime) openConversation(ctx context.Context, in Input) (string, []llm.Message, error) {
+func (r *Runtime) openConversation(ctx context.Context, in Input) (string, []llm.Message, []time.Time, error) {
 	channel := in.Channel
 	if channel == "" {
 		channel = store.ChannelCLI
@@ -578,37 +625,39 @@ func (r *Runtime) openConversation(ctx context.Context, in Input) (string, []llm
 			id = logx.NewID()
 		}
 		h := append([]llm.Message(nil), r.mem[id]...)
-		return id, h, nil
+		return id, h, nil, nil
 	}
 	s := r.opt.Store
 	if in.ConversationID == "" {
 		c, err := s.CreateConversation(ctx, titleOf(in.Text), channel)
 		if err != nil {
-			return "", nil, err
+			return "", nil, nil, err
 		}
-		return c.ID, nil, nil
+		return c.ID, nil, nil, nil
 	}
 	if _, err := s.GetConversation(ctx, in.ConversationID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return "", nil, fmt.Errorf("conversation %q not found", in.ConversationID)
+			return "", nil, nil, fmt.Errorf("conversation %q not found", in.ConversationID)
 		}
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	rows, err := s.ListMessages(ctx, in.ConversationID)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	h := make([]llm.Message, 0, len(rows))
+	times := make([]time.Time, 0, len(rows))
 	for _, m := range rows {
 		lm := llm.Message{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID, Name: m.Name}
 		if len(m.ToolCalls) > 0 {
 			if err := json.Unmarshal(m.ToolCalls, &lm.ToolCalls); err != nil {
-				return "", nil, fmt.Errorf("decode tool_calls of message %d: %w", m.ID, err)
+				return "", nil, nil, fmt.Errorf("decode tool_calls of message %d: %w", m.ID, err)
 			}
 		}
 		h = append(h, lm)
+		times = append(times, m.CreatedAt)
 	}
-	return in.ConversationID, h, nil
+	return in.ConversationID, h, times, nil
 }
 
 func (r *Runtime) persist(ctx context.Context, convID string, m llm.Message) error {

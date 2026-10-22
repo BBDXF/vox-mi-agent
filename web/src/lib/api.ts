@@ -753,6 +753,8 @@ export interface AgentSettings {
   temperature: number | null;
   turn_timeout: string;
   history_messages: number;
+  idle_reset: string;
+  context_tokens: number;
   tools_disabled: string[];
   default_system_prompt: string;
   available_tools: { name: string; description: string }[];
