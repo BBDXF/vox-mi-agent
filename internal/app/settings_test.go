@@ -521,8 +521,8 @@ func TestSectionSpeakerLoggingServer(t *testing.T) {
 	a, dir := newTestApp(t, nil)
 	_ = lv
 	// speaker
-	put(t, a, "speaker", `{"driver":"log"}`)
-	if a.Config().Speaker.Driver != "log" || reload(t, dir).Speaker.Driver != "log" {
+	put(t, a, "speaker", `{"driver":"mock"}`)
+	if a.Config().Speaker.Driver != "mock" || reload(t, dir).Speaker.Driver != "mock" {
 		t.Fatal("speaker driver")
 	}
 	if f := putFields(t, a, "speaker", `{"driver":"bogus"}`); f["driver"] == "" {
@@ -595,7 +595,7 @@ func TestSectionSpeakerLoggingServer(t *testing.T) {
 func TestSettingsPreserveCommentsAndOtherSections(t *testing.T) {
 	a, dir := newTestApp(t, nil)
 	put(t, a, "search", `{"limit":3}`)
-	put(t, a, "speaker", `{"driver":"log"}`)
+	put(t, a, "speaker", `{"driver":"mock"}`)
 	raw, _ := os.ReadFile(filepath.Join(dir, config.FileName))
 	if !strings.Contains(string(raw), "# vox-mi-agent default configuration") || !strings.Contains(string(raw), "# 0 = manual only") {
 		t.Fatalf("comments lost:\n%s", raw)

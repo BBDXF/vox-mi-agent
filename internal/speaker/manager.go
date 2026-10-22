@@ -32,14 +32,14 @@ type Manager struct {
 
 var _ audio.Player = (*Manager)(nil)
 
-// NewManager creates a Manager with a log driver until Set is called.
+// NewManager creates a Manager with a mock driver until Set is called.
 func NewManager(log *slog.Logger) *Manager {
 	if log == nil {
 		log = slog.Default()
 	}
 	m := &Manager{log: log, events: NewEventLog(), debugOn: true}
 	m.rt = &router{m: m}
-	m.setDriverLocked(NewLog(log))
+	m.setDriverLocked(NewMock())
 	return m
 }
 

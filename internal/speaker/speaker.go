@@ -1,4 +1,4 @@
-// Package speaker defines the speaker driver abstraction (mock | log |
+// Package speaker defines the speaker driver abstraction (mock |
 // xiaomi), the Manager that adapts it to the audio tools, and the Hook that
 // lets the agent take over the speaker's conversations (docs/DESIGN.md §6.7).
 package speaker
@@ -48,7 +48,7 @@ type Status struct {
 // Playing reports whether audio is currently playing.
 func (s Status) Playing() bool { return s.Status == StatusPlaying }
 
-// Driver is implemented by mock, log and xiaomi (method names follow MiNAService).
+// Driver is implemented by mock and xiaomi (method names follow MiNAService).
 type Driver interface {
 	Name() string
 	DeviceList(ctx context.Context) ([]Device, error)

@@ -170,7 +170,7 @@ func TestSpeakerStatusTestAndMockE2E(t *testing.T) {
 func TestSpeakerSettingsHotReload(t *testing.T) {
 	e := spkEnv(t, nil, llm.NewFake())
 	put := func(body string) (*http.Response, []byte) { return e.do(t, "PUT", "/api/settings/speaker", body) }
-	resp, b := put(`{"driver":"log","volume_default":40,"hook.mode":"keyword","hook.keywords":["请"," 你 ",""],"hook.poll_interval":"2s",
+	resp, b := put(`{"driver":"mock","volume_default":40,"hook.mode":"keyword","hook.keywords":["请"," 你 ",""],"hook.poll_interval":"2s",
 	  "xiaomi.devices":[{"device_id":"A","name":"客厅","hardware":"L05B","enabled":true,"play_mode":"auto","tts_mode":"miot","miot_tts":"5-3"}]}`)
 	if resp.StatusCode != 200 {
 		t.Fatalf("%d %s", resp.StatusCode, b)
@@ -178,7 +178,7 @@ func TestSpeakerSettingsHotReload(t *testing.T) {
 	_, b = e.do(t, "GET", "/api/speaker/status", "")
 	st := jsonOf(t, b)
 	d := st["devices"].([]any)[0].(map[string]any)
-	if st["driver"] != "log" || d["device_id"] != "A" || d["play_mode_effective"] != "music" || d["tts_mode_effective"] != "miot" {
+	if st["driver"] != "mock" || d["device_id"] != "A" || d["play_mode_effective"] != "music" || d["tts_mode_effective"] != "miot" {
 		t.Fatalf("%s", b)
 	}
 	cfg := e.app.Config()
@@ -187,7 +187,7 @@ func TestSpeakerSettingsHotReload(t *testing.T) {
 	}
 	// persisted to config.yaml
 	reloaded, err := config.Load(e.dir)
-	if err != nil || len(reloaded.Speaker.Xiaomi.Devices) != 1 || reloaded.Speaker.Xiaomi.Devices[0].MiotTTS != "5-3" || reloaded.Speaker.Driver != "log" {
+	if err != nil || len(reloaded.Speaker.Xiaomi.Devices) != 1 || reloaded.Speaker.Xiaomi.Devices[0].MiotTTS != "5-3" || reloaded.Speaker.Driver != "mock" {
 		t.Fatalf("%v %+v", err, reloaded.Speaker)
 	}
 	// volume tool path goes through the log driver without restart
@@ -224,8 +224,8 @@ func TestSpeakerSettingsHotReload(t *testing.T) {
 func TestXiaomiAccountEndpoints(t *testing.T) {
 	xm := miniXiaomi(t, false)
 	e := spkEnv(t, xm, llm.NewFake())
-	put := func(body string) { e.do(t, "PUT", "/api/settings/speaker", body) }
-	put(`{"driver":"xiaomi"}`)
+
+	// driver stays mock: discover + login must still use the Xiaomi account
 
 	// not logged in
 	resp, b := e.do(t, "GET", "/api/speaker/devices/discover", "")
@@ -249,7 +249,7 @@ func TestXiaomiAccountEndpoints(t *testing.T) {
 		t.Fatalf("%d %s", resp.StatusCode, b)
 	}
 	_, b = e.do(t, "GET", "/api/speaker/status", "")
-	if st := jsonOf(t, b); st["driver"] != "xiaomi" || st["account"].(map[string]any)["state"] != "logged_in" {
+	if st := jsonOf(t, b); st["driver"] != "mock" || st["account"].(map[string]any)["state"] != "logged_in" {
 		t.Fatalf("%s", b)
 	}
 	if _, b = e.do(t, "POST", "/api/speaker/xiaomi/logout", ""); jsonOf(t, b)["account"].(map[string]any)["state"] != "logged_out" {

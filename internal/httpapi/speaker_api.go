@@ -107,19 +107,23 @@ func (s *Server) xiaomiLogout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) speakerDiscover(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	list, err := s.app.Speaker.Driver().DeviceList(ctx)
+	// Always the Xiaomi account, whatever driver is saved (never mock/debug).
+	list, err := s.app.Xiaomi().DeviceList(ctx)
 	if err != nil {
-		code := http.StatusBadGateway
 		if errors.Is(err, xiaomi.ErrNotLoggedIn) {
-			code = http.StatusConflict
+			writeError(w, http.StatusConflict, "请先登录小米账号")
+			return
 		}
-		writeError(w, code, err.Error())
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	if list == nil {
-		list = []speaker.Device{}
+	out := make([]speaker.Device, 0, len(list))
+	for _, d := range list {
+		if d.DeviceID != speaker.DebugDeviceID {
+			out = append(out, d)
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"driver": s.app.Speaker.Driver().Name(), "devices": list})
+	writeJSON(w, http.StatusOK, map[string]any{"driver": "xiaomi", "devices": out})
 }
 
 func (s *Server) speakerTest(w http.ResponseWriter, r *http.Request) {

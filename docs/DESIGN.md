@@ -397,7 +397,7 @@ LLM 可见参数（JSON Schema）：
 #### 6.7.1 分层
 
 ```
-Agent ──Player/Speaker 接口──▶ speaker.Manager ──▶ Driver: mock | log | xiaomi
+Agent ──Player/Speaker 接口──▶ speaker.Manager ──▶ Driver: mock（模拟音箱）| xiaomi（小米音箱）
                                     ▲                      │
                           Hook(轮询到用户提问) ◀────────────┘
 ```
@@ -440,7 +440,7 @@ Agent ──Player/Speaker 接口──▶ speaker.Manager ──▶ Driver: moc
 
 #### 6.7.3a 调试音箱与事件流
 
-- **调试音箱**：虚拟设备 `debug`（名称「调试音箱」，型号 LX06）始终可用，与 `speaker.driver` 无关（配置 `speaker.debug_device`，默认 true，可隐藏）。`Manager` 按设备 id 路由：`debug` → mock 驱动实例，其余设备 → 配置的驱动（xiaomi/log）；`driver: mock` 仅表示没有真实设备。无 `device_id` 的播放/音量默认指向第一个真实设备，没有则指向 `debug`。统一聊天界面的输入走 `POST /api/speaker/mock/ask`（默认设备 `debug`，任意驱动均可），真实音箱的对话只读地出现在同一事件流中。
+- **调试音箱**：虚拟设备 `debug`（名称「调试音箱」，型号 LX06）始终可用，与 `speaker.driver` 无关（配置 `speaker.debug_device`，默认 true，可隐藏）。`Manager` 按设备 id 路由：`debug` → mock 驱动实例，其余设备 → 配置的驱动（xiaomi）；`driver: mock`（模拟音箱）仅有调试音箱、无真实设备；`driver: xiaomi`（小米音箱）= 真实设备 + 调试音箱。发现设备 `GET /api/speaker/devices/discover` 始终查询小米账号（MiNA device_list），与已保存的驱动无关，未登录返回 409，不含调试音箱。无 `device_id` 的播放/音量默认指向第一个真实设备，没有则指向 `debug`。统一聊天界面的输入走 `POST /api/speaker/mock/ask`（默认设备 `debug`，任意驱动均可），真实音箱的对话只读地出现在同一事件流中。
 - **事件流**（`GET /api/speaker/events?after=&device_id=&conversation_id=` → `{events,last_seq}`；`/api/speaker/mock/events` 为别名；环形缓冲 5000 条，所有驱动共用）。每条事件：`seq, ts, device_id, kind, conversation_id?, turn_id?, latency_ms?`（自该设备最近一次提问起，ms），其余字段按 kind：
 
 | kind | 字段 |
@@ -470,7 +470,7 @@ Agent ──Player/Speaker 接口──▶ speaker.Manager ──▶ Driver: moc
 
 #### 6.7.5 配置（`speaker` 段，均可在 Web 修改）
 
-`driver(mock|log|xiaomi)`、`public_base_url`、`url_ttl`、`xiaomi.devices[]{device_id,name,hardware,enabled,play_mode,tts_mode,miot_tts}`、`hook.mode/wake_words/music_triggers/music_exclude/direct_play_score/keywords/poll_interval/interrupt_window`、`volume_default`。账号状态与登录动作走独立接口 `/api/speaker/xiaomi/*`，不进配置文件。
+`driver(mock|xiaomi；旧值 log 载入时迁移为 mock)`、`public_base_url`、`url_ttl`、`xiaomi.devices[]{device_id,name,hardware,enabled,play_mode,tts_mode,miot_tts}`、`hook.mode/wake_words/music_triggers/music_exclude/direct_play_score/keywords/poll_interval/interrupt_window`、`volume_default`。账号状态与登录动作走独立接口 `/api/speaker/xiaomi/*`，不进配置文件。
 
 #### 6.7.6 风险
 

@@ -411,6 +411,10 @@ func applyEnv(c *Config, lookup func(string) (string, bool)) error {
 
 // resolve fills derived defaults (tool paths from Tools.Dir).
 func (c *Config) resolve(_ func(string) (string, bool)) {
+	// Migration: the removed "log" speaker driver is now "mock".
+	if c.Speaker.Driver == "log" {
+		c.Speaker.Driver = "mock"
+	}
 	// Migration: the old keyword-mode default (["请","你","问问"]) becomes music mode.
 	if h := &c.Speaker.Hook; h.Mode == "keyword" && len(h.Keywords) == 3 &&
 		h.Keywords[0] == "请" && h.Keywords[1] == "你" && h.Keywords[2] == "问问" {
@@ -608,9 +612,9 @@ var miotTTSRe = regexp.MustCompile(`^[0-9]{1,3}-[0-9]{1,3}$`)
 
 func (s Speaker) validate() error {
 	switch s.Driver {
-	case "mock", "log", "xiaomi":
+	case "mock", "xiaomi":
 	default:
-		return fmt.Errorf("config: speaker.driver must be mock|log|xiaomi, got %q", s.Driver)
+		return fmt.Errorf("config: speaker.driver must be mock|xiaomi, got %q", s.Driver)
 	}
 	if s.VolumeDefault < 0 || s.VolumeDefault > 100 {
 		return errors.New("config: speaker.volume_default must be 0-100")

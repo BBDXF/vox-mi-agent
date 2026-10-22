@@ -284,3 +284,14 @@ func TestHookDefaultsAndMigration(t *testing.T) {
 		t.Fatalf("%v %+v", err, got.Speaker.Hook)
 	}
 }
+
+func TestSpeakerDriverLogMigratesToMock(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("speaker:\n  driver: log\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(dir)
+	if err != nil || c.Speaker.Driver != "mock" {
+		t.Fatalf("%v %q", err, c.Speaker.Driver)
+	}
+}

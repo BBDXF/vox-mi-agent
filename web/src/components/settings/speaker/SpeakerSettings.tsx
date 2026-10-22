@@ -245,7 +245,7 @@ export function SpeakerSettings() {
 
   const discover = async () => {
     setFinding(true);
-    try { setFound((await discoverDevices()).devices || []); } catch (e: any) { toastError(e.message || '发现设备失败'); } finally { setFinding(false); }
+    try { setFound(((await discoverDevices()).devices || []).filter((d: any) => d.device_id !== 'debug')); } catch (e: any) { toastError(e.message || '发现设备失败'); } finally { setFinding(false); }
   };
   const addDev = (d: any) => {
     if (devices.some((x) => x.device_id === d.device_id)) return;
@@ -256,11 +256,11 @@ export function SpeakerSettings() {
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader><CardTitle>驱动</CardTitle><CardDescription>选择音箱后端：模拟用于调试，小米用于真实设备。</CardDescription></CardHeader>
+        <CardHeader><CardTitle>驱动</CardTitle><CardDescription>模拟音箱：仅调试音箱；小米音箱：真实设备 + 调试音箱。{driver !== (status?.driver ?? driver) && ' 保存后生效。'}</CardDescription></CardHeader>
         <CardContent className="grid sm:grid-cols-2 gap-4">
           <Field label="驱动" error={E('driver')}>
             <select className={selectCls + ' w-full'} value={driver} onChange={(e) => set('driver', e.target.value)}>
-              <option value="mock">模拟音箱</option><option value="log">仅日志</option><option value="xiaomi">小米音箱</option>
+              <option value="mock">模拟音箱</option><option value="xiaomi">小米音箱</option>
             </select>
           </Field>
           <Field label="对外地址" error={E('public_base_url')} help="音箱需要能访问到的 NAS 局域网地址，例如 http://192.168.1.10:8081；Docker 默认网络下自动探测的地址通常不可用">
@@ -291,7 +291,7 @@ export function SpeakerSettings() {
 
       {driver === 'xiaomi' && <AccountCard account={status?.account} onChange={(a) => setStatus((s) => ({ ...(s || {}), account: a }))} />}
 
-      <Card>
+      {driver === 'xiaomi' && <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-2">
             <CardTitle>设备</CardTitle>
@@ -299,7 +299,7 @@ export function SpeakerSettings() {
               {finding ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}发现设备
             </Button>
           </div>
-          <CardDescription>添加后记得点击底部「保存」。</CardDescription>
+          <CardDescription>添加后记得点击底部「保存」。{status?.driver !== 'xiaomi' && <span className="text-amber-600"> 保存后生效。</span>}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {found && (
@@ -369,7 +369,7 @@ export function SpeakerSettings() {
             </div>
           )}
         </CardContent>
-      </Card>
+      </Card>}
 
       <Card>
         <CardHeader><CardTitle>对话接管</CardTitle><CardDescription>监听音箱的提问，按规则交给本 Agent 回答。</CardDescription></CardHeader>

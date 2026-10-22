@@ -8,7 +8,7 @@ import (
 	"github.com/andy/vox-mi-agent/internal/tools/audio"
 )
 
-// Log is a driver that only logs (and records plays / volumes) every call.
+// Log is a test-only non-mock driver that logs every call.
 type Log struct {
 	Log *slog.Logger
 	audio.LogPlayer

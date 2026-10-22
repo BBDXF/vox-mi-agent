@@ -82,7 +82,6 @@ type App struct {
 
 	healthMu sync.RWMutex
 	sources  *data.SourceSet
-	logDrv   *speaker.Log
 	xmOpts   func(*xiaomi.Options)
 	xmMu     sync.Mutex
 	xm       *xiaomi.Driver
@@ -164,7 +163,6 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 	}
 	a.xmOpts = o.xiaomi
 	a.Mock = speaker.NewMock()
-	a.logDrv = speaker.NewLog(a.Log)
 	a.Speaker = speaker.NewManager(a.Log)
 	a.applySpeaker(a.cfg)
 	reg := tools.NewRegistry()

@@ -62,7 +62,7 @@ search:
   candidates: 500
 
 speaker:
-  driver: mock                        # mock | log | xiaomi
+  driver: mock                        # mock | xiaomi
   debug_device: true                  # always-available mock device "debug" (调试音箱)
   volume_default: 30                  # default for the volume test action; 0 = unset (never applied automatically)
   xiaomi:

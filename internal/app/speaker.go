@@ -38,8 +38,6 @@ func (a *App) applySpeaker(c *config.Config) {
 	switch c.Speaker.Driver {
 	case "xiaomi":
 		drv = a.Xiaomi()
-	case "log":
-		drv = a.logDrv
 	default:
 		drv = a.Mock
 	}

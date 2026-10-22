@@ -20,7 +20,7 @@ export interface SpeakerDeviceStatus {
   tts_mode_effective?: string;
 }
 export interface SpeakerStatus {
-  driver?: 'mock' | 'log' | 'xiaomi';
+  driver?: 'mock' | 'xiaomi';
   account?: SpeakerAccount;
   devices?: SpeakerDeviceStatus[];
   hook?: { running?: boolean; last_ask?: { device?: string; query?: string; time?: string | number; handled?: boolean } };
