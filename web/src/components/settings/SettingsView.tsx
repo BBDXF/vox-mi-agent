@@ -39,13 +39,13 @@ const SECTION_METADATA: Record<
 
 const EXCLUDED_SECTIONS = new Set(['media', 'aliases']);
 
-export function SettingsView() {
+export function SettingsView({ initialSection }: { initialSection?: string } = {}) {
   const { error: toastError } = useToast();
 
   const [loading, setLoading] = useState(false);
   const [schema, setSchema] = useState<SettingsSchemaResponse>({ sections: [] } as any);
   const [legacySettings, setLegacySettings] = useState<SettingsResponse | null>(null);
-  const [activeSection, setActiveSection] = useState<string>('llm');
+  const [activeSection, setActiveSection] = useState<string>(initialSection || 'llm');
 
   const loadAll = async () => {
     setLoading(true);

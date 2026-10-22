@@ -5,6 +5,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { FirstRunBanner } from '@/components/guide/FirstRunBanner';
 import { SpeakerTimeline } from './SpeakerTimeline';
 import {
   getSpeakerStatus, getSpeakerEvents, mockAsk,
@@ -16,12 +17,13 @@ import { formatRelativeTime } from '@/lib/utils';
 
 export interface ChatViewProps {
   targetConversationId?: string;
+  onOpenGuide?: () => void;
 }
 
 const DEBUG_ID = 'debug';
 const EXAMPLES = ['小爱同学，播放一首周杰伦的晴天', '播放海阔天空', '来点陈奕迅的歌', '我想听七里香', '今天天气怎么样', '问问 我的曲库有多少首歌'];
 
-export function ChatView({ targetConversationId }: ChatViewProps = {}) {
+export function ChatView({ targetConversationId, onOpenGuide }: ChatViewProps = {}) {
   const { toast, error: toastError } = useToast();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -209,6 +211,7 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0 h-full">
+        {onOpenGuide && <FirstRunBanner onOpenGuide={onOpenGuide} />}
         <header className="h-13 border-b px-4 flex items-center gap-2 bg-card/40 backdrop-blur shrink-0">
           <Button variant="ghost" size="icon" className="lg:hidden shrink-0 -ml-2" onClick={() => setMobileSidebarOpen(true)}><Menu className="w-4 h-4" /></Button>
           <Radio className="w-4 h-4 text-primary shrink-0" />

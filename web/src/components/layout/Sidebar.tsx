@@ -6,12 +6,13 @@ import {
   Moon,
   Activity,
   ScrollText,
+  BookOpen,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-export type NavTab = 'chat' | 'settings' | 'media' | 'logs';
+export type NavTab = 'guide' | 'chat' | 'settings' | 'media' | 'logs';
 
 interface SidebarProps {
   currentTab: NavTab;
@@ -35,6 +36,7 @@ export function Sidebar({
     badge?: string;
     disabled?: boolean;
   }> = [
+    { id: 'guide', label: '快速开始', icon: BookOpen },
     {
       id: 'chat',
       label: '对话调试',

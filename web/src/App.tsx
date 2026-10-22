@@ -3,6 +3,7 @@ import { Sidebar, type NavTab } from '@/components/layout/Sidebar';
 import { ChatView } from '@/components/chat/ChatView';
 import { SettingsView } from '@/components/settings/SettingsView';
 import { MediaView } from '@/components/media/MediaView';
+import { GuideView } from '@/components/guide/GuideView';
 import { LogsView } from '@/components/logs/LogsView';
 import { ToastProvider } from '@/components/ui/toast';
 import { getHealth } from '@/lib/api';
@@ -11,11 +12,13 @@ import {
   Settings as SettingsIcon,
   Music,
   ScrollText,
+  BookOpen,
 } from 'lucide-react';
 
 export function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('chat');
   const [targetConversationId, setTargetConversationId] = useState<string | undefined>();
+  const [settingsSection, setSettingsSection] = useState<string>('llm');
   const [isDark, setIsDark] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     const saved = localStorage.getItem('vox_theme');
@@ -76,9 +79,17 @@ export function App() {
           {/* Active Tab View */}
           <div className="flex-1 h-full min-w-0 overflow-hidden">
             {currentTab === 'chat' && (
-              <ChatView targetConversationId={targetConversationId} />
+              <ChatView targetConversationId={targetConversationId} onOpenGuide={() => setCurrentTab('guide')} />
             )}
-            {currentTab === 'settings' && <SettingsView />}
+            {currentTab === 'guide' && (
+              <GuideView
+                onGo={(tab, section) => {
+                  if (section) setSettingsSection(section);
+                  setCurrentTab(tab);
+                }}
+              />
+            )}
+            {currentTab === 'settings' && <SettingsView key={settingsSection} initialSection={settingsSection} />}
             {currentTab === 'media' && <MediaView />}
             {currentTab === 'logs' && (
               <LogsView
@@ -92,6 +103,16 @@ export function App() {
 
           {/* Bottom Navigation for Mobile Screens (< 640px) */}
           <div className="sm:hidden border-t bg-card/90 backdrop-blur flex items-center justify-around py-2 px-1 shrink-0 z-20">
+            <button
+              type="button"
+              onClick={() => setCurrentTab('guide')}
+              className={`flex flex-col items-center gap-0.5 text-[10px] p-1.5 rounded ${
+                currentTab === 'guide' ? 'text-primary font-semibold' : 'text-muted-foreground'
+              }`}
+            >
+              <BookOpen className="w-4 h-4" />
+              <span>开始</span>
+            </button>
             <button
               type="button"
               onClick={() => setCurrentTab('chat')}
