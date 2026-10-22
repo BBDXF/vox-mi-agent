@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/BBDXF/vox-mi-agent/internal/runtimes"
+	"github.com/BBDXF/vox-mi-agent/internal/tools/shell"
 	"log/slog"
 	"net"
 	"net/url"
@@ -73,6 +75,7 @@ type App struct {
 	Tools     *tools.Registry
 	Agent     *agent.Runtime
 	MCP       *mcp.Manager
+	Runtimes  *runtimes.Manager
 	Provider  *SwapProvider
 	Health    ToolStatuses // startup self-check; live value: HealthStatus()
 	Tracer    *trace.Recorder
@@ -186,6 +189,9 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 	}) {
 		reg.Register(t)
 	}
+	a.Runtimes = runtimes.New(c.DataDir)
+	mcp.ChildEnv = a.Runtimes.ChildEnv
+	reg.Register(shell.New(shell.Deps{Workdir: a.Runtimes.Workspace(), Env: a.Runtimes.ChildEnv}))
 	a.Tools = reg
 
 	inner := o.provider

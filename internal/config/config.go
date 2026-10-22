@@ -363,7 +363,8 @@ func Defaults() *Config {
 				MusicExclude:    []string{"放假", "放心", "放松", "听说", "听话", "听见"},
 				DirectPlayScore: 85,
 				PollInterval:    time.Second, InterruptWindow: 3 * time.Second}},
-		Agent: Agent{MaxSteps: 6, TurnTimeout: 120 * time.Second, HistoryMessages: 40},
+		Agent: Agent{MaxSteps: 6, TurnTimeout: 120 * time.Second, HistoryMessages: 40,
+			ToolsDisabled: []string{"run_shell"}}, // run_shell is opt-in
 		Logging: Logging{
 			Level:                "info",
 			TraceRetentionDays:   30,

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -101,8 +102,9 @@ func transportOf(c ServerConfig) (sdk.Transport, error) {
 	case "sse":
 		return &sdk.SSEClientTransport{Endpoint: c.URL, HTTPClient: hc}, nil
 	case "stdio":
-		cmd := exec.Command(c.Command, c.Args...)
-		cmd.Env = os.Environ()
+		env := ChildEnv()
+		cmd := exec.Command(lookPath(c.Command, env), c.Args...)
+		cmd.Env = env
 		keys := make([]string, 0, len(c.Env))
 		for k := range c.Env {
 			keys = append(keys, k)
@@ -115,6 +117,10 @@ func transportOf(c ServerConfig) (sdk.Transport, error) {
 	}
 	return nil, fmt.Errorf("unknown transport %q", c.Transport)
 }
+
+// ChildEnv supplies the environment of stdio servers (set by the app to
+// runtimes.Manager.ChildEnv so installed runtimes are on PATH).
+var ChildEnv = os.Environ
 
 func (c ServerConfig) timeout() time.Duration {
 	if c.Timeout > 0 {
@@ -376,4 +382,24 @@ func (t *mcpTool) Call(ctx context.Context, args json.RawMessage) (any, error) {
 		return nil, errors.New(text)
 	}
 	return text, nil
+}
+
+// lookPath resolves a bare command name against the child's PATH (which
+// includes installed runtimes), not the server process's own PATH.
+func lookPath(name string, env []string) string {
+	if strings.ContainsRune(name, '/') {
+		return name
+	}
+	for i := len(env) - 1; i >= 0; i-- {
+		if p, ok := strings.CutPrefix(env[i], "PATH="); ok {
+			for _, dir := range filepath.SplitList(p) {
+				f := filepath.Join(dir, name)
+				if st, err := os.Stat(f); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+					return f
+				}
+			}
+			break
+		}
+	}
+	return name
 }

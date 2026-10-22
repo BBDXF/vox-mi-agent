@@ -24,7 +24,7 @@ agent:
   # temperature: 0.3                  # optional sampling temperature; unset = provider default
   turn_timeout: 120s
   history_messages: 40                # stored messages kept as context; 0 = all
-  tools_disabled: []                  # built-in tool names hidden from the LLM
+  tools_disabled: [run_shell]         # built-in tool names hidden from the LLM (run_shell is opt-in)
 
 mcp:
   servers: []                         # {name, enabled, transport: http|sse|stdio, url, headers, command, args, env, timeout, tools_allow}

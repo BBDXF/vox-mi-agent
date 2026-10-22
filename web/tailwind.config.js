@@ -6,6 +6,10 @@ export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['system-ui','-apple-system','"Segoe UI"','"PingFang SC"','"Hiragino Sans GB"','"Microsoft YaHei UI"','"Microsoft YaHei"','"Noto Sans CJK SC"','"Source Han Sans SC"','"HarmonyOS Sans SC"','MiSans','Roboto','"Helvetica Neue"','Arial','sans-serif','"Apple Color Emoji"','"Segoe UI Emoji"','"Noto Color Emoji"'],
+        mono: ['ui-monospace','"SF Mono"','"Cascadia Code"','"JetBrains Mono"','Menlo','Consolas','"Liberation Mono"','"Noto Sans Mono CJK SC"','monospace'],
+      },
       colors: {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',

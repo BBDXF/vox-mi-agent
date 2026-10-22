@@ -31,7 +31,7 @@ CMD ["go", "test", "./..."]
 # ---- runtime ----
 FROM alpine:${ALPINE_VERSION} AS runtime
 ARG TARGETARCH
-RUN apk add --no-cache ca-certificates curl tzdata bash coreutils findutils \
+RUN apk add --no-cache ca-certificates curl tzdata bash coreutils findutils libstdc++ libgcc \
  && addgroup -g 1000 app && adduser -D -u 1000 -G app app \
  && mkdir -p /data /tmp/toolrun && chown -R app:app /data /tmp/toolrun
 COPY --from=tools /out/ /usr/local/bin/

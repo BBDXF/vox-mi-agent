@@ -19,7 +19,7 @@
 | 5 | 检索评分改为 fzq 的 0–100 分制 | 阈值 `--min-score 65`，`ambiguous`（前两名差 < 5）直接驱动反问；替代 v5.0 的 0.45 / 0.05 |
 | 6 | 依赖调整 | 主程序不再直接依赖 `go-pinyin` / `levenshtein`（由 fzq 持有） |
 | 7 | 曲库定时同步 + 预建索引缓存 | 定时/启动/手动扫描音乐文件夹 → `songs.jsonl` → 立即预建 fzq 缓存；查询只读缓存；见 §6.4.2 |
-| 8 | 可选 Shell 能力 `run_shell` | 默认关闭；`landlock` 同容器文件隔离，不做网络限制；可限定仅 Web 调试台可用；网络限制、sandbox 容器与 shell 审计保留为后续加固；见 §6.10 |
+| 8 | 可选 Shell 能力 `run_shell` | 内置工具，默认禁用（`agent.tools_disabled`），无沙箱；配合按需安装的 bun/node/uv 运行时；见 §6.10 |
 | 9 | fnOS 网关设计简化 | 只保留入口注册、socket 监听、前缀剥离、管理员校验；其余细节等真机测试遇到再处理；见 §4.2、§5 |
 
 ---
@@ -280,7 +280,7 @@ desktop_applaunchname=fnos-ai-agent.main
 | `fuzzy_match` | fzq 按次调用（§6.4.3） | 通用口语模糊匹配：在指定数据源中找最接近查询的记录（联系人、设备名、城市、商品等） |
 | `query_json` | jq 按次调用（§6.9） | 对 JSON/JSONL 数据执行 jq 表达式 |
 | `query_yaml` | yq 按次调用（§6.9） | 对 YAML 数据执行 yq 表达式 |
-| `run_shell`（可选，默认关闭） | 隔离 shell（§6.10） | 在受限环境中执行 bash，组合 jq / yq / fzq |
+| `run_shell`（默认禁用） | bash（§6.10） | 执行系统任务，组合 jq / yq / fzq / 已装运行时 |
 
 Tool 定义的 schema 直接对齐 MCP 规范，便于 P3 平滑接入 `mark3labs/mcp-go`（9.2k★，MIT，v1.3.0，活跃维护）。
 
@@ -511,9 +511,11 @@ fzq / jq / yq 的所有调用都经过 `internal/toolrunner`，业务代码不�
 
 **输出即数据**：工具返回内容按 §8 视为数据而非指令，包装在 `{"tool":"...","result":...}` 中回灌。
 
-### 6.10 Shell 工具 `run_shell`（未实现，已从配置中移除）
+### 6.10 Shell 工具 `run_shell` 与可选运行时
 
-当前**未实现**，`tools.shell.*` 配置项（含 landlock 相关）已整体删除；旧 `config.yaml` 中残留的 `tools.shell` 会在加载时被忽略。结构化工具（§6.3）是唯一路径。若日后实现，需重新设计隔离方案（Landlock / 独立 sandbox 容器 / seccomp 网络限制 / 审计）并重新引入配置。
+**`run_shell`**（内置工具，**默认禁用**：`agent.tools_disabled` 默认 `["run_shell"]`，在设置页从禁用列表移除即启用）：参数 `{command, timeout_sec?}`；以 `bash -lc`（无 bash 时 `sh -c`）在 `<data>/workspace` 执行，环境取自 `runtimes.ChildEnv()`；默认超时 60s（最大 600s）；stdout/stderr 合并，仅保留末尾 32KiB；返回 `{exit_code, output, truncated, timed_out, duration_ms, error?}`。超时 / 取消时杀死整个进程组。**不做任何沙箱**（用户明确不要安全边界），与其他工具一样写入 traces。代码：`internal/tools/shell/`。
+
+**可选运行时**（`internal/runtimes/`）：目录 `<data>/runtime/<name>/`，目录内 `bin/` 加入子进程 PATH。内置（镜像自带，只读展示）：bash、curl、jq、yq、fzq。可按需安装：`bun`、`node`（含 npm/npx）、`uv`（含 uvx），均使用 musl 静态/官方构建（amd64/arm64）：node 来自 unofficial-builds.nodejs.org（`index.json` 取最新 LTS，`SHASUMS256.txt` 校验）、bun / uv 来自 GitHub releases `latest`（`SHASUMS256.txt` / `.sha256` 校验）。下载用 Go `net/http`（遵循代理与 `SSL_CERT_DIR`），解压到临时目录、执行 `--version` 验证后原子 rename。缓存位于 `<data>/runtime/cache`（`NPM_CONFIG_CACHE` / `BUN_INSTALL_CACHE_DIR` / `UV_CACHE_DIR` / `UV_TOOL_DIR` / `UV_PYTHON_INSTALL_DIR`）；`HOME` 不可写时指向 `<data>/runtime/home`。`ChildEnv()` 同时用于 MCP stdio 服务与 `run_shell`。状态通过扫描目录得到，重启后保留。API：`GET /api/runtimes`、`POST /api/runtimes/{name}/install`（202，异步，安装中重复调用无效）、`DELETE /api/runtimes/{name}`。MCP 服务默认列表为空，新增服务默认 `enabled:false`。
 
 ---
 

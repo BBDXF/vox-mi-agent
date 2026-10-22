@@ -168,3 +168,7 @@ make up      # 构建本地镜像并用 compose 启动（读取 .env）
 ## 许可证
 
 [MIT](LICENSE) © BBDXF
+
+## Optional runtimes & run_shell
+
+bun / node / uv can be installed on demand into `/data/runtime/` via `GET/POST/DELETE /api/runtimes[/{name}[/install]]`. The `run_shell` tool (bash, no sandbox) is disabled by default; remove it from `agent.tools_disabled` to enable. See docs/DESIGN.md §6.10.

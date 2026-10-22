@@ -98,6 +98,20 @@ body,
   overflow: hidden;
 }
 
+body {
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  -webkit-text-size-adjust: 100%;
+}
+
+.tabular-nums-feat {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

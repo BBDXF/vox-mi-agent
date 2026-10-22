@@ -12,7 +12,7 @@ import {
 import { Switch } from './AgentSettings';
 
 const blank = (): McpServer => ({
-  name: '', enabled: true, transport: 'http', url: '', headers: {}, command: '', args: [], env: {}, timeout: '15s', tools_allow: [],
+  name: '', enabled: false, transport: 'http', url: '', headers: {}, command: '', args: [], env: {}, timeout: '15s', tools_allow: [],
 });
 
 function KV({ value, onChange, kp, vp }: { value: Record<string, string>; onChange: (v: Record<string, string>) => void; kp: string; vp: string }) {
