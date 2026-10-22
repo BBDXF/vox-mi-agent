@@ -1001,3 +1001,20 @@ func TestDeleteConversationCancelsRunningTurn(t *testing.T) {
 		t.Fatalf("conversation still exists: %v", err)
 	}
 }
+
+func TestVersionEndpoint(t *testing.T) {
+	e := newEnv(t, llm.NewFake(), nil)
+	resp, b := e.do(t, "GET", "/api/version", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("%d %s", resp.StatusCode, b)
+	}
+	var v map[string]any
+	if err := json.Unmarshal(b, &v); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"version", "commit", "build_date", "go_version", "os", "arch", "started_at", "uptime_s", "tools", "data_dir"} {
+		if _, ok := v[k]; !ok {
+			t.Errorf("missing %q in %s", k, b)
+		}
+	}
+}

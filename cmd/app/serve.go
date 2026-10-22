@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/andy/vox-mi-agent/internal/buildinfo"
 	"log/slog"
 	"os"
 
@@ -48,7 +49,7 @@ func cmdServe(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	log.Info("serving", "version", version, "listen", cfg.Server.Listen, "base_path", cfg.Server.BasePath, "data", a.Cfg.DataDir)
+	log.Info("serving", "version", buildinfo.Version, "commit", buildinfo.Commit, "listen", cfg.Server.Listen, "base_path", cfg.Server.BasePath, "data", a.Cfg.DataDir)
 
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()

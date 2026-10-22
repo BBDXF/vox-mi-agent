@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/andy/vox-mi-agent/internal/buildinfo"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -47,11 +49,12 @@ type Server struct {
 	static   fs.FS
 	basePath string
 	handler  http.Handler
+	started  time.Time
 }
 
 // New builds the HTTP handler tree.
 func New(a *app.App, opts ...Option) *Server {
-	s := &Server{app: a, hc: &http.Client{}, log: a.Log, static: webui.FS(), basePath: a.Cfg.Server.BasePath}
+	s := &Server{app: a, hc: &http.Client{}, log: a.Log, static: webui.FS(), basePath: a.Cfg.Server.BasePath, started: time.Now()}
 	for _, o := range opts {
 		o(s)
 	}
@@ -59,6 +62,7 @@ func New(a *app.App, opts ...Option) *Server {
 	r := chi.NewRouter()
 	r.Use(requestID, recoverer(s.log), accessLog(s.log), adminOnly(a.Cfg.Server.Auth.RequireAdmin))
 	r.Get("/healthz", s.healthz)
+	r.Get("/api/version", s.version)
 	r.Get("/audio/{file}", s.serveAudio)
 	r.Head("/audio/{file}", s.serveAudio)
 	r.Get("/api/conversations", s.listConversations)
@@ -176,9 +180,26 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok",
-		"tools":  s.app.HealthStatus(),
-		"media":  s.app.Syncer.Status(),
+		"status":  "ok",
+		"version": buildinfo.Version,
+		"tools":   s.app.HealthStatus(),
+		"media":   s.app.Syncer.Status(),
+	})
+}
+
+func (s *Server) version(w http.ResponseWriter, r *http.Request) {
+	h := s.app.HealthStatus()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version":    buildinfo.Version,
+		"commit":     buildinfo.Commit,
+		"build_date": buildinfo.Date,
+		"go_version": runtime.Version(),
+		"os":         runtime.GOOS,
+		"arch":       runtime.GOARCH,
+		"started_at": s.started.UTC().Format(time.RFC3339),
+		"uptime_s":   int64(time.Since(s.started).Seconds()),
+		"tools":      map[string]string{"fzq": h.Fzq.Version, "jq": h.Jq.Version, "yq": h.Yq.Version},
+		"data_dir":   s.app.Cfg.DataDir,
 	})
 }
 

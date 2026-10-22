@@ -5,13 +5,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/andy/vox-mi-agent/internal/buildinfo"
 	"os"
 	"os/signal"
 	"syscall"
 )
-
-// version is set by -ldflags "-X main.version=...".
-var version = "dev"
 
 const usage = `usage: app <command> [flags]
 
@@ -42,7 +40,7 @@ func run(args []string) int {
 	case "healthcheck":
 		err = cmdHealthcheck(ctx, args[1:])
 	case "version", "--version", "-v":
-		fmt.Println(version)
+		fmt.Println(buildinfo.String())
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:

@@ -45,7 +45,7 @@ jobs:
 
       - name: Cross-compile (linux amd64 + arm64)
         # `make build` re-runs `make web` (idempotent); binaries land in dist/linux_<arch>/app
-        run: make build VERSION="${VERSION}"
+        run: make build VERSION="${VERSION}" COMMIT="${GITHUB_SHA::7}"
 
       - name: Package release assets
         run: |

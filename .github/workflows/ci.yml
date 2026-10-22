@@ -36,6 +36,11 @@ jobs:
         run: go vet ./...
       - name: go test
         run: go test -race ./...
+      - name: build (with build info)
+        run: |
+          BI=github.com/andy/vox-mi-agent/internal/buildinfo
+          go build -trimpath -ldflags "-X $BI.Version=ci -X $BI.Commit=${GITHUB_SHA::7} -X $BI.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o /tmp/app ./cmd/app
+          /tmp/app version
 
   web:
     runs-on: ubuntu-latest
