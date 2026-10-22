@@ -12,7 +12,7 @@ BI       := github.com/BBDXF/vox-mi-agent/internal/buildinfo
 LDFLAGS  := -s -w -X $(BI).Version=$(VERSION) -X $(BI).Commit=$(COMMIT) -X $(BI).Date=$(DATE)
 export VOX_TOOLS_DIR ?= $(CURDIR)/.tools
 
-.PHONY: tools build web test test-docker image dev clean
+.PHONY: tools build web test test-docker image dev clean fpk
 
 tools: .tools/fzq
 .tools/fzq: tools.lock
@@ -60,3 +60,6 @@ down:
 	$(COMPOSE) down
 logs:
 	$(COMPOSE) logs -f --tail=100
+
+fpk:
+	sh fnos/build.sh $(VERSION)

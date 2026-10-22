@@ -1,0 +1,14 @@
+appname=vox-mi-agent
+version=@VERSION@
+display_name=Vox 小爱音乐助手
+desc=用大模型驱动小爱音箱播放 NAS 本地音乐。LLM 与小米账号在 Web 界面中配置。
+platform=all
+source=thirdparty
+maintainer=BBDXF
+maintainer_url=https://github.com/BBDXF/vox-mi-agent
+desktop_uidir=ui
+desktop_applaunchname=vox-mi-agent.main
+service_port=8080
+checkport=true
+ctl_stop=true
+# TODO(verify on device): changelog vs change_log key name; platform=all with multi-arch image

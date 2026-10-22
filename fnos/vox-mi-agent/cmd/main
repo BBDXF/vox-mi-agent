@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+D="${TRIM_APPDEST}/docker"
+dc() { (cd "$D" && docker compose "$@"); }
+case "${1:-}" in
+  start)
+    mkdir -p "${TRIM_PKGVAR}/data"
+    dc up -d ;;
+  stop)
+    dc down || true ;;
+  status)
+    if [ -n "$(dc ps -q --status running 2>/dev/null || true)" ]; then exit 0; else exit 3; fi ;;
+  *) echo "usage: $0 start|stop|status" >&2; exit 1 ;;
+esac

@@ -161,6 +161,7 @@ make up      # 构建本地镜像并用 compose 启动（读取 .env）
 | `web/` | 前端 |
 | `scripts/`、`tools.lock` | 外部工具（fzq/jq/yq）下载与锁定 |
 | `compose.yaml` / `compose.local.yaml` / `compose.test.yaml` | 运行 / 本地 CA 覆盖 / 测试 |
+| `fnos/` | 飞牛 fnOS `.fpk` 打包（`make fpk`） |
 | `certs/` | 本地专用代理 CA（仓库中为空文件） |
 | `docs/DESIGN.md` | 设计文档 |
 
