@@ -1,5 +1,5 @@
 // Package webui embeds the built frontend (internal/webui/dist, populated from
-// web/dist by `make web`; a placeholder index.html is committed).
+// web/dist by `make web`; only .gitkeep is committed).
 package webui
 
 import (

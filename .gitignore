@@ -27,4 +27,5 @@ web/dist/
 /vendor-src/
 .tools/
 
-/internal/webui/dist/assets/
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
