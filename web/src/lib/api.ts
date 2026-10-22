@@ -92,8 +92,8 @@ export interface LLMSettings {
   model: string;
   api_key_masked: string;
   has_api_key?: boolean;
-  temperature: number;
-  timeout_seconds?: number;
+  timeout?: string;
+  extra_body?: Record<string, any>;
 }
 
 export interface ToolStatus {
@@ -392,7 +392,8 @@ export interface UpdateLLMRequest {
   base_url?: string;
   model: string;
   api_key?: string;
-  temperature?: number;
+  timeout?: string;
+  extra_body?: Record<string, any>;
 }
 
 export interface MediaStatus {

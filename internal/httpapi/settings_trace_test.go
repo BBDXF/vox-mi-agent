@@ -41,7 +41,7 @@ func TestSettingsSchemaAndSectionGets(t *testing.T) {
 			t.Errorf("restart flag of %s", s.Name)
 		}
 	}
-	if got := strings.Join(names, ","); got != "llm,agent,mcp,media,aliases,search,sources,tools,speaker,logging,server" {
+	if got := strings.Join(names, ","); got != "llm,agent,mcp,media,aliases,search,sources,speaker,logging,server" {
 		t.Fatalf("sections %s", got)
 	}
 	for _, n := range names {
@@ -321,7 +321,7 @@ func TestPayloadAPI(t *testing.T) {
 		llm.FakeTurn{Text: "查。", ToolCalls: []llm.ToolCall{{ID: "c1", Name: "query_json", Arguments: json.RawMessage(`{"filter":".a","input":"{\"a\":42}"}`)}}},
 		llm.FakeTurn{Text: "是 42。"},
 	)
-	e.app.Provider.Set(f2, "m", 0.1)
+	e.app.Provider.Set(f2, "m")
 	conv = runTurn(t, e, "on")
 	turn = turnOf(conv)
 	_, b = e.do(t, "GET", "/api/traces/"+turn+"/payload", "")

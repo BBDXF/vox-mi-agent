@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"gopkg.in/yaml.v3"
 
@@ -38,12 +37,11 @@ func persistSets(dataDir string, sets []yamlSet) error {
 
 // persistLLM rewrites the llm section keys. apiKey == nil leaves the stored
 // key untouched (a pointer to "" clears it).
-func persistLLM(dataDir, provider, baseURL, model string, temperature float64, apiKey *string, extra ...yamlSet) error {
+func persistLLM(dataDir, provider, baseURL, model string, apiKey *string, extra ...yamlSet) error {
 	sets := []yamlSet{
 		{[]string{"llm", "provider"}, strNode(provider)},
 		{[]string{"llm", "base_url"}, strNode(baseURL)},
 		{[]string{"llm", "model"}, strNode(model)},
-		{[]string{"llm", "temperature"}, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!float", Value: strconv.FormatFloat(temperature, 'g', -1, 64)}},
 	}
 	if apiKey != nil {
 		sets = append(sets, yamlSet{[]string{"llm", "api_key"}, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: *apiKey, Style: yaml.DoubleQuotedStyle}})

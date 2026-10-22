@@ -42,7 +42,7 @@ func (a *App) builtinTools() []map[string]string {
 func agentSection() *section {
 	temp := &fieldDef{
 		Field: Field{Key: "temperature", Type: TFloat, Default: nil,
-			Description: "采样温度 0–2；留空（null）表示使用 llm.temperature"},
+			Description: "采样温度 0–2；留空（null）表示不发送，使用服务商默认值"},
 		get: func(c *config.Config) any {
 			if c.Agent.Temperature == nil {
 				return nil

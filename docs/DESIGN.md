@@ -511,54 +511,15 @@ fzq / jq / yq 的所有调用都经过 `internal/toolrunner`，业务代码不�
 
 **输出即数据**：工具返回内容按 §8 视为数据而非指令，包装在 `{"tool":"...","result":...}` 中回灌。
 
-### 6.10 可选能力：Shell 工具 `run_shell`（默认关闭）
+### 6.10 Shell 工具 `run_shell`（未实现，已从配置中移除）
 
-**定位**：给需要「用 bash 自由组合 jq / yq / fzq / coreutils」的高级用户。**默认关闭**，结构化工具（§6.3）始终是主路径；开启后 `run_shell` 只是额外多出的一个工具。
-
-**为什么默认关闭**：音箱是共享设备，任何在场的人或藏在歌名/文件名里的提示注入都可能驱动 Agent；而 Agent 容器内有 LLM API Key、小米令牌、`app.db`——只靠「独立 Docker 镜像」挡不住读取密钥。
-
-**配置**：
-```yaml
-tools:
-  shell:
-    enabled: false              # 总开关
-    isolation: landlock         # 当前仅 landlock；sandbox 见下方「后续加固」
-    expose_to: admin_console    # admin_console（仅 Web 调试台会话）| all（含语音会话）
-    timeout: 10s
-    max_output: 64KiB
-    readable_paths: [/data/sources, /data/media/songs.jsonl]   # 只读白名单
-```
-
-**工具定义**：`run_shell(command: string)`，≤ 4 KiB；以 `bash -c` 执行（隔离环境内），返回 `{exit_code, stdout, stderr, truncated}`。系统提示词仅在启用时追加：「可用 run_shell，环境中有 jq / yq / fzq，数据位于 …，数据只读」。
-
-**隔离方式：`landlock`（同容器）**
-- 与 Agent 同 UID 运行（非 root 进程无法切换 UID）；密钥、`app.db`、`/proc` 不在 Landlock 白名单内 → 读不到；Landlock 同时阻止 ptrace 域外进程。
-- `env -i`，只注入 `PATH=/opt/tools:/usr/bin:/bin`、`LANG=C.UTF-8`、`HOME=/tmp/sh-<id>`。
-- Landlock（`landlock-lsm/go-landlock`，启动子进程前施加，子进程继承）：只读 `readable_paths` + `/opt/tools` + `/usr` + `/bin` + `/lib`；可写仅 `/tmp/sh-<id>`（执行后删除）。需内核 ≥ 5.13（Landlock ABI ≥ 1；建议 ≥ 2 以覆盖跨目录重命名/链接）。
-- `setrlimit`：CPU、内存（`RLIMIT_AS`）、进程数（`RLIMIT_NPROC`）、文件大小；超时 kill 进程组。
-- 镜像需额外包含 `bash`/`busybox`（与 distroless 目标冲突，仅在启用此能力的镜像变体中加入）。
-- **不做网络限制**（设计决定）：shell 可联网、可连接 Unix socket（包括 `app.sock`）。已知后果：shell 读到的白名单数据可被外传；可经 `app.sock` 伪造管理员 Header 调用 Agent API。作为接受的风险记录（风险 6d），网络限制（seccomp 禁止 `socket()`）列入后续加固。
-- **启动自检**：`/sys/kernel/security/lsm` 含 `landlock`、ABI 版本、Docker seccomp 放行 `landlock_*` 系统调用；试读 `/data/app.db` 必须失败；任何一项不满足 → 拒绝启用并在 UI 提示原因，**绝不降级为无隔离运行**。
-
-**约束**
-- `expose_to: admin_console` 时，语音会话中该工具**不注册**（LLM 看不到），而不是注册后再拒绝。
-- 输出视为数据（§8），回灌前截断。
-- 不得挂载 docker.sock、不得使用 privileged。
-
-**后续安全加固（暂不实现，保留方案）**
-- **网络限制**：子进程施加 seccomp 过滤器（纯 Go：`elastic/go-seccomp-bpf`），`socket()` 遇 `AF_INET`/`AF_INET6`/`AF_UNIX`/`AF_NETLINK` 一律拒绝，一次堵住 TCP、UDP（含 DNS 外传）与 `app.sock`。对内核版本无额外要求。
-- **`sandbox` 独立容器隔离**：
-  - Compose 中增加可选服务 `shell-sandbox`：busybox + jq/yq/fzq 镜像；`network_mode: none`；`read_only: true`；非 root；`mem_limit`/`cpus`/`pids_limit`；只读挂载 `readable_paths`；**不挂载任何密钥和 `app.db`**。
-  - Agent 经共享卷中的 Unix socket 发送 `{command, timeout}`，sandbox 内的小型执行器运行并返回结果；每次执行使用新的临时目录。
-  - 对内核无要求；代价是多一个容器与数十 ms 延迟。
-  - 落地时 `isolation` 增加 `sandbox` 取值；不满足 Landlock 条件的环境改用此模式。
-- **Shell 审计**：每次调用写 `audit_log`（会话、用户、完整命令、退出码、耗时、输出字节数），UI 可查看。
+当前**未实现**，`tools.shell.*` 配置项（含 landlock 相关）已整体删除；旧 `config.yaml` 中残留的 `tools.shell` 会在加载时被忽略。结构化工具（§6.3）是唯一路径。若日后实现，需重新设计隔离方案（Landlock / 独立 sandbox 容器 / seccomp 网络限制 / 审计）并重新引入配置。
 
 ---
 
 ### 6.11 Agent 配置与 MCP
 
-**`agent:`**（设置分区 `agent`，立即生效，无需重启）：`system_prompt`（空 = 内置 `DefaultSystemPrompt`，GET 附带只读 `default_system_prompt`）、`max_steps`（每轮最多调用 LLM 次数，默认 6）、`temperature`（可空，非空时覆盖 `llm.temperature`）、`turn_timeout`（单轮总超时，默认 120s，0 = 不限）、`history_messages`（作为上下文保留的最近消息数，默认 40，0 = 全部；截断后从 user 消息开始，避免孤立的 tool 消息）、`tools_disabled`（被禁用的内置工具名；不发送给 LLM，调用也会被拒绝）。GET 的 `available_tools` 列出内置工具 `{name, description}`（不含 MCP 工具）。
+**`agent:`**（设置分区 `agent`，立即生效，无需重启）：`system_prompt`（空 = 内置 `DefaultSystemPrompt`，GET 附带只读 `default_system_prompt`）、`max_steps`（每轮最多调用 LLM 次数，默认 6）、`temperature`（唯一的采样温度设置；可空，空 = 不下发、使用服务商默认值；旧 `llm.temperature` / `VOX_LLM_TEMPERATURE` 在 agent.temperature 未设置时迁移到此）、`turn_timeout`（单轮总超时，默认 120s，0 = 不限）、`history_messages`（作为上下文保留的最近消息数，默认 40，0 = 全部；截断后从 user 消息开始，避免孤立的 tool 消息）、`tools_disabled`（被禁用的内置工具名；不发送给 LLM，调用也会被拒绝）。GET 的 `available_tools` 列出内置工具 `{name, description}`（不含 MCP 工具）。
 
 **`mcp.servers`**（设置分区 `mcp`，保存后立即重连）：`{name, enabled, transport: http|sse|stdio, url, headers, command, args, env, timeout, tools_allow}`。使用官方 Go SDK（`github.com/modelcontextprotocol/go-sdk`）；`http` = Streamable HTTP，`sse` = 旧版 SSE，`stdio` = 本地子进程（以管理员权限运行任意命令，仅管理员可配置）。启动与保存时连接已启用的服务并 `tools/list`，工具注册为 `mcp__<server>__<tool>`（非 `[a-zA-Z0-9_-]` 字符替换为 `_`，最长 64），参数 schema 取自服务端；调用经 `tools/call`，仅返回文本内容并截断到 64KiB，`isError` 作为工具错误返回。`tools_allow` 非空时只注册列出的服务端工具。连接失败只记录日志并体现在 `GET /api/mcp/status`，不阻塞启动。`headers`/`env` 的值在 GET 中仅显示末 4 位；原样回传掩码值表示保持不变。`POST /api/mcp/test` 连接（可为未保存的）单个服务、列出工具后断开，不注册任何工具。MCP 工具调用与内置工具一样写入 traces。代码位于 `internal/mcp/`。
 

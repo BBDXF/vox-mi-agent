@@ -54,7 +54,7 @@ func reload(t *testing.T, dir string) *config.Config {
 }
 
 func TestSchemaListsAllSections(t *testing.T) {
-	want := []string{"llm", "agent", "mcp", "media", "aliases", "search", "sources", "tools", "speaker", "logging", "server"}
+	want := []string{"llm", "agent", "mcp", "media", "aliases", "search", "sources", "speaker", "logging", "server"}
 	sc := Schema()
 	if len(sc) != len(want) {
 		t.Fatalf("%d sections", len(sc))
@@ -101,14 +101,23 @@ func TestSchemaListsAllSections(t *testing.T) {
 		find("logging", "payload_retention_days").Default != 7 || find("logging", "payload_max_bytes").Default != "200MiB" {
 		t.Error("logging defaults")
 	}
-	if f := find("tools", "shell.enabled"); !strings.Contains(f.Description, "未实现") {
-		t.Error("shell.enabled must say not implemented")
+	for _, sec := range []string{"tools"} {
+		if _, ok := byName[sec]; ok {
+			t.Errorf("section %s must not be in schema", sec)
+		}
+	}
+	for _, f := range byName["llm"].Fields {
+		if f.Key == "temperature" {
+			t.Error("llm.temperature must not be in schema")
+		}
+	}
+	for _, f := range byName["search"].Fields {
+		if f.Key == "candidates" {
+			t.Error("search.candidates must not be in schema")
+		}
 	}
 	if f := find("search", "limit"); f.Default != 5 {
 		t.Errorf("search.limit default %v", f.Default)
-	}
-	if find("tools", "fzq_path").Default != "/usr/local/bin/fzq" {
-		t.Errorf("fzq default %v", find("tools", "fzq_path").Default)
 	}
 	b, _ := json.Marshal(sc)
 	if !strings.Contains(string(b), `"default":`) || !strings.Contains(string(b), `"restart_required":true`) {
@@ -148,12 +157,12 @@ func TestUnknownSectionAndEmptyBody(t *testing.T) {
 
 func TestSectionLLM(t *testing.T) {
 	a, dir := newTestApp(t, nil)
-	res := put(t, a, "llm", `{"model":"m2","temperature":0.5,"timeout":"45s","extra_body":{"enable_thinking":false},"api_key":"sk-sekrit-9999"}`)
+	res := put(t, a, "llm", `{"model":"m2","timeout":"45s","extra_body":{"enable_thinking":false},"api_key":"sk-sekrit-9999"}`)
 	if res.RestartRequired || len(res.Changed) == 0 {
 		t.Fatalf("%+v", res)
 	}
 	c := a.Config().LLM
-	if c.Model != "m2" || c.Temperature != 0.5 || c.Timeout != 45*time.Second || c.ExtraBody["enable_thinking"] != false || c.APIKey != "sk-sekrit-9999" {
+	if c.Model != "m2" || c.Timeout != 45*time.Second || c.ExtraBody["enable_thinking"] != false || c.APIKey != "sk-sekrit-9999" {
 		t.Fatalf("live %+v", c)
 	}
 	if a.Provider.Model() != "m2" {
@@ -171,8 +180,8 @@ func TestSectionLLM(t *testing.T) {
 		t.Fatal("secret leaked in GET")
 	}
 	// partial update keeps the rest (including base_url and key)
-	put(t, a, "llm", `{"temperature":0.9}`)
-	if c := a.Config().LLM; c.Model != "m2" || c.Temperature != 0.9 || c.APIKey != "sk-sekrit-9999" || c.Timeout != 45*time.Second {
+	put(t, a, "llm", `{"timeout":"45s"}`)
+	if c := a.Config().LLM; c.Model != "m2" || c.APIKey != "sk-sekrit-9999" || c.Timeout != 45*time.Second {
 		t.Fatalf("partial %+v", c)
 	}
 	// extra_body {} clears
@@ -181,8 +190,8 @@ func TestSectionLLM(t *testing.T) {
 		t.Fatal("extra_body not cleared")
 	}
 	// errors
-	if _, err := a.PutSection(context.Background(), "llm", body(t, `{"temperature":9}`)); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("%v", err)
+	if f := putFields(t, a, "llm", `{"temperature":0.5}`); f["temperature"] == "" {
+		t.Fatalf("llm.temperature must be unknown: %v", f)
 	}
 	if _, err := a.PutSection(context.Background(), "llm", body(t, `{"timeout":"1ms"}`)); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("%v", err)
@@ -355,18 +364,18 @@ func TestSectionSearchLive(t *testing.T) {
 		t.Fatalf("default limit gave %d hits", n)
 	}
 
-	res := put(t, a, "search", `{"strip_patterns":["^foo","bar$"],"min_score":70,"limit":2,"candidates":100}`)
-	if res.RestartRequired || len(res.Changed) != 4 {
+	res := put(t, a, "search", `{"strip_patterns":["^foo","bar$"],"min_score":70,"limit":2}`)
+	if res.RestartRequired || len(res.Changed) != 3 {
 		t.Fatalf("%+v", res)
 	}
-	if p := a.Index.Params(); p.Candidates != 100 || len(p.Strip) != 2 || p.Strip[0] != "^foo" {
+	if p := a.Index.Params(); len(p.Strip) != 2 || p.Strip[0] != "^foo" {
 		t.Fatalf("index params %+v", p)
 	}
 	if n := count(); n != 2 { // next query already uses limit=2
 		t.Fatalf("after limit=2 got %d hits", n)
 	}
 	r := reload(t, dir)
-	if r.Search.Limit != 2 || r.Search.MinScore != 70 || r.Search.Candidates != 100 || len(r.Search.StripPatterns) != 2 {
+	if r.Search.Limit != 2 || r.Search.MinScore != 70 || len(r.Search.StripPatterns) != 2 {
 		t.Fatalf("persisted %+v", r.Search)
 	}
 	for js, key := range map[string]string{
@@ -375,8 +384,7 @@ func TestSectionSearchLive(t *testing.T) {
 		`{"min_score":-1}`:              "min_score",
 		`{"limit":0}`:                   "limit",
 		`{"limit":21}`:                  "limit",
-		`{"candidates":49}`:             "candidates",
-		`{"candidates":5001}`:           "candidates",
+		`{"candidates":100}`:            "candidates",
 	} {
 		if f := putFields(t, a, "search", js); f[key] == "" {
 			t.Errorf("%s -> %v", js, f)
@@ -463,56 +471,13 @@ func writeScript(t *testing.T, name, out string) string {
 	return p
 }
 
-func TestSectionToolsPathsAndShell(t *testing.T) {
-	a, dir := newTestApp(t, nil)
-	notExec := filepath.Join(t.TempDir(), "jq")
-	if err := os.WriteFile(notExec, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
+func TestToolsSectionRemoved(t *testing.T) {
+	a, _ := newTestApp(t, nil)
+	if _, err := a.GetSection(context.Background(), "tools"); err == nil {
+		t.Fatal("tools section must not exist")
 	}
-	f := putFields(t, a, "tools", `{"jq_path":"/definitely/missing/jq","yq_path":"`+notExec+`","shell":{"timeout":"1ms","max_output":"1B","readable_paths":["rel"]}}`)
-	for _, k := range []string{"jq_path", "yq_path", "shell.timeout", "shell.max_output", "shell.readable_paths[0]"} {
-		if f[k] == "" {
-			t.Errorf("missing %s in %v", k, f)
-		}
-	}
-	if f := putFields(t, a, "tools", `{"shell":{"expose_to":"nobody","bogus":1}}`); f["shell.expose_to"] == "" || f["shell.bogus"] == "" {
-		t.Errorf("%v", f)
-	}
-
-	// the data tools must use the configured per-tool path, not <tools dir>/jq
-	fake := writeScript(t, "fakejq", "CUSTOM-JQ")
-	res := put(t, a, "tools", `{"jq_path":"`+fake+`","shell":{"enabled":true,"timeout":"20s","max_output":"128KiB","readable_paths":["/srv/x"]}}`)
-	if res.RestartRequired {
-		t.Fatalf("shell.enabled must not require restart: %+v", res)
-	}
-	if h, ok := res.Applied["health"].(ToolStatuses); !ok || h.Jq.Path != fake || !h.Fzq.OK {
-		t.Fatalf("self-check not re-run: %+v", res.Applied)
-	}
-	if st := a.HealthStatus(); st.Jq.Path != fake {
-		t.Fatalf("HealthStatus %+v", st)
-	}
-	qj, _ := a.Tools.Get("query_json")
-	v, err := qj.Call(context.Background(), json.RawMessage(`{"filter":".","input":"1"}`))
-	if err != nil || !strings.Contains(v.(map[string]any)["output"].(string), "CUSTOM-JQ") {
-		t.Fatalf("query_json did not use jq_path: %v %v", v, err)
-	}
-	c := a.Config().Tools
-	if c.JqPath != fake || !c.Shell.Enabled || c.Shell.Timeout != 20*time.Second || c.Shell.MaxOutput != 128<<10 || c.Shell.ReadablePaths[0] != "/srv/x" {
-		t.Fatalf("live %+v", c)
-	}
-	r := reload(t, dir)
-	if r.Tools.JqPath != fake || !r.Tools.Shell.Enabled || r.Tools.Shell.Timeout != 20*time.Second || r.Tools.Shell.MaxOutput != 128<<10 {
-		t.Fatalf("persisted %+v", r.Tools)
-	}
-	got, _ := a.GetSection(context.Background(), "tools")
-	sh := got["shell"].(map[string]any)
-	if got["jq_path"] != fake || sh["enabled"] != true || sh["timeout"] != "20s" || sh["max_output"] != "128KiB" || got["health"] == nil {
-		t.Fatalf("GET %+v", got)
-	}
-	// empty path = default location again
-	res = put(t, a, "tools", `{"jq_path":""}`)
-	if a.Config().Tools.JqPath == fake {
-		t.Fatal("jq_path not reset")
+	if _, err := a.PutSection(context.Background(), "tools", body(t, `{"jq_path":"/x"}`)); err == nil {
+		t.Fatal("tools section must not be writable")
 	}
 }
 

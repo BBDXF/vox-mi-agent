@@ -460,7 +460,6 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		"llm": map[string]any{
 			"provider": l.Provider, "base_url": l.BaseURL, "model": l.Model,
 			"api_key_masked": maskKey(l.APIKey), "has_api_key": l.APIKey != "",
-			"temperature": l.Temperature,
 		},
 		"tools":   s.app.HealthStatus(),
 		"sources": srcs,
@@ -474,24 +473,18 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) putLLM(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Provider    string          `json:"provider"`
-		BaseURL     string          `json:"base_url"`
-		Model       string          `json:"model"`
-		APIKey      string          `json:"api_key"`
-		Temperature *float64        `json:"temperature"`
-		Timeout     *string         `json:"timeout"`
-		ExtraBody   json.RawMessage `json:"extra_body"`
+		Provider  string          `json:"provider"`
+		BaseURL   string          `json:"base_url"`
+		Model     string          `json:"model"`
+		APIKey    string          `json:"api_key"`
+		Timeout   *string         `json:"timeout"`
+		ExtraBody json.RawMessage `json:"extra_body"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	u := app.LLMUpdate{Provider: body.Provider, BaseURL: body.BaseURL, Model: body.Model, APIKey: body.APIKey}
-	if body.Temperature != nil {
-		u.Temperature = *body.Temperature
-	} else {
-		u.Temperature = s.app.LLMConfig().Temperature
-	}
 	if body.Timeout != nil {
 		d, err := time.ParseDuration(strings.TrimSpace(*body.Timeout))
 		if err != nil {

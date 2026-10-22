@@ -24,14 +24,13 @@ export function AgentSettings() {
   const [temp, setTemp] = useState('');
   const [timeout, setTimeoutV] = useState('2m');
   const [hist, setHist] = useState('40');
-  const [disabled, setDisabled] = useState<string[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
   const apply = (d: AS) => {
     setData(d); setPrompt(d.system_prompt || ''); setMaxSteps(String(d.max_steps));
     setTemp(d.temperature == null ? '' : String(d.temperature)); setTimeoutV(d.turn_timeout);
-    setHist(String(d.history_messages)); setDisabled(d.tools_disabled || []);
+    setHist(String(d.history_messages));
   };
   const load = () => getAgentSettings().then(apply).catch((e) => toastError(e.message || '加载失败'));
   useEffect(() => { load(); }, []);
@@ -45,7 +44,6 @@ export function AgentSettings() {
         temperature: temp.trim() === '' ? null : Number(temp),
         turn_timeout: timeout.trim(),
         history_messages: Number(hist),
-        tools_disabled: disabled,
       });
       success('智能体设置已保存并生效');
       await load();
@@ -58,14 +56,12 @@ export function AgentSettings() {
   if (!data) return <div className="text-sm text-muted-foreground py-12 text-center">正在加载…</div>;
   const custom = prompt.trim() !== '';
   const Err = ({ k }: { k: string }) => errors[k] ? <p className="text-xs text-destructive mt-1">{errors[k]}</p> : null;
-  const toggle = (name: string, on: boolean) =>
-    setDisabled((p) => on ? p.filter((n) => n !== name) : p.includes(name) ? p : [...p, name]);
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><IconChip icon={Bot} color="agent" />智能体</CardTitle>
-        <CardDescription>提示词、推理参数与内置工具，保存后立即生效，无需重启。</CardDescription>
+        <CardDescription>提示词与运行参数，保存后立即生效，无需重启。</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <section className="space-y-2">
@@ -84,7 +80,7 @@ export function AgentSettings() {
           <Err k="system_prompt" />
         </section>
 
-        <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <section className="space-y-3"><h3 className="text-sm font-medium">运行参数</h3><div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="text-sm font-medium">最大步数</label>
             <Input type="number" min={1} max={50} value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} />
@@ -105,23 +101,7 @@ export function AgentSettings() {
             <Input type="number" min={0} max={1000} value={hist} onChange={(e) => setHist(e.target.value)} />
             <p className="text-xs text-muted-foreground mt-1">0 = 全部，最大 1000</p><Err k="history_messages" />
           </div>
-        </section>
-
-        <section className="space-y-2">
-          <h3 className="text-sm font-medium">内置工具</h3>
-          <Err k="tools_disabled" />
-          <div className="divide-y rounded-md border">
-            {data.available_tools.map((t) => (
-              <div key={t.name} className="flex items-start justify-between gap-3 p-3">
-                <div className="min-w-0">
-                  <div className="font-mono text-xs font-semibold">{t.name}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">{t.description}</div>
-                </div>
-                <Switch label={t.name} checked={!disabled.includes(t.name)} onChange={(v) => toggle(t.name, v)} />
-              </div>
-            ))}
-          </div>
-        </section>
+        </div></section>
       </CardContent>
       <CardFooter className="justify-end gap-2">
         <Button variant="outline" onClick={load} disabled={saving}>重置</Button>

@@ -55,6 +55,10 @@ interface LLMProviderCardProps {
   onSaved: () => Promise<void> | void;
 }
 
+function fmtEb(v: any): string {
+  return v && typeof v === 'object' && Object.keys(v).length ? JSON.stringify(v, null, 2) : '';
+}
+
 export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardProps) {
   const { success, error: toastError } = useToast();
 
@@ -69,7 +73,8 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
   const [baseUrl, setBaseUrl] = useState<string>(currentSettings.base_url || '');
   const [model, setModel] = useState<string>(currentSettings.model || '');
   const [apiKeyInput, setApiKeyInput] = useState<string>('');
-  const [temperature, setTemperature] = useState<number>(currentSettings.temperature ?? 0.3);
+  const [timeoutStr, setTimeoutStr] = useState<string>(String((currentSettings as any).timeout ?? ''));
+  const [extraBodyStr, setExtraBodyStr] = useState<string>(fmtEb((currentSettings as any).extra_body));
 
   // Track original server state to detect provider switching & API key persistence
   const [initialProviderId, setInitialProviderId] = useState<string>(
@@ -125,7 +130,8 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
     setInitialProviderId(provId);
     setBaseUrl(currentSettings.base_url || '');
     setModel(currentSettings.model || '');
-    setTemperature(currentSettings.temperature ?? 0.3);
+    setTimeoutStr(String((currentSettings as any).timeout ?? ''));
+    setExtraBodyStr(fmtEb((currentSettings as any).extra_body));
     setHasApiKeyOnServer(Boolean(currentSettings.has_api_key));
     setApiKeyMaskedOnServer(currentSettings.api_key_masked || '');
     setApiKeyInput('');
@@ -267,8 +273,15 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
       const payload: UpdateLLMRequest = {
         provider: selectedProviderId,
         model: model.trim(),
-        temperature: Number(temperature),
       };
+      if (timeoutStr.trim()) payload.timeout = timeoutStr.trim();
+      const ebText = extraBodyStr.trim();
+      try {
+        payload.extra_body = ebText ? JSON.parse(ebText) : {};
+        if (typeof payload.extra_body !== 'object' || Array.isArray(payload.extra_body)) throw new Error();
+      } catch {
+        throw new Error('extra_body 必须是合法的 JSON 对象');
+      }
 
       if (baseUrl.trim()) {
         payload.base_url = baseUrl.trim();
@@ -715,40 +728,24 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
             </span>
           </div>
 
-          {/* Temperature Slider */}
-          <div className="space-y-2 pt-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-foreground">
-                采样温度 (Temperature): {temperature}
-              </label>
-              <span className="text-[11px] text-muted-foreground">
-                {temperature <= 0.3
-                  ? '0.0 ~ 0.3：高确定性 (推荐用于曲库工具精准检索与意图识别)'
-                  : temperature >= 0.8
-                  ? '0.8 ~ 1.5：高发散性 (适合闲聊与自由创作)'
-                  : '0.4 ~ 0.7：平衡模式'}
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                min="0"
-                max="1.5"
-                step="0.05"
-                value={temperature}
-                onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                className="w-full accent-primary h-2 bg-muted rounded-lg cursor-pointer"
-              />
-              <Input
-                type="number"
-                min="0"
-                max="2"
-                step="0.05"
-                value={temperature}
-                onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                className="w-20 text-center font-mono h-8 text-xs shadow-xs"
-              />
-            </div>
+          {/* Timeout */}
+          <div className="space-y-1.5 pt-2">
+            <label className="text-xs font-semibold text-foreground">请求超时 (timeout)</label>
+            <Input value={timeoutStr} onChange={(e) => setTimeoutStr(e.target.value)} placeholder="如 60s、2m；留空使用默认" className="font-mono text-xs shadow-xs" />
+            <span className="text-[11px] text-muted-foreground block">范围 0 ~ 10m。</span>
+          </div>
+
+          {/* extra_body */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">额外请求参数 (extra_body)</label>
+            <textarea
+              value={extraBodyStr}
+              onChange={(e) => setExtraBodyStr(e.target.value)}
+              rows={4}
+              placeholder='{"enable_thinking": false}'
+              className="w-full rounded-md border bg-background p-3 font-mono text-xs outline-none focus:ring-2 focus:ring-ring resize-y"
+            />
+            <span className="text-[11px] text-muted-foreground block">JSON 对象，会合并进每次模型请求体；留空表示不添加。</span>
           </div>
         </form>
 

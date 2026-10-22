@@ -34,6 +34,7 @@ import {
 import { formatTime } from '@/lib/utils';
 import { MediaSettingsCard } from './MediaSettingsCard';
 import { AliasesTableEditor } from './AliasesTableEditor';
+import { SearchSettingsCard } from './SearchSettingsCard';
 import { TracksCard } from './TracksCard';
 
 export function MediaView() {
@@ -360,6 +361,8 @@ export function MediaView() {
         onSaved={handleSettingsSaved}
         isSyncing={isSyncing}
       />
+
+      <SearchSettingsCard />
 
       {/* Aliases Card (音乐别名映射) */}
       <AliasesTableEditor />

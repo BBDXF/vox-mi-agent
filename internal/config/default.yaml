@@ -14,7 +14,6 @@ llm:
   base_url: "https://api.openai.com/v1"
   api_key: ""                         # prefer env VOX_LLM_API_KEY
   model: "gpt-4o-mini"
-  temperature: 0.3
   timeout: 60s
   # extra_body:                       # merged into the chat/completions request JSON
   #   enable_thinking: false          # (siliconflow/dashscope presets default to this)
@@ -22,7 +21,7 @@ llm:
 agent:
   system_prompt: ""                   # empty = built-in default prompt
   max_steps: 6                        # max LLM calls (tool rounds) per turn
-  # temperature: 0.3                  # optional; overrides llm.temperature
+  # temperature: 0.3                  # optional sampling temperature; unset = provider default
   turn_timeout: 120s
   history_messages: 40                # stored messages kept as context; 0 = all
   tools_disabled: []                  # built-in tool names hidden from the LLM
@@ -35,13 +34,6 @@ tools:
   # fzq_path: /usr/local/bin/fzq
   # jq_path: /usr/local/bin/jq
   # yq_path: /usr/local/bin/yq
-  shell:
-    enabled: false
-    isolation: landlock
-    expose_to: admin_console          # admin_console | all
-    timeout: 10s
-    max_output: 64KiB
-    readable_paths: []
 
 # Registered data sources for fuzzy_match / query_json / query_yaml.
 # file is relative to <dataDir>/sources unless absolute.

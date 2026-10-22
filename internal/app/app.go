@@ -192,7 +192,7 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 	if inner == nil {
 		inner = newOpenAI(c.LLM)
 	}
-	a.Provider = NewSwapProvider(inner, c.LLM.Model, c.LLM.Temperature)
+	a.Provider = NewSwapProvider(inner, c.LLM.Model)
 	a.Tracer = trace.NewRecorder(st, trace.PayloadDir(c.DataDir), a.Log, trace.WriterOptions{})
 	a.Tracer.Configure(c.Logging)
 	a.Tracer.P.SetSecrets(c.LLM.APIKey)
@@ -284,11 +284,10 @@ func (a *App) LLMConfig() config.LLM { return a.Config().LLM }
 // provider. APIKey "" keeps the stored key only when the provider is
 // unchanged; switching provider with an empty key clears the stored key.
 type LLMUpdate struct {
-	Provider    string
-	BaseURL     string
-	Model       string
-	APIKey      string
-	Temperature float64
+	Provider string
+	BaseURL  string
+	Model    string
+	APIKey   string
 	// Timeout nil = unchanged.
 	Timeout *time.Duration
 	// SetExtraBody replaces llm.extra_body with ExtraBody (nil/empty = clear,
@@ -375,8 +374,6 @@ func (a *App) updateLLMLocked(u LLMUpdate) ([]string, error) {
 	switch {
 	case u.Model == "":
 		return nil, fmt.Errorf("%w: model is required", ErrInvalid)
-	case u.Temperature < 0 || u.Temperature > 2:
-		return nil, fmt.Errorf("%w: temperature must be between 0 and 2", ErrInvalid)
 	case tgt.Preset.KeyRequired && tgt.APIKey == "":
 		return nil, fmt.Errorf("%w: %s requires an API key", ErrInvalid, tgt.Preset.Name)
 	case u.Timeout != nil && (*u.Timeout < time.Second || *u.Timeout > 10*time.Minute):
@@ -394,13 +391,13 @@ func (a *App) updateLLMLocked(u LLMUpdate) ([]string, error) {
 		extra = append(extra, yamlSet{[]string{"llm", "extra_body"}, nd})
 	}
 	key := tgt.APIKey
-	if err := persistLLM(a.Cfg.DataDir, tgt.Provider, tgt.BaseURL, u.Model, u.Temperature, &key, extra...); err != nil {
+	if err := persistLLM(a.Cfg.DataDir, tgt.Provider, tgt.BaseURL, u.Model, &key, extra...); err != nil {
 		return nil, fmt.Errorf("persist config: %w", err)
 	}
 	n := a.Config()
 	nl := &n.LLM
 	nl.Provider, nl.BaseURL, nl.APIKey = tgt.Provider, tgt.BaseURL, tgt.APIKey
-	nl.Model, nl.Temperature = u.Model, u.Temperature
+	nl.Model = u.Model
 	if u.Timeout != nil {
 		nl.Timeout = *u.Timeout
 	}
@@ -417,14 +414,13 @@ func (a *App) updateLLMLocked(u LLMUpdate) ([]string, error) {
 	add("base_url", cur.BaseURL != nl.BaseURL)
 	add("api_key", cur.APIKey != nl.APIKey)
 	add("model", cur.Model != nl.Model)
-	add("temperature", cur.Temperature != nl.Temperature)
 	add("timeout", cur.Timeout != nl.Timeout)
 	add("extra_body", u.SetExtraBody && !reflect.DeepEqual(cur.ExtraBody, nl.ExtraBody))
 	a.setConfig(n)
-	a.Provider.Set(newOpenAI(*nl), nl.Model, nl.Temperature)
+	a.Provider.Set(newOpenAI(*nl), nl.Model)
 	a.Tracer.P.SetSecrets(nl.APIKey)
 	a.auditSettings("llm", changed)
-	a.Log.Info("llm reconfigured", "provider", nl.Provider, "base_url", nl.BaseURL, "model", nl.Model, "temperature", nl.Temperature)
+	a.Log.Info("llm reconfigured", "provider", nl.Provider, "base_url", nl.BaseURL, "model", nl.Model)
 	return changed, nil
 }
 

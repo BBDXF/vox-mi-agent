@@ -60,8 +60,8 @@ type Config struct {
 	MCP     MCP      `yaml:"mcp" json:"mcp"`
 }
 
-// Agent tunes the think-act loop. Temperature, when set, overrides
-// llm.temperature (nil = use llm.temperature / the provider default).
+// Agent tunes the think-act loop. Temperature is the single sampling knob
+// (nil = not sent, the provider default applies).
 type Agent struct {
 	// SystemPrompt empty = built-in default (agent.DefaultSystemPrompt).
 	SystemPrompt string `yaml:"system_prompt" json:"system_prompt"`
@@ -175,12 +175,11 @@ type Auth struct {
 
 type LLM struct {
 	// Provider is a preset id (see llm.Presets) or "custom".
-	Provider    string        `yaml:"provider" json:"provider"`
-	BaseURL     string        `yaml:"base_url" json:"base_url"`
-	APIKey      string        `yaml:"api_key" json:"api_key"`
-	Model       string        `yaml:"model" json:"model"`
-	Temperature float64       `yaml:"temperature" json:"temperature"`
-	Timeout     time.Duration `yaml:"timeout" json:"timeout"`
+	Provider string        `yaml:"provider" json:"provider"`
+	BaseURL  string        `yaml:"base_url" json:"base_url"`
+	APIKey   string        `yaml:"api_key" json:"api_key"`
+	Model    string        `yaml:"model" json:"model"`
+	Timeout  time.Duration `yaml:"timeout" json:"timeout"`
 	// ExtraBody is merged into the chat/completions request body (e.g.
 	// enable_thinking: false). Empty = use the provider preset's default.
 	ExtraBody map[string]any `yaml:"extra_body" json:"extra_body,omitempty"`
@@ -218,16 +217,6 @@ type Tools struct {
 	FzqPath string `yaml:"fzq_path" json:"fzq_path"`
 	JqPath  string `yaml:"jq_path" json:"jq_path"`
 	YqPath  string `yaml:"yq_path" json:"yq_path"`
-	Shell   Shell  `yaml:"shell" json:"shell"`
-}
-
-type Shell struct {
-	Enabled       bool          `yaml:"enabled" json:"enabled"`
-	Isolation     string        `yaml:"isolation" json:"isolation"`
-	ExposeTo      string        `yaml:"expose_to" json:"expose_to"`
-	Timeout       time.Duration `yaml:"timeout" json:"timeout"`
-	MaxOutput     ByteSize      `yaml:"max_output" json:"max_output"`
-	ReadablePaths []string      `yaml:"readable_paths" json:"readable_paths"`
 }
 
 // MediaLibrarySource is the reserved name of the built-in, read-only data
@@ -352,20 +341,13 @@ func Defaults() *Config {
 			BasePath: DefaultBasePath,
 		},
 		LLM: LLM{
-			Provider:    llm.CustomPresetID,
-			BaseURL:     "https://api.openai.com/v1",
-			Model:       "gpt-4o-mini",
-			Temperature: 0.3,
-			Timeout:     60 * time.Second,
+			Provider: llm.CustomPresetID,
+			BaseURL:  "https://api.openai.com/v1",
+			Model:    "gpt-4o-mini",
+			Timeout:  60 * time.Second,
 		},
 		Tools: Tools{
 			Dir: DefaultToolsDir,
-			Shell: Shell{
-				Isolation: "landlock",
-				ExposeTo:  "admin_console",
-				Timeout:   10 * time.Second,
-				MaxOutput: 64 << 10,
-			},
 		},
 		Media: Media{
 			Folders:         []string{"/vol1/1000/Music"},
@@ -436,12 +418,19 @@ func load(dataDir string, lookup func(string) (string, bool)) (*Config, error) {
 	case err != nil:
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
+	raw, legacyTemp, err := migrateLegacy(raw)
+	if err != nil {
+		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+	}
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	if err := dec.Decode(cfg); err != nil && !errors.Is(err, errEOF) {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 
+	if legacyTemp != nil && cfg.Agent.Temperature == nil {
+		cfg.Agent.Temperature = legacyTemp
+	}
 	if err := applyEnv(cfg, lookup); err != nil {
 		return nil, err
 	}
@@ -494,7 +483,7 @@ func applyEnv(c *Config, lookup func(string) (string, bool)) error {
 		if err != nil {
 			errs = append(errs, fmt.Errorf("config: VOX_LLM_TEMPERATURE: %w", err))
 		} else {
-			c.LLM.Temperature = f
+			c.Agent.Temperature = &f
 		}
 	}
 	dur("VOX_AGENT_TURN_TIMEOUT", &c.Agent.TurnTimeout)
@@ -502,7 +491,6 @@ func applyEnv(c *Config, lookup func(string) (string, bool)) error {
 	str("VOX_FZQ_PATH", &c.Tools.FzqPath)
 	str("VOX_JQ_PATH", &c.Tools.JqPath)
 	str("VOX_YQ_PATH", &c.Tools.YqPath)
-	boolean("VOX_SHELL_ENABLED", &c.Tools.Shell.Enabled)
 	str("VOX_SPEAKER_DRIVER", &c.Speaker.Driver)
 	str("VOX_PUBLIC_BASE_URL", &c.Speaker.PublicBaseURL)
 	return errors.Join(errs...)
@@ -555,14 +543,6 @@ func (c *Config) Validate() error {
 	}
 	if err := c.Speaker.validate(); err != nil {
 		return err
-	}
-	switch c.Tools.Shell.ExposeTo {
-	case "admin_console", "all":
-	default:
-		return fmt.Errorf("config: tools.shell.expose_to must be admin_console|all, got %q", c.Tools.Shell.ExposeTo)
-	}
-	if c.Tools.Shell.Isolation != "landlock" {
-		return fmt.Errorf("config: tools.shell.isolation %q unsupported (only landlock)", c.Tools.Shell.Isolation)
 	}
 	seen := map[string]bool{}
 	for i, s := range c.Sources {
@@ -654,7 +634,6 @@ func (c *Config) Source(name string) (Source, bool) {
 func (c *Config) Clone() *Config {
 	cp := *c
 	cp.LLM.ExtraBody = cloneMap(c.LLM.ExtraBody)
-	cp.Tools.Shell.ReadablePaths = append([]string(nil), c.Tools.Shell.ReadablePaths...)
 	cp.Media.Folders = append([]string(nil), c.Media.Folders...)
 	cp.Media.Extensions = append([]string(nil), c.Media.Extensions...)
 	cp.Search.StripPatterns = append([]string(nil), c.Search.StripPatterns...)
@@ -822,4 +801,60 @@ func (c *Config) stripDebugDevice() {
 		}
 	}
 	c.Speaker.Xiaomi.Devices = out
+}
+
+// migrateLegacy rewrites an old config file so it still loads: the removed
+// tools.shell block is dropped, and llm.temperature is returned (and dropped)
+// so the caller can move it to agent.temperature when that is unset.
+func migrateLegacy(raw []byte) ([]byte, *float64, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil || doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+		return raw, nil, nil // let the strict decoder report real errors
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return raw, nil, nil
+	}
+	drop := func(m *yaml.Node, key string) *yaml.Node {
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			if m.Content[i].Value == key {
+				v := m.Content[i+1]
+				m.Content = append(m.Content[:i], m.Content[i+2:]...)
+				return v
+			}
+		}
+		return nil
+	}
+	sub := func(key string) *yaml.Node {
+		for i := 0; i+1 < len(root.Content); i += 2 {
+			if root.Content[i].Value == key && root.Content[i+1].Kind == yaml.MappingNode {
+				return root.Content[i+1]
+			}
+		}
+		return nil
+	}
+	var temp *float64
+	changed := false
+	if l := sub("llm"); l != nil {
+		if v := drop(l, "temperature"); v != nil {
+			changed = true
+			var f float64
+			if v.Decode(&f) == nil {
+				temp = &f
+			}
+		}
+	}
+	if t := sub("tools"); t != nil {
+		if drop(t, "shell") != nil {
+			changed = true
+		}
+	}
+	if !changed {
+		return raw, nil, nil
+	}
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, temp, nil
 }

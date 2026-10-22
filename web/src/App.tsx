@@ -19,6 +19,12 @@ import {
 
 export function App() {
   const { route, navigate } = useHashRoute();
+  useEffect(() => {
+    if (route.tab !== 'settings') return;
+    const go = (h: string) => window.location.replace(h);
+    if (route.param === 'search') go('#/media');
+    else if (route.param === 'sources' || route.param === 'mcp') go('#/settings/tools');
+  }, [route.tab, route.param]);
   const currentTab: NavTab = route.tab;
   const setCurrentTab = (t: Tab) => navigate(t);
   const [isDark, setIsDark] = useState<boolean>(() => {

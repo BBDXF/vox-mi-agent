@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   Cpu,
-  Search,
-  Database,
   Wrench,
   Volume2,
   Server,
@@ -11,7 +9,6 @@ import {
   Sliders,
   Info,
   Bot,
-  Plug,
 } from 'lucide-react';
 import { accent, type Area } from '@/lib/accent';
 import { IconChip } from '@/components/ui/icon-chip';
@@ -25,10 +22,9 @@ import {
   type SettingsResponse,
 } from '@/lib/api';
 import { LLMProviderCard } from './LLMProviderCard';
-import { SourcesTableEditor } from './SourcesTableEditor';
+import { ToolsSettings } from './ToolsSettings';
 import { SpeakerSettings } from './speaker/SpeakerSettings';
 import { AgentSettings } from './AgentSettings';
-import { McpSettings } from './McpSettings';
 import { GenericSectionForm } from './GenericSectionForm';
 
 // Mapping section keys to display names and icons (曲库 and 别名 are now on the dedicated 曲库 page)
@@ -37,9 +33,6 @@ const SECTION_METADATA: Record<
   { label: string; icon: React.ComponentType<{ className?: string }> }
 > = {
   llm: { label: '大模型', icon: Cpu },
-  search: { label: '检索', icon: Search },
-  sources: { label: '数据源', icon: Database },
-  tools: { label: '工具', icon: Wrench },
   speaker: { label: '音箱', icon: Volume2 },
   server: { label: '服务', icon: Server },
   logging: { label: '日志', icon: ScrollText },
@@ -47,10 +40,10 @@ const SECTION_METADATA: Record<
 
 const EXTRA_SECTIONS = [
   { name: 'agent', label: '智能体', icon: Bot },
-  { name: 'mcp', label: 'MCP', icon: Plug },
+  { name: 'tools', label: '工具', icon: Wrench },
 ];
 
-const EXCLUDED_SECTIONS = new Set(['media', 'aliases']);
+const EXCLUDED_SECTIONS = new Set(['media', 'aliases', 'search', 'sources', 'tools', 'mcp']);
 
 export function SettingsView({ section, onSectionChange }: { section?: string; onSectionChange?: (s: string) => void } = {}) {
   const { error: toastError } = useToast();
@@ -101,7 +94,7 @@ export function SettingsView({ section, onSectionChange }: { section?: string; o
             系统配置与参数规范
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
-            动态参数架构驱动：大模型、拼音检索、数据源、音箱驱动与调用链审计策略
+            动态参数架构驱动：大模型、智能体、工具、音箱与服务
           </p>
         </div>
 
@@ -176,7 +169,7 @@ export function SettingsView({ section, onSectionChange }: { section?: string; o
 
         {/* Right Content Area */}
         <div className="md:col-span-9 lg:col-span-9 min-w-0 space-y-6">
-          {activeSection === 'about' ? <AboutCard /> : activeSection === 'agent' ? <AgentSettings /> : activeSection === 'mcp' ? <McpSettings /> : !currentSection ? (
+          {activeSection === 'about' ? <AboutCard /> : activeSection === 'agent' ? <AgentSettings /> : activeSection === 'tools' ? <ToolsSettings /> : !currentSection ? (
             <div className="text-sm text-muted-foreground py-12 text-center">
               {loading ? '正在加载配置…' : '配置加载失败，请点击「刷新配置」重试'}
             </div>
@@ -193,13 +186,11 @@ export function SettingsView({ section, onSectionChange }: { section?: string; o
             )
           )}
 
-          {/* Dedicated Sources Table Editor */}
-          {activeSection === 'sources' && <SourcesTableEditor />}
 
           {/* Generic Schema-Driven Section Form for search, tools, speaker, server, logging */}
           {activeSection === 'speaker' && <SpeakerSettings />}
 
-          {activeSection !== 'llm' && activeSection !== 'sources' && activeSection !== 'speaker' && (
+          {activeSection !== 'llm' && activeSection !== 'speaker' && (
             <GenericSectionForm
               key={activeSection}
               section={currentSection}

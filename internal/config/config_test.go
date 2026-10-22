@@ -30,8 +30,8 @@ func TestPrecedence(t *testing.T) {
 				if c.Tools.FzqPath != "/usr/local/bin/fzq" || c.Tools.JqPath != "/usr/local/bin/jq" {
 					t.Errorf("tool paths: %+v", c.Tools)
 				}
-				if c.Tools.Shell.MaxOutput != 64<<10 || c.Tools.Shell.Timeout != 10*time.Second || c.Tools.Shell.Enabled {
-					t.Errorf("shell: %+v", c.Tools.Shell)
+				if c.Agent.Temperature != nil {
+					t.Errorf("agent temperature default: %v", *c.Agent.Temperature)
 				}
 				if c.Media.SyncInterval != 6*time.Hour || !c.Media.SyncOnStart || c.Speaker.Driver != "mock" {
 					t.Errorf("media/speaker: %+v %+v", c.Media, c.Speaker)
@@ -40,16 +40,16 @@ func TestPrecedence(t *testing.T) {
 		},
 		{
 			name: "file overrides defaults",
-			file: "llm:\n  model: file-model\n  temperature: 0\n  timeout: 5s\n  extra_body:\n    enable_thinking: false\n    nested: {a: 1}\ntools:\n  shell:\n    max_output: 1MiB\nmedia:\n  sync_interval: 0\nsources:\n  - {name: contacts, file: c.json, format: json, keys: [name]}\n",
+			file: "llm:\n  model: file-model\n  temperature: 0\n  timeout: 5s\n  extra_body:\n    enable_thinking: false\n    nested: {a: 1}\ntools:\n  shell:\n    max_output: 1MiB\n    enabled: true\nmedia:\n  sync_interval: 0\nsources:\n  - {name: contacts, file: c.json, format: json, keys: [name]}\n",
 			check: func(t *testing.T, c *Config) {
-				if c.LLM.Model != "file-model" || c.LLM.Temperature != 0 || c.LLM.Timeout != 5*time.Second {
+				if c.LLM.Model != "file-model" || c.LLM.Timeout != 5*time.Second {
 					t.Errorf("llm: %+v", c.LLM)
 				}
 				if eb := c.LLM.EffectiveExtraBody(); eb["enable_thinking"] != false || eb["nested"] == nil {
 					t.Errorf("extra_body: %+v", eb)
 				}
-				if c.Tools.Shell.MaxOutput != 1<<20 || c.Tools.Shell.Isolation != "landlock" {
-					t.Errorf("shell: %+v", c.Tools.Shell)
+				if c.Agent.Temperature == nil || *c.Agent.Temperature != 0 {
+					t.Errorf("legacy llm.temperature not migrated: %v", c.Agent.Temperature)
 				}
 				if c.Media.SyncInterval != 0 {
 					t.Errorf("sync interval: %v", c.Media.SyncInterval)
@@ -149,8 +149,6 @@ func TestInvalid(t *testing.T) {
 		"unknown key":    "bogus: 1\n",
 		"bad listen":     "server:\n  listen: http://x\n",
 		"dup source":     "sources:\n  - {name: a, file: a}\n  - {name: a, file: b}\n",
-		"bad expose":     "tools:\n  shell:\n    expose_to: nobody\n",
-		"bad bytesize":   "tools:\n  shell:\n    max_output: lots\n",
 		"source no file": "sources:\n  - {name: a}\n",
 	}
 	for name, y := range tests {

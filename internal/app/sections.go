@@ -38,7 +38,7 @@ var sections []*section
 
 func init() {
 	sections = []*section{llmSection(), agentSection(), mcpSection(), mediaSection(), aliasesSection(), searchSection(),
-		sourcesSection(), toolsSection(), speakerSection(), loggingSection(), serverSection()}
+		sourcesSection(), speakerSection(), loggingSection(), serverSection()}
 }
 
 func withDefault(f *fieldDef, def any) *fieldDef { f.Default = def; return f }
@@ -62,7 +62,6 @@ func llmSection() *section {
 			strField("base_url", "接口基础地址（http/https），预设服务商不可编辑时由预设决定", func(c *config.Config) *string { return &c.LLM.BaseURL }),
 			apiKey,
 			strField("model", "模型名称", func(c *config.Config) *string { return &c.LLM.Model }),
-			floatField("temperature", "采样温度，范围 0–2", func(c *config.Config) *float64 { return &c.LLM.Temperature }),
 			durField("timeout", "单次请求超时时间（1s–10m）", func(c *config.Config) *time.Duration { return &c.LLM.Timeout }),
 			mapField("extra_body", "附加到 chat/completions 请求体的额外字段（JSON 对象，如 {\"enable_thinking\": false}）；留空则使用服务商预设的默认值",
 				func(c *config.Config) *map[string]any { return &c.LLM.ExtraBody }),
@@ -78,7 +77,7 @@ func llmSection() *section {
 	s.putFn = func(ctx context.Context, a *App, body map[string]json.RawMessage) (*PutResult, error) {
 		fe := fieldErrs{}
 		cur := a.Config().LLM
-		u := LLMUpdate{Provider: cur.Provider, Model: cur.Model, Temperature: cur.Temperature}
+		u := LLMUpdate{Provider: cur.Provider, Model: cur.Model}
 		dec := func(key string, dst any) bool {
 			raw, ok := body[key]
 			if !ok {
@@ -101,7 +100,6 @@ func llmSection() *section {
 		}
 		dec("model", &u.Model)
 		dec("api_key", &u.APIKey)
-		dec("temperature", &u.Temperature)
 		if tOK = dec("timeout", &timeout); tOK {
 			d, err := time.ParseDuration(strings.TrimSpace(timeout))
 			if err != nil {
@@ -115,7 +113,7 @@ func llmSection() *section {
 		}
 		for k := range body {
 			switch k {
-			case "provider", "base_url", "api_key", "model", "temperature", "timeout", "extra_body":
+			case "provider", "base_url", "api_key", "model", "timeout", "extra_body":
 			default:
 				fe[k] = "unknown field"
 			}
@@ -381,7 +379,6 @@ func searchSection() *section {
 				func(c *config.Config) *[]string { return &c.Search.StripPatterns }),
 			floatField("min_score", "最低匹配分数（0–100）", func(c *config.Config) *float64 { return &c.Search.MinScore }),
 			intField("limit", "默认返回结果数（1–20）", func(c *config.Config) *int { return &c.Search.Limit }),
-			intField("candidates", "模糊匹配的候选集大小（50–5000）", func(c *config.Config) *int { return &c.Search.Candidates }),
 		},
 	}
 	s.validate = func(a *App, old, n *config.Config, provided, changed keySet, fe fieldErrs) {
@@ -397,9 +394,6 @@ func searchSection() *section {
 		}
 		if provided["limit"] && (n.Search.Limit < 1 || n.Search.Limit > 20) {
 			fe["limit"] = "must be between 1 and 20"
-		}
-		if provided["candidates"] && (n.Search.Candidates < 50 || n.Search.Candidates > 5000) {
-			fe["candidates"] = "must be between 50 and 5000"
 		}
 	}
 	s.apply = func(ctx context.Context, a *App, old, n *config.Config, changed keySet) (map[string]any, *bool, error) {
@@ -547,7 +541,7 @@ func buildSources(c *config.Config) (*data.Sources, error) {
 	return set, nil
 }
 
-// ---------------------------------------------------------------- tools
+// ---------------------------------------------------------------- tool paths (config file / env only)
 
 // toolPath returns the effective absolute path of fzq / jq / yq in c.
 func toolPath(c *config.Config, name string) string {
@@ -573,88 +567,6 @@ func toolPath(c *config.Config, name string) string {
 		}
 	}
 	return p
-}
-
-func toolField(name string) *fieldDef {
-	ptr := func(c *config.Config) *string {
-		switch name {
-		case "fzq":
-			return &c.Tools.FzqPath
-		case "jq":
-			return &c.Tools.JqPath
-		}
-		return &c.Tools.YqPath
-	}
-	f := strField(name+"_path", fmt.Sprintf("%s 可执行文件路径（须存在且可执行）；留空使用工具目录下的 %s。修改后立即生效并重新自检", name, name), ptr)
-	f.get = func(c *config.Config) any { return toolPath(c, name) }
-	return f
-}
-
-func toolsSection() *section {
-	s := &section{
-		Name: "tools", Title: "外部工具",
-		Description: "fzq / jq / yq 可执行文件路径，以及（尚未实现的）shell 工具设置。",
-		fields: []*fieldDef{
-			toolField("fzq"), toolField("jq"), toolField("yq"),
-			boolField("shell.enabled", "启用 run_shell 工具（未实现：仅保存配置，暂无实际效果）", func(c *config.Config) *bool { return &c.Tools.Shell.Enabled }),
-			enumField("shell.expose_to", "shell 工具对谁开放（未实现：仅保存配置）", []string{"admin_console", "all"}, func(c *config.Config) *string { return &c.Tools.Shell.ExposeTo }),
-			durField("shell.timeout", "shell 单次执行超时（1s–5m；未实现：仅保存配置）", func(c *config.Config) *time.Duration { return &c.Tools.Shell.Timeout }),
-			sizeField("shell.max_output", "shell 输出上限（1KiB–16MiB；未实现：仅保存配置）", func(c *config.Config) *config.ByteSize { return &c.Tools.Shell.MaxOutput }),
-			stringsField("shell.readable_paths", "shell 允许读取的绝对路径（未实现：仅保存配置）", func(c *config.Config) *[]string { return &c.Tools.Shell.ReadablePaths }),
-		},
-	}
-	s.getFn = func(ctx context.Context, a *App) (map[string]any, error) {
-		out := s.values(a.Config())
-		out["health"] = a.HealthStatus()
-		return out, nil
-	}
-	s.validate = func(a *App, old, n *config.Config, provided, changed keySet, fe fieldErrs) {
-		for _, name := range []string{"fzq", "jq", "yq"} {
-			k := name + "_path"
-			if !provided[k] {
-				continue
-			}
-			if !changed[k] {
-				continue
-			}
-			p := toolPath(n, name)
-			if fi, err := os.Stat(p); err != nil {
-				fe[k] = "file does not exist: " + p
-			} else if !fi.Mode().IsRegular() {
-				fe[k] = "not a regular file"
-			} else if fi.Mode().Perm()&0o111 == 0 {
-				fe[k] = "file is not executable"
-			}
-		}
-		sh := &n.Tools.Shell
-		if provided["shell.timeout"] && (sh.Timeout < time.Second || sh.Timeout > 5*time.Minute) {
-			fe["shell.timeout"] = "must be between 1s and 5m"
-		}
-		if provided["shell.max_output"] && (sh.MaxOutput < 1<<10 || sh.MaxOutput > 16<<20) {
-			fe["shell.max_output"] = "must be between 1KiB and 16MiB"
-		}
-		if provided["shell.readable_paths"] {
-			for i, p := range sh.ReadablePaths {
-				if !filepath.IsAbs(p) {
-					fe[fmt.Sprintf("shell.readable_paths[%d]", i)] = "must be an absolute path"
-				}
-			}
-		}
-	}
-	s.apply = func(ctx context.Context, a *App, old, n *config.Config, changed keySet) (map[string]any, *bool, error) {
-		// resolve to absolute effective paths for the live config
-		n.Tools.FzqPath, n.Tools.JqPath, n.Tools.YqPath = toolPath(n, "fzq"), toolPath(n, "jq"), toolPath(n, "yq")
-		a.Syncer.SetTools(n.Tools)
-		a.Index.Reconfigure(n.Tools.FzqPath, n.Search.StripPatterns, n.Search.Candidates)
-		applied := map[string]any{}
-		if changed.any("fzq_path", "jq_path", "yq_path") {
-			h := SelfCheck(ctx, n.Tools.FzqPath, n.Tools.JqPath, n.Tools.YqPath)
-			a.setHealth(h)
-			applied["health"] = h
-		}
-		return applied, nil, nil
-	}
-	return s
 }
 
 // ---------------------------------------------------------------- speaker

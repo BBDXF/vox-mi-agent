@@ -547,10 +547,9 @@ func TestSettingsRedactionAndPut(t *testing.T) {
 	}
 	var s struct {
 		LLM struct {
-			BaseURL     string  `json:"base_url"`
-			Model       string  `json:"model"`
-			Masked      string  `json:"api_key_masked"`
-			Temperature float64 `json:"temperature"`
+			BaseURL string `json:"base_url"`
+			Model   string `json:"model"`
+			Masked  string `json:"api_key_masked"`
 		} `json:"llm"`
 		Tools   map[string]struct{ Path string }      `json:"tools"`
 		Sources []struct{ Name, Format, File string } `json:"sources"`
@@ -573,7 +572,6 @@ func TestSettingsRedactionAndPut(t *testing.T) {
 	for _, body := range []string{
 		`{"base_url":"ftp://x","model":"m","temperature":0.5}`,
 		`{"base_url":"http://x","model":"","temperature":0.5}`,
-		`{"base_url":"http://x","model":"m","temperature":5}`,
 		`not json`,
 	} {
 		if resp, _ := e.do(t, "PUT", "/api/settings/llm", body); resp.StatusCode != 400 {
@@ -588,7 +586,7 @@ func TestSettingsRedactionAndPut(t *testing.T) {
 	}
 	_, b = e.do(t, "GET", "/api/settings", "")
 	json.Unmarshal(b, &s)
-	if s.LLM.BaseURL != "http://127.0.0.1:9/v1" || s.LLM.Model != "qwen-x" || s.LLM.Temperature != 0.7 || s.LLM.Masked != "****7890" {
+	if s.LLM.BaseURL != "http://127.0.0.1:9/v1" || s.LLM.Model != "qwen-x" || s.LLM.Masked != "****7890" {
 		t.Fatalf("after put: %s", b)
 	}
 
@@ -607,7 +605,7 @@ func TestSettingsRedactionAndPut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LLM.BaseURL != "http://127.0.0.1:9/v1" || cfg.LLM.Model != "qwen-x" || cfg.LLM.Temperature != 0.7 || cfg.LLM.APIKey != "sk-new-abcdef" {
+	if cfg.LLM.BaseURL != "http://127.0.0.1:9/v1" || cfg.LLM.Model != "qwen-x" || cfg.LLM.APIKey != "sk-new-abcdef" {
 		t.Errorf("reloaded llm = %+v", cfg.LLM)
 	}
 	if cfg.Server.Listen == "" || cfg.Search.MinScore != 65 || cfg.LLM.Timeout != 60*time.Second {
