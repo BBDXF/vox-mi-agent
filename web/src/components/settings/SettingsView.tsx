@@ -10,6 +10,8 @@ import {
   RefreshCw,
   Sliders,
   Info,
+  Bot,
+  Plug,
 } from 'lucide-react';
 import { accent, type Area } from '@/lib/accent';
 import { IconChip } from '@/components/ui/icon-chip';
@@ -25,6 +27,8 @@ import {
 import { LLMProviderCard } from './LLMProviderCard';
 import { SourcesTableEditor } from './SourcesTableEditor';
 import { SpeakerSettings } from './speaker/SpeakerSettings';
+import { AgentSettings } from './AgentSettings';
+import { McpSettings } from './McpSettings';
 import { GenericSectionForm } from './GenericSectionForm';
 
 // Mapping section keys to display names and icons (曲库 and 别名 are now on the dedicated 曲库 page)
@@ -40,6 +44,11 @@ const SECTION_METADATA: Record<
   server: { label: '服务', icon: Server },
   logging: { label: '日志', icon: ScrollText },
 };
+
+const EXTRA_SECTIONS = [
+  { name: 'agent', label: '智能体', icon: Bot },
+  { name: 'mcp', label: 'MCP', icon: Plug },
+];
 
 const EXCLUDED_SECTIONS = new Set(['media', 'aliases']);
 
@@ -136,6 +145,21 @@ export function SettingsView({ section, onSectionChange }: { section?: string; o
               </button>
             );
           })}
+          {EXTRA_SECTIONS.map((x) => (
+            <button
+              key={x.name}
+              type="button"
+              onClick={() => setActiveSection(x.name)}
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors shrink-0 md:w-full text-left select-none ${
+                activeSection === x.name
+                  ? 'bg-primary text-primary-foreground shadow-xs font-semibold'
+                  : 'text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+              }`}
+            >
+              <x.icon className={`w-4 h-4 shrink-0 ${activeSection === x.name ? 'text-primary-foreground' : accent(x.name as Area).text}`} />
+              <span className="truncate">{x.label}</span>
+            </button>
+          ))}
           <button
             type="button"
             onClick={() => setActiveSection('about')}
@@ -152,7 +176,7 @@ export function SettingsView({ section, onSectionChange }: { section?: string; o
 
         {/* Right Content Area */}
         <div className="md:col-span-9 lg:col-span-9 min-w-0 space-y-6">
-          {activeSection === 'about' ? <AboutCard /> : !currentSection ? (
+          {activeSection === 'about' ? <AboutCard /> : activeSection === 'agent' ? <AgentSettings /> : activeSection === 'mcp' ? <McpSettings /> : !currentSection ? (
             <div className="text-sm text-muted-foreground py-12 text-center">
               {loading ? '正在加载配置…' : '配置加载失败，请点击「刷新配置」重试'}
             </div>

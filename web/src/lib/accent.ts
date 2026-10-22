@@ -32,7 +32,7 @@ export const PALETTE: Record<AccentColor, AccentClasses> = {
 export const AREA = {
   guide: 'amber', chat: 'blue', media: 'violet', logs: 'slate', settings: 'zinc',
   llm: 'indigo', search: 'cyan', sources: 'teal', tools: 'orange',
-  speaker: 'rose', server: 'gray', logging: 'slate', about: 'sky',
+  agent: 'violet', mcp: 'teal', speaker: 'rose', server: 'gray', logging: 'slate', about: 'sky',
 } as const satisfies Record<string, AccentColor>;
 export type Area = keyof typeof AREA;
 

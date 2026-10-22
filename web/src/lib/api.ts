@@ -837,3 +837,47 @@ export async function testDataSource(
   });
   return handleResponse<SourceTestResponse>(res);
 }
+
+// ---------------- Agent / MCP ----------------
+export interface AgentSettings {
+  system_prompt: string;
+  max_steps: number;
+  temperature: number | null;
+  turn_timeout: string;
+  history_messages: number;
+  tools_disabled: string[];
+  default_system_prompt: string;
+  available_tools: { name: string; description: string }[];
+}
+export interface McpServer {
+  name: string;
+  enabled: boolean;
+  transport: 'http' | 'sse' | 'stdio';
+  url: string;
+  headers: Record<string, string>;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  timeout: string;
+  tools_allow: string[];
+}
+export interface McpToolInfo { name: string; original: string; description?: string }
+export interface McpStatusItem {
+  name: string; enabled: boolean; transport: string; connected: boolean; error?: string; tools?: McpToolInfo[];
+}
+export interface McpTestResult { ok: boolean; error?: string; latency_ms?: number; tools?: McpToolInfo[] }
+
+export async function getAgentSettings(): Promise<AgentSettings> {
+  return handleResponse<AgentSettings>(await fetch('api/settings/agent'));
+}
+export async function getMcpSettings(): Promise<{ servers: McpServer[] }> {
+  return handleResponse(await fetch('api/settings/mcp'));
+}
+export async function getMcpStatus(): Promise<{ servers: McpStatusItem[] }> {
+  return handleResponse(await fetch('api/mcp/status'));
+}
+export async function testMcpServer(server: McpServer): Promise<McpTestResult> {
+  return handleResponse(await fetch('api/mcp/test', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(server),
+  }));
+}
