@@ -163,15 +163,6 @@ export function Sidebar({
           <Activity className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
         </div>
 
-        <button
-          type="button"
-          onClick={() => onOpenAbout}
-          className="w-full text-left px-2 text-[10px] font-mono text-muted-foreground/70 hover:text-foreground truncate"
-          title="关于"
-        >
-          {ver ? `v${ver.version}${ver.commit ? ` · ${ver.commit.slice(0, 7)}` : ''}` : ' '}
-        </button>
-
         {/* Theme Toggle */}
         <div className="flex items-center justify-between pt-1">
           <span className="text-[11px] text-muted-foreground px-2">外观主题</span>
@@ -189,6 +180,16 @@ export function Sidebar({
             )}
           </Button>
         </div>
+
+        {/* Version (bottom-most) → 设置 / 关于 */}
+        <button
+          type="button"
+          onClick={() => onOpenAbout()}
+          className="w-full text-left px-2 pt-1 text-[10px] font-mono text-muted-foreground/70 hover:text-foreground hover:underline truncate cursor-pointer"
+          title="关于"
+        >
+          {ver ? `v${ver.version}${ver.commit && ver.commit !== ver.version ? ` · ${ver.commit.slice(0, 7)}` : ''}` : 'v…'}
+        </button>
       </div>
     </div>
   );
