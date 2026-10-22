@@ -8,8 +8,7 @@ maintainer=BBDXF
 maintainer_url=https://github.com/BBDXF/vox-mi-agent
 desktop_uidir=ui
 desktop_applaunchname=vox-mi-agent.main
-service_port=8080
+service_port=18080
 checkport=true
 ctl_stop=true
-# TODO(verify on device): changelog vs change_log key name; platform=all with multi-arch image;
-# service_port is fixed at 8080 while the wizard may pick another host port (ui/config uses ${wizard_port}) — check checkport/TRIM_SERVICE_PORT behaviour
+# TODO(verify on device): changelog vs change_log key name; platform=all with multi-arch image

@@ -1,6 +1,5 @@
 [{"stepTitle":"Vox 设置","items":[
-{"type":"text","field":"wizard_port","label":"端口","initValue":"8080","rules":[{"required":true}]},
 {"type":"text","field":"wizard_music_dir","label":"音乐目录（NAS 路径）","initValue":"/vol1/1000/音乐","rules":[{"required":true}]},
-{"type":"text","field":"wizard_public_base_url","label":"对外地址（可选，如 http://NAS-IP:8080）","initValue":"","rules":[{"required":false}]},
+{"type":"text","field":"wizard_public_base_url","label":"对外地址（音箱拉取音频用，填 http://NAS局域网IP:18080）","initValue":"","rules":[{"required":false}]},
 {"type":"tips","helpText":"大模型与小米账号请安装后在 Web 界面中配置。"}
 ]}]

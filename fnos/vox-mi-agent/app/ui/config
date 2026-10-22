@@ -1,1 +1,1 @@
-{".url":{"vox-mi-agent.main":{"title":"Vox","icon":"images/icon_{0}.png","type":"url","protocol":"http","port":"${wizard_port}","url":"/app/vox/","allUsers":false}}}
+{".url":{"vox-mi-agent.main":{"title":"Vox","icon":"images/icon_{0}.png","type":"url","protocol":"http","port":"18080","url":"/app/vox/","allUsers":false}}}

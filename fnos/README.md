@@ -5,7 +5,7 @@
 ## 文件说明（`vox-mi-agent/`）
 - `manifest`：应用元信息（版本由构建时替换 `@VERSION@`）
 - `ICON.PNG` / `ICON_256.PNG`、`app/ui/images/`：占位图标，可替换
-- `app/ui/config`：桌面入口（URL 方式，端口 8080，路径 `/app/vox/`）
+- `app/ui/config`：桌面入口（URL 方式，端口 18080（manifest service_port），路径 `/app/vox/`）
 - `app/docker/docker-compose.yaml` + `.env`：容器定义；`.env` 由向导回调改写
 - `cmd/main`：start/stop/status（运行 0，未运行 3）
 - `cmd/*_init`、`*_callback`：生命周期钩子；`install_callback`/`config_callback` 经 `write_env.sh` 写 `.env`
@@ -23,7 +23,7 @@ fnpack build vox-mi-agent   # 在 dist/fpk 内（build.sh 检测到 fnpack 会�
 ```sh
 appcenter-cli install-fpk vox-mi-agent.fpk
 ```
-或在应用中心「手动安装」上传。安装后访问 `http://NAS-IP:8080/app/vox/`，在 Web 中配置 LLM 与小米账号。
+或在应用中心「手动安装」上传。安装后访问 `http://NAS-IP:18080/app/vox/`，在 Web 中配置 LLM 与小米账号。
 
 ## 真机待验证清单
 - [ ] 向导字段是否以 `wizard_*` 环境变量传给 cmd 脚本
@@ -33,6 +33,6 @@ appcenter-cli install-fpk vox-mi-agent.fpk
 - [ ] 桌面入口 url 方式 vs iframe
 - [ ] 未来可选：网关模式（gatewayPrefix + socket）提供 `/app/vox`
 - [ ] manifest 更新日志键名：`changelog` 还是 `change_log`
-- [ ] `ui/config` 的 port 已写成 `${wizard_port}`：确认改端口后桌面入口打开的是新端口；`manifest` 的 `service_port=8080` 与端口检查（`checkport`、`TRIM_SERVICE_PORT`）是否也需跟随
+- [ ] 端口固定为 18080（manifest service_port / compose `TRIM_SERVICE_PORT` / ui/config）；确认 checkport 生效、桌面入口可打开
 - [ ] 平台自行启动 compose 时能否读到 `docker/.env`（`cmd/main` 已显式 `--env-file`）
 - [ ] 卸载向导 `wizard_keep_data` 的处理（目前 uninstall 回调未删数据）
