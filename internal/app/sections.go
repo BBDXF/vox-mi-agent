@@ -778,6 +778,8 @@ func speakerSection() *section {
 				switch {
 				case d.DeviceID == "":
 					fe[pre+"device_id"] = "required"
+				case d.DeviceID == "debug":
+					fe[pre+"device_id"] = "the debug device is built in and cannot be configured"
 				case seen[d.DeviceID]:
 					fe[pre+"device_id"] = "duplicate device_id"
 				}

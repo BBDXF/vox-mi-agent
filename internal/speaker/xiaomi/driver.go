@@ -17,7 +17,8 @@ type Driver struct {
 
 	mu      sync.Mutex
 	devs    map[string]MinaDevice // by deviceID, from the last device_list
-	lastNLP map[string]string     // M01: last seen query per device
+	devsAt  time.Time
+	lastNLP map[string]string // M01: last seen query per device
 }
 
 var _ speaker.Driver = (*Driver)(nil)
@@ -41,6 +42,7 @@ func (d *Driver) refresh(ctx context.Context) ([]MinaDevice, error) {
 	}
 	d.mu.Lock()
 	d.devs = make(map[string]MinaDevice, len(l))
+	d.devsAt = time.Now()
 	for _, x := range l {
 		d.devs[x.DeviceID] = x
 	}
@@ -60,6 +62,28 @@ func (d *Driver) info(ctx context.Context, id string) MinaDevice {
 		}
 	}
 	return x
+}
+
+// Lookup finds an account device by id using a 60s device-list cache.
+func (d *Driver) Lookup(ctx context.Context, id string) (speaker.Device, bool, error) {
+	d.mu.Lock()
+	x, ok := d.devs[id]
+	fresh := time.Since(d.devsAt) < 60*time.Second
+	d.mu.Unlock()
+	if !ok || !fresh {
+		if _, err := d.refresh(ctx); err != nil {
+			return speaker.Device{}, false, err
+		}
+		d.mu.Lock()
+		x, ok = d.devs[id]
+		d.mu.Unlock()
+	}
+	if !ok {
+		return speaker.Device{}, false, nil
+	}
+	online := x.Presence == "" || strings.EqualFold(x.Presence, "online")
+	return speaker.Device{DeviceID: x.DeviceID, Name: firstNonEmpty(x.Alias, x.Name), Hardware: x.Hardware,
+		Enabled: true, PlayMode: "auto", TTSMode: "auto", Online: &online}, true, nil
 }
 
 func (d *Driver) hardware(ctx context.Context, dev speaker.Device) string {

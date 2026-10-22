@@ -33,7 +33,7 @@ export interface SpeakerTestReq {
   action: 'tts' | 'play_url' | 'pause' | 'play' | 'stop' | 'volume' | 'status';
   text?: string; url?: string; volume?: number;
 }
-export interface SpeakerTestRes { ok: boolean; action?: string; error?: string; elapsed_ms?: number; volume?: number; status?: { status: number; volume: number } }
+export interface SpeakerTestRes { ok: boolean; note?: string; action?: string; error?: string; elapsed_ms?: number; volume?: number; status?: { status: number; volume: number } }
 export interface MockEvent {
   seq: number; ts: number | string; device_id?: string; conversation_id?: string; turn_id?: string;
   kind: string;

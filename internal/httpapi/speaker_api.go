@@ -139,16 +139,30 @@ func (s *Server) speakerTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := s.app.Speaker
-	dev, err := m.Resolve(in.DeviceID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	drv := m.Driver()
+	var drv speaker.Driver = m.Driver()
+	note := ""
+	dev, err := m.Resolve(in.DeviceID)
+	if err != nil {
+		// Not saved yet: look it up in the Xiaomi account (test before save).
+		found := false
+		if in.DeviceID != "" && in.DeviceID != speaker.DebugDeviceID {
+			xm := s.app.Xiaomi()
+			if d, ok, lerr := xm.Lookup(ctx, in.DeviceID); lerr == nil && ok {
+				dev, drv, note, found = d, xm, "设备尚未保存", true
+			}
+		}
+		if !found {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	start := time.Now()
 	res := map[string]any{"action": in.Action, "device_id": dev.DeviceID}
+	if note != "" {
+		res["note"] = note
+	}
 	switch in.Action {
 	case "tts":
 		if strings.TrimSpace(in.Text) == "" {

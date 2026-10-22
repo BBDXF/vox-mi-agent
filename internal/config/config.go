@@ -350,6 +350,7 @@ func load(dataDir string, lookup func(string) (string, bool)) (*Config, error) {
 	}
 	cfg.DataDir = dataDir
 	cfg.resolve(lookup)
+	cfg.stripDebugDevice()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -663,4 +664,16 @@ func (s Speaker) validate() error {
 		}
 	}
 	return nil
+}
+
+// stripDebugDevice removes the built-in debug device from the real device
+// list (migration: it must never be persisted in speaker.xiaomi.devices).
+func (c *Config) stripDebugDevice() {
+	out := c.Speaker.Xiaomi.Devices[:0:0]
+	for _, d := range c.Speaker.Xiaomi.Devices {
+		if strings.TrimSpace(d.DeviceID) != "debug" {
+			out = append(out, d)
+		}
+	}
+	c.Speaker.Xiaomi.Devices = out
 }

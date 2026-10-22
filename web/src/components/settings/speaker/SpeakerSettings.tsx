@@ -170,6 +170,7 @@ function TestPanel({ deviceId, defVolume }: { deviceId: string; defVolume: numbe
       {res && (
         <div className={`rounded border p-2 font-mono break-all ${res.ok ? 'border-emerald-500/30' : 'border-destructive/40 text-destructive'}`}>
           {res.ok ? '成功' : '失败'}{res.elapsed_ms != null && ` · ${res.elapsed_ms}ms`}
+          {res.note && <div className="text-amber-600">{res.note}</div>}
           {res.error && <div>{res.error}</div>}
           {res.status && <div className="text-muted-foreground">状态：{['空闲', '播放中', '已暂停', '已停止'][res.status.status] ?? res.status.status} · 音量 {res.status.volume}</div>}
           {res.ok && res.volume != null && <div className="text-muted-foreground">音量已设为 {res.volume}</div>}
@@ -201,7 +202,9 @@ function Chips({ label, help, items, onChange, error }: { label: string; help?: 
 
 export function SpeakerSettings() {
   const { success, error: toastError } = useToast();
-  const [v, setV] = useState<Record<string, any> | null>(null);
+  const [v, setVRaw] = useState<Record<string, any> | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const setV: typeof setVRaw = (x) => { setDirty(true); setVRaw(x); };
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<SpeakerStatus | null>(null);
   const [saving, setSaving] = useState(false);
@@ -211,7 +214,7 @@ export function SpeakerSettings() {
 
   const loadStatus = useCallback(() => getSpeakerStatus().then(setStatus).catch(() => {}), []);
   useEffect(() => {
-    getSectionSettings('speaker').then(setV).catch((e) => toastError(e.message || '加载音箱配置失败'));
+    getSectionSettings('speaker').then((x) => { const xm = x?.xiaomi; setVRaw(xm?.devices ? { ...x, xiaomi: { ...xm, devices: xm.devices.filter((d: any) => d.device_id !== 'debug') } } : x); }).catch((e) => toastError(e.message || '加载音箱配置失败'));
     loadStatus();
     const t = setInterval(loadStatus, 5000);
     return () => clearInterval(t);
@@ -235,6 +238,7 @@ export function SpeakerSettings() {
     setSaving(true); setErrs({});
     try {
       const r = await updateSectionSettings('speaker', v);
+      setDirty(false);
       success((r as any)?.restart_required ? '已保存，部分设置需重启生效' : '音箱配置已保存');
       loadStatus();
     } catch (e: any) {
@@ -255,6 +259,12 @@ export function SpeakerSettings() {
 
   return (
     <div className="space-y-6">
+      {dirty && (
+        <div className="sticky top-0 z-20 flex items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-background/95 backdrop-blur px-4 py-2 shadow">
+          <span className="text-sm text-amber-600">有未保存的更改</span>
+          <Button size="sm" onClick={save} disabled={saving} className="gap-2"><Save className="w-4 h-4" />{saving ? '保存中…' : '保存'}</Button>
+        </div>
+      )}
       <Card>
         <CardHeader><CardTitle>驱动</CardTitle><CardDescription>模拟音箱：仅调试音箱；小米音箱：真实设备 + 调试音箱。{driver !== (status?.driver ?? driver) && ' 保存后生效。'}</CardDescription></CardHeader>
         <CardContent className="grid sm:grid-cols-2 gap-4">
