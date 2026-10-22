@@ -41,7 +41,7 @@ func TestSettingsSchemaAndSectionGets(t *testing.T) {
 			t.Errorf("restart flag of %s", s.Name)
 		}
 	}
-	if got := strings.Join(names, ","); got != "llm,agent,mcp,media,aliases,search,sources,speaker,logging,server" {
+	if got := strings.Join(names, ","); got != "llm,agent,mcp,media,aliases,search,speaker,logging,server" {
 		t.Fatalf("sections %s", got)
 	}
 	for _, n := range names {

@@ -31,7 +31,7 @@ func (*fuzzyMatch) Name() string { return "fuzzy_match" }
 func (t *fuzzyMatch) Description() string {
 	return sourcesHint(t.d, "Fuzzy-match a spoken/voice-style query (Chinese homophones, pinyin, typos, partial input) against the records of "+
 		"a data source and return the closest records with scores. Provide exactly one of 'source' "+
-		"(a registered data source name) or 'input' (inline data, max 256 KiB; set 'format' for it). "+
+		"(a built-in data source name, default 'media_library') or 'input' (inline data, max 256 KiB; set 'format' for it). "+
 		"'ambiguous' is true when the top two scores are close. count 0 means no match.")
 }
 
@@ -40,7 +40,7 @@ func (*fuzzyMatch) Schema() json.RawMessage {
   "type": "object",
   "properties": {
     "query": {"type": "string", "minLength": 1, "maxLength": 200, "description": "The user's spoken query, a single line."},
-    "source": {"type": "string", "description": "Registered data source name. Mutually exclusive with 'input': provide exactly one."},
+    "source": {"type": "string", "description": "Built-in data source name (default 'media_library'). Mutually exclusive with 'input'."},
     "input": {"type": "string", "maxLength": 262144, "description": "Inline data to search (max 256 KiB). Mutually exclusive with 'source': provide exactly one."},
     "format": {"type": "string", "enum": ["auto", "lines", "json", "jsonl", "yaml"], "description": "Format of 'input'; ignored for 'source'."},
     "records": {"type": "string", "maxLength": 200, "pattern": "^[.\\w\\[\\]\" -]*$", "description": "Path of the records in a JSON/YAML document, e.g. '.data.items[]'."},

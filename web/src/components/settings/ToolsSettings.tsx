@@ -6,7 +6,6 @@ import { IconChip } from '@/components/ui/icon-chip';
 import { useToast } from '@/components/ui/toast';
 import { getAgentSettings, updateSectionSettings, type AgentSettings as AS } from '@/lib/api';
 import { Switch } from './AgentSettings';
-import { SourcesTableEditor } from './SourcesTableEditor';
 import { McpSettings } from './McpSettings';
 
 function BuiltinToolsCard() {
@@ -61,7 +60,6 @@ export function ToolsSettings() {
   return (
     <div className="space-y-6">
       <BuiltinToolsCard />
-      <SourcesTableEditor />
       <McpSettings />
     </div>
   );

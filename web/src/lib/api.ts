@@ -103,16 +103,6 @@ export interface ToolStatus {
   error?: string;
 }
 
-export interface SourceInfo {
-  name: string;
-  format: string;
-  file: string;
-  records?: string;
-  keys?: string[];
-  extract?: string;
-  strip?: string[];
-}
-
 export type MediaTagMode = 'filename_first' | 'tags_first' | 'filename_only';
 
 export interface MediaConfig {
@@ -205,51 +195,6 @@ export interface MediaArtistsResponse {
   items: MediaArtistItem[];
 }
 
-// ---------------- Data Sources Types ----------------
-
-export interface DataSourceItem {
-  name: string;
-  builtin: boolean;
-  format: string;
-  file: string;
-  exists?: boolean;
-  records?: string;
-  keys?: string[];
-  extract?: string;
-  strip?: string[];
-  count?: number | null;
-  size_bytes?: number;
-  updated_at?: string | null;
-  description?: string;
-}
-
-export interface DataSourcesResponse {
-  items: DataSourceItem[];
-}
-
-export interface SourcePreviewResponse {
-  total: number;
-  items: any[];
-  error?: string;
-}
-
-export interface SourceTestRequest {
-  tool: 'fuzzy_match' | 'query_json' | 'query_yaml';
-  query?: string;
-  filter?: string;
-  expr?: string;
-  limit?: number;
-  keys?: string[];
-  slurp?: boolean;
-  raw?: boolean;
-  output_format?: string;
-}
-
-export interface SourceTestResponse {
-  elapsed_ms?: number;
-  [key: string]: any;
-}
-
 // ---------------- Schema-Driven Settings Types ----------------
 
 export type FieldType =
@@ -276,7 +221,7 @@ export interface SchemaField {
 }
 
 export interface SchemaSection {
-  name: string; // 'llm' | 'media' | 'aliases' | 'search' | 'sources' | 'tools' | 'speaker' | 'server' | 'logging'
+  name: string; // 'llm' | 'media' | 'aliases' | 'search' | 'tools' | 'speaker' | 'server' | 'logging'
   title?: string;
   fields: SchemaField[];
 }
@@ -382,7 +327,6 @@ export interface TracePayloadResponse {
 export interface SettingsResponse {
   llm: LLMSettings;
   tools: Record<string, ToolStatus>;
-  sources: SourceInfo[];
   media: MediaConfig;
   speaker: SpeakerConfig;
 }
@@ -800,43 +744,6 @@ export async function getMediaArtists(): Promise<MediaArtistsResponse> {
 
   const res = await fetch('api/media/artists');
   return handleResponse<MediaArtistsResponse>(res);
-}
-
-/**
- * GET api/sources
- */
-export async function getDataSources(): Promise<DataSourcesResponse> {
-
-  const res = await fetch('api/sources');
-  return handleResponse<DataSourcesResponse>(res);
-}
-
-/**
- * GET api/sources/{name}/preview?limit=20
- */
-export async function getSourcePreview(
-  name: string,
-  limit: number = 20
-): Promise<SourcePreviewResponse> {
-
-  const res = await fetch(`api/sources/${encodeURIComponent(name)}/preview?limit=${limit}`);
-  return handleResponse<SourcePreviewResponse>(res);
-}
-
-/**
- * POST api/sources/{name}/test
- */
-export async function testDataSource(
-  name: string,
-  body: SourceTestRequest
-): Promise<SourceTestResponse> {
-
-  const res = await fetch(`api/sources/${encodeURIComponent(name)}/test`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return handleResponse<SourceTestResponse>(res);
 }
 
 // ---------------- Agent / MCP ----------------

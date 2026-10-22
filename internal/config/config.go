@@ -48,16 +48,15 @@ const (
 type Config struct {
 	DataDir string `yaml:"-" json:"data_dir"`
 
-	Server  Server   `yaml:"server" json:"server"`
-	LLM     LLM      `yaml:"llm" json:"llm"`
-	Tools   Tools    `yaml:"tools" json:"tools"`
-	Sources []Source `yaml:"sources" json:"sources"`
-	Media   Media    `yaml:"media" json:"media"`
-	Search  Search   `yaml:"search" json:"search"`
-	Speaker Speaker  `yaml:"speaker" json:"speaker"`
-	Logging Logging  `yaml:"logging" json:"logging"`
-	Agent   Agent    `yaml:"agent" json:"agent"`
-	MCP     MCP      `yaml:"mcp" json:"mcp"`
+	Server  Server  `yaml:"server" json:"server"`
+	LLM     LLM     `yaml:"llm" json:"llm"`
+	Tools   Tools   `yaml:"tools" json:"tools"`
+	Media   Media   `yaml:"media" json:"media"`
+	Search  Search  `yaml:"search" json:"search"`
+	Speaker Speaker `yaml:"speaker" json:"speaker"`
+	Logging Logging `yaml:"logging" json:"logging"`
+	Agent   Agent   `yaml:"agent" json:"agent"`
+	MCP     MCP     `yaml:"mcp" json:"mcp"`
 }
 
 // Agent tunes the think-act loop. Temperature is the single sampling knob
@@ -220,19 +219,8 @@ type Tools struct {
 }
 
 // MediaLibrarySource is the reserved name of the built-in, read-only data
-// source over the synced song list; user sources may not use it.
+// source over the synced song list.
 const MediaLibrarySource = "media_library"
-
-// Source is a registered data source (§6.3). The LLM only ever sees Name.
-type Source struct {
-	Name    string   `yaml:"name" json:"name"`
-	File    string   `yaml:"file" json:"file"`
-	Format  string   `yaml:"format" json:"format"`
-	Records string   `yaml:"records" json:"records"`
-	Keys    []string `yaml:"keys" json:"keys"`
-	Extract string   `yaml:"extract" json:"extract"`
-	Strip   []string `yaml:"strip" json:"strip"`
-}
 
 type Media struct {
 	Folders         []string      `yaml:"folders" json:"folders"`
@@ -544,19 +532,6 @@ func (c *Config) Validate() error {
 	if err := c.Speaker.validate(); err != nil {
 		return err
 	}
-	seen := map[string]bool{}
-	for i, s := range c.Sources {
-		if s.Name == "" || s.File == "" {
-			return fmt.Errorf("config: sources[%d]: name and file are required", i)
-		}
-		if s.Name == MediaLibrarySource {
-			return fmt.Errorf("config: sources[%d]: name %q is reserved for the built-in media library source", i, s.Name)
-		}
-		if seen[s.Name] {
-			return fmt.Errorf("config: duplicate source name %q", s.Name)
-		}
-		seen[s.Name] = true
-	}
 	if c.Media.SyncInterval < 0 {
 		return errors.New("config: media.sync_interval must be >= 0")
 	}
@@ -606,29 +581,8 @@ func ParseListen(s string) (network, addr string, err error) {
 	return "", "", fmt.Errorf("config: server.listen %q: scheme must be tcp or unix", s)
 }
 
-// SourcesDir is where relative source files live.
-func (c *Config) SourcesDir() string { return filepath.Join(c.DataDir, "sources") }
-
-// SourcePath resolves a source's file (relative -> <dataDir>/sources).
-func (c *Config) SourcePath(s Source) string {
-	if filepath.IsAbs(s.File) {
-		return s.File
-	}
-	return filepath.Join(c.SourcesDir(), s.File)
-}
-
 // DBPath is the SQLite database location.
 func (c *Config) DBPath() string { return filepath.Join(c.DataDir, "app.db") }
-
-// Source returns a registered source by name.
-func (c *Config) Source(name string) (Source, bool) {
-	for _, s := range c.Sources {
-		if s.Name == name {
-			return s, true
-		}
-	}
-	return Source{}, false
-}
 
 // Clone returns a deep copy (slices, maps and nested structs are not shared).
 func (c *Config) Clone() *Config {
@@ -653,12 +607,6 @@ func (c *Config) Clone() *Config {
 		m.Args = append([]string(nil), m.Args...)
 		m.ToolsAllow = append([]string(nil), m.ToolsAllow...)
 		cp.MCP.Servers[i] = m
-	}
-	cp.Sources = make([]Source, len(c.Sources))
-	for i, s := range c.Sources {
-		s.Keys = append([]string(nil), s.Keys...)
-		s.Strip = append([]string(nil), s.Strip...)
-		cp.Sources[i] = s
 	}
 	return &cp
 }
@@ -848,6 +796,9 @@ func migrateLegacy(raw []byte) ([]byte, *float64, error) {
 		if drop(t, "shell") != nil {
 			changed = true
 		}
+	}
+	if drop(root, "sources") != nil { // removed user-defined data sources
+		changed = true
 	}
 	if !changed {
 		return raw, nil, nil

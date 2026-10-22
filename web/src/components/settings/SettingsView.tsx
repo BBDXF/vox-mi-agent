@@ -43,7 +43,7 @@ const EXTRA_SECTIONS = [
   { name: 'tools', label: '工具', icon: Wrench },
 ];
 
-const EXCLUDED_SECTIONS = new Set(['media', 'aliases', 'search', 'sources', 'tools', 'mcp']);
+const EXCLUDED_SECTIONS = new Set(['media', 'aliases', 'search', 'tools', 'mcp', 'agent']);
 
 export function SettingsView({ section, onSectionChange }: { section?: string; onSectionChange?: (s: string) => void } = {}) {
   const { error: toastError } = useToast();
@@ -126,6 +126,7 @@ export function SettingsView({ section, onSectionChange }: { section?: string; o
               <button
                 key={sec.name}
                 type="button"
+                style={{ order: sec.name === 'llm' ? 0 : 2 }}
                 onClick={() => setActiveSection(sec.name)}
                 className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors shrink-0 md:w-full text-left select-none ${
                   isActive
@@ -142,6 +143,7 @@ export function SettingsView({ section, onSectionChange }: { section?: string; o
             <button
               key={x.name}
               type="button"
+              style={{ order: 1 }}
               onClick={() => setActiveSection(x.name)}
               className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors shrink-0 md:w-full text-left select-none ${
                 activeSection === x.name
@@ -155,6 +157,7 @@ export function SettingsView({ section, onSectionChange }: { section?: string; o
           ))}
           <button
             type="button"
+            style={{ order: 3 }}
             onClick={() => setActiveSection('about')}
             className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors shrink-0 md:w-full text-left select-none ${
               activeSection === 'about'

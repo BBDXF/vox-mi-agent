@@ -285,10 +285,10 @@ desktop_applaunchname=fnos-ai-agent.main
 Tool 定义的 schema 直接对齐 MCP 规范，便于 P3 平滑接入 `mark3labs/mcp-go`（9.2k★，MIT，v1.3.0，活跃维护）。
 
 **数据源（`source`）约定**：`fuzzy_match` / `query_json` / `query_yaml` 的输入二选一：
-- `source`：**已注册数据源的名字**（如 `media_library` → `/data/media/songs.jsonl`、`devices`、`contacts`），由服务端映射到 `/data/sources/` 下的文件或内部生成的 JSON 快照。LLM **永远拿不到、也不能传入文件路径**。
+- `source`：**内置数据源的名字**（目前仅 `media_library` → `/data/media/songs.jsonl`，同步生成，只读；省略时默认即为它），由服务端映射到文件。LLM **永远拿不到、也不能传入文件路径**。
 - `input`：LLM 直接给出的内联文本（如上一个工具的输出），上限 256 KiB。
 
-数据源注册表在 `config.yaml` 的 `sources:` 中声明（名称、文件、格式、默认 `records` 路径、默认 `keys`），UI 只读展示。
+不支持用户自定义数据源（已移除）；数据源仅有内置的 `media_library`，旧配置中的 `sources:` 加载时会被忽略丢弃。
 
 **组合用法**：先 `query_json` 过滤/投影，再把结果作为 `input` 交给 `fuzzy_match`（与 fzq README 中「先 jq 过滤再 fzq」的管道等价，但由 Agent 分两步调用，不拼 shell 管道）。
 
@@ -634,7 +634,7 @@ Agent 核心 + 单个 OpenAI 兼容 Provider + 内置工具（`play_audio`/`set_
 2. 自有小米音箱型号是否支持 `play_url` 与自定义音频？→ S0-3
 3. ~~媒体检索最终选型？~~ ✅ 已定：fzq 子进程（见 §6.4）。待办：真实曲库 + ASR 日志回归、3 万条 benchmark
 4. fnOS 官方「飞牛 Skills」（AI 智能体化身 NAS 管家）是否开放 API、是否与本项目存在定位重叠或可复用点？→ 待核实
-5. 数据源注册表（`sources:`）首批包含哪些？曲库之外是否需要联系人 / 设备列表？由谁生成、多久刷新？
+5. ~~数据源注册表~~：已决定移除用户自定义数据源，仅保留内置 `media_library`；联系人 / 设备列表如需再议。
 6. ~~fzq 常驻热加载？~~ ✅ 不需要：按次调用 + `--index-cache` 按文件哈希自动失效（fzq `d718ffc`）
 
 

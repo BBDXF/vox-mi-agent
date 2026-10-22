@@ -36,7 +36,7 @@ func (ss *SourceSet) Get() *Sources {
 // Set atomically replaces the registry.
 func (ss *SourceSet) Set(s *Sources) { ss.p.Store(s) }
 
-// Source is a server-side registered data source (config.yaml `sources:`).
+// Source is a server-side data source.
 type Source struct {
 	Name    string   // name the LLM uses
 	File    string   // absolute path, never shown to the LLM

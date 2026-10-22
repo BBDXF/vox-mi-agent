@@ -538,9 +538,7 @@ func TestConversationsPagination(t *testing.T) {
 }
 
 func TestSettingsRedactionAndPut(t *testing.T) {
-	e := newEnv(t, llm.NewFake(), func(c *config.Config) {
-		c.Sources = []config.Source{{Name: "people", File: "people.json", Format: "json"}}
-	})
+	e := newEnv(t, llm.NewFake(), nil)
 	_, b := e.do(t, "GET", "/api/settings", "")
 	if strings.Contains(string(b), "sk-secret-1234567890") || strings.Contains(string(b), "secret") {
 		t.Fatalf("plaintext key leaked: %s", b)
@@ -551,9 +549,8 @@ func TestSettingsRedactionAndPut(t *testing.T) {
 			Model   string `json:"model"`
 			Masked  string `json:"api_key_masked"`
 		} `json:"llm"`
-		Tools   map[string]struct{ Path string }      `json:"tools"`
-		Sources []struct{ Name, Format, File string } `json:"sources"`
-		Media   struct {
+		Tools map[string]struct{ Path string } `json:"tools"`
+		Media struct {
 			Folders      []string `json:"folders"`
 			SyncInterval string   `json:"sync_interval"`
 		} `json:"media"`
@@ -563,7 +560,7 @@ func TestSettingsRedactionAndPut(t *testing.T) {
 		t.Fatal(err)
 	}
 	if s.LLM.Masked != "****7890" || s.LLM.Model == "" || len(s.Tools) != 3 ||
-		len(s.Sources) != 1 || s.Sources[0].Name != "people" || len(s.Media.Folders) != 1 ||
+		len(s.Media.Folders) != 1 ||
 		s.Media.SyncInterval == "" || s.Speaker.Driver != "mock" {
 		t.Fatalf("settings = %s", b)
 	}

@@ -15,7 +15,7 @@ func (*queryYAML) Name() string { return "query_yaml" }
 
 func (t *queryYAML) Description() string {
 	return sourcesHint(t.d, "Run a yq (v4) expression over YAML data (read-only). Provide exactly one of 'source' "+
-		"(a registered data source name) or 'input' (inline YAML text, max 256 KiB). "+
+		"(a built-in data source name, default 'media_library') or 'input' (inline YAML text, max 256 KiB). "+
 		"File access and environment access are disabled.")
 }
 
@@ -24,7 +24,7 @@ func (*queryYAML) Schema() json.RawMessage {
   "type": "object",
   "properties": {
     "expr": {"type": "string", "minLength": 1, "maxLength": 1024, "description": "yq expression, e.g. '.devices[] | select(.room == \"kitchen\") | .name'"},
-    "source": {"type": "string", "description": "Registered data source name. Mutually exclusive with 'input': provide exactly one."},
+    "source": {"type": "string", "description": "Built-in data source name (default 'media_library'). Mutually exclusive with 'input'."},
     "input": {"type": "string", "maxLength": 262144, "description": "Inline YAML text (max 256 KiB). Mutually exclusive with 'source': provide exactly one."},
     "output_format": {"type": "string", "enum": ["yaml", "json"], "description": "Output format, default yaml."}
   },

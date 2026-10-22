@@ -54,9 +54,6 @@ func TestPrecedence(t *testing.T) {
 				if c.Media.SyncInterval != 0 {
 					t.Errorf("sync interval: %v", c.Media.SyncInterval)
 				}
-				if len(c.Sources) != 1 || c.SourcePath(c.Sources[0]) != filepath.Join(c.DataDir, "sources", "c.json") {
-					t.Errorf("sources: %+v", c.Sources)
-				}
 			},
 		},
 		{
@@ -146,10 +143,8 @@ func TestDefaultFileCreated(t *testing.T) {
 
 func TestInvalid(t *testing.T) {
 	tests := map[string]string{
-		"unknown key":    "bogus: 1\n",
-		"bad listen":     "server:\n  listen: http://x\n",
-		"dup source":     "sources:\n  - {name: a, file: a}\n  - {name: a, file: b}\n",
-		"source no file": "sources:\n  - {name: a}\n",
+		"unknown key": "bogus: 1\n",
+		"bad listen":  "server:\n  listen: http://x\n",
 	}
 	for name, y := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -174,7 +169,6 @@ func TestRedacted(t *testing.T) {
 	for _, tc := range tests {
 		c := Defaults()
 		c.LLM.APIKey = tc.in
-		c.Sources = []Source{{Name: "a", File: "a", Keys: []string{"k"}}}
 		r := c.Redacted()
 		if r.LLM.APIKey != tc.want {
 			t.Errorf("%q -> %q want %q", tc.in, r.LLM.APIKey, tc.want)
@@ -182,9 +176,8 @@ func TestRedacted(t *testing.T) {
 		if c.LLM.APIKey != tc.in {
 			t.Error("original mutated")
 		}
-		r.Sources[0].Keys[0] = "changed"
 		r.Media.Folders[0] = "changed"
-		if c.Sources[0].Keys[0] != "k" || c.Media.Folders[0] == "changed" {
+		if c.Media.Folders[0] == "changed" {
 			t.Error("not a deep copy")
 		}
 	}

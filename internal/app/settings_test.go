@@ -54,7 +54,7 @@ func reload(t *testing.T, dir string) *config.Config {
 }
 
 func TestSchemaListsAllSections(t *testing.T) {
-	want := []string{"llm", "agent", "mcp", "media", "aliases", "search", "sources", "speaker", "logging", "server"}
+	want := []string{"llm", "agent", "mcp", "media", "aliases", "search", "speaker", "logging", "server"}
 	sc := Schema()
 	if len(sc) != len(want) {
 		t.Fatalf("%d sections", len(sc))
@@ -392,73 +392,6 @@ func TestSectionSearchLive(t *testing.T) {
 	}
 	if a.Config().Search.Limit != 2 {
 		t.Fatal("invalid update changed the live config")
-	}
-}
-
-func TestSectionSourcesLive(t *testing.T) {
-	a, dir := newTestApp(t, nil)
-	srcDir := filepath.Join(dir, "sources")
-	if err := os.MkdirAll(srcDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(srcDir, "people.json"), []byte(`[{"name":"张三"},{"name":"李四"}]`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	abs := filepath.Join(t.TempDir(), "abs.json")
-	if err := os.WriteFile(abs, []byte(`{"k":1}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	qj, _ := a.Tools.Get("query_json")
-	call := func(src string) map[string]any {
-		v, err := qj.Call(context.Background(), json.RawMessage(`{"filter":".[].name","source":"`+src+`"}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return v.(map[string]any)
-	}
-	if r := call("people"); r["error"] == nil || !strings.Contains(r["error"].(string), "unknown source") {
-		t.Fatalf("before: %+v", r)
-	}
-	res := put(t, a, "sources", `{"items":[{"name":"people","file":"people.json","format":"json","keys":["name"]},{"name":"abs_file","file":"`+abs+`"}]}`)
-	if res.RestartRequired || res.Applied["sources"] == nil {
-		t.Fatalf("%+v", res)
-	}
-	if r := call("people"); r["error"] != nil || !strings.Contains(r["output"].(string), "张三") {
-		t.Fatalf("after: %+v", r)
-	}
-	got, _ := a.GetSection(context.Background(), "sources")
-	b, _ := json.Marshal(got)
-	if !strings.Contains(string(b), `"name":"abs_file"`) || !strings.Contains(string(b), `"format":"auto"`) {
-		t.Fatalf("GET %s", b)
-	}
-	r := reload(t, dir)
-	if len(r.Sources) != 2 || r.Sources[0].Name != "people" || r.Sources[0].Keys[0] != "name" || r.Sources[1].File != abs {
-		t.Fatalf("persisted %+v", r.Sources)
-	}
-	// swap: remove people
-	put(t, a, "sources", `{"items":[{"name":"abs_file","file":"`+abs+`"}]}`)
-	if r := call("people"); r["error"] == nil {
-		t.Fatalf("people should be gone: %+v", r)
-	}
-	// validation
-	long := "a" + strings.Repeat("b", 32)
-	f := putFields(t, a, "sources", `{"items":[
-		{"name":"Bad","file":"people.json"},
-		{"name":"dup","file":"people.json"},{"name":"dup","file":"people.json"},
-		{"name":"`+long+`","file":"people.json"},
-		{"name":"missing","file":"nope.json"},
-		{"name":"esc","file":"../x.json"},
-		{"name":"fmt","file":"people.json","format":"xml"},
-		{"name":"k5","file":"people.json","keys":["a","b","c","d","e"]},
-		{"name":"rx","file":"people.json","extract":"(","strip":["ok","("]}]}`)
-	for _, k := range []string{"items[0].name", "items[2].name", "items[3].name", "items[4].file", "items[5].file",
-		"items[6].format", "items[7].keys", "items[8].extract", "items[8].strip[1]"} {
-		if f[k] == "" {
-			t.Errorf("missing %s in %v", k, f)
-		}
-	}
-	if len(r.Sources) != 2 || len(a.Config().Sources) != 1 {
-		t.Fatalf("live sources %+v", a.Config().Sources)
 	}
 }
 

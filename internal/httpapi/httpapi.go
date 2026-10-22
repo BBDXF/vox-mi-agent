@@ -90,9 +90,6 @@ func New(a *app.App, opts ...Option) *Server {
 	r.Post("/api/media/sync", s.mediaSync)
 	r.Get("/api/media/tracks", s.mediaTracks)
 	r.Get("/api/media/artists", s.mediaArtists)
-	r.Get("/api/sources", s.listSources)
-	r.Get("/api/sources/{name}/preview", s.previewSource)
-	r.Post("/api/sources/{name}/test", s.testSource)
 	r.Get("/api/speaker/status", s.speakerStatus)
 	r.Post("/api/speaker/xiaomi/login", s.xiaomiLogin)
 	r.Post("/api/speaker/xiaomi/verify/send", s.xiaomiSend)
@@ -435,15 +432,6 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	cfg := s.app.Config()
 	l := cfg.LLM
-	type srcDTO struct {
-		Name   string `json:"name"`
-		Format string `json:"format"`
-		File   string `json:"file"`
-	}
-	srcs := make([]srcDTO, 0, len(cfg.Sources))
-	for _, x := range cfg.Sources {
-		srcs = append(srcs, srcDTO{x.Name, x.Format, x.File})
-	}
 	mc := cfg.Media
 	folders, exts := mc.Folders, mc.Extensions
 	if folders == nil {
@@ -461,8 +449,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 			"provider": l.Provider, "base_url": l.BaseURL, "model": l.Model,
 			"api_key_masked": maskKey(l.APIKey), "has_api_key": l.APIKey != "",
 		},
-		"tools":   s.app.HealthStatus(),
-		"sources": srcs,
+		"tools": s.app.HealthStatus(),
 		"media": map[string]any{
 			"folders": folders, "extensions": exts, "accessible_roots": roots,
 			"sync_interval": fmtDuration(mc.SyncInterval),

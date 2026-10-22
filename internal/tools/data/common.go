@@ -103,7 +103,13 @@ type input struct {
 }
 
 // resolveInput enforces "exactly one of source / input".
+// When both are empty it defaults to the built-in media_library source.
 func (d Deps) resolveInput(source, inline string) (input, error) {
+	if source == "" && inline == "" {
+		if _, err := d.sources().Get(config.MediaLibrarySource); err == nil {
+			source = config.MediaLibrarySource
+		}
+	}
 	switch {
 	case source != "" && inline != "":
 		return input{}, errors.New("provide exactly one of 'source' or 'input', not both")
@@ -208,7 +214,7 @@ func sourcesHint(d Deps, desc string) string {
 	}
 	var b strings.Builder
 	b.WriteString(desc)
-	b.WriteString(" Registered sources:")
+	b.WriteString(" Built-in sources:")
 	for _, s := range srcs.List() {
 		b.WriteString(" '")
 		b.WriteString(s.Name)

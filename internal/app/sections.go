@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -27,18 +26,15 @@ const MaxMediaFolders = 20
 const MinSyncInterval = time.Minute
 
 const (
-	maxSources    = 50
 	maxAliasItems = 5000
 )
-
-var sourceNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
 // sections is the registry, in display order.
 var sections []*section
 
 func init() {
 	sections = []*section{llmSection(), agentSection(), mcpSection(), mediaSection(), aliasesSection(), searchSection(),
-		sourcesSection(), speakerSection(), loggingSection(), serverSection()}
+		speakerSection(), loggingSection(), serverSection()}
 }
 
 func withDefault(f *fieldDef, def any) *fieldDef { f.Default = def; return f }
@@ -403,138 +399,11 @@ func searchSection() *section {
 	return s
 }
 
-// ---------------------------------------------------------------- sources
+// ---------------------------------------------------------------- built-in sources
 
-func sourcesSection() *section {
-	itemFields := []Field{
-		{Key: "name", Type: TString, Default: "", Description: "数据源名称（唯一，^[a-z][a-z0-9_]{0,31}$），模型只能看到名称"},
-		{Key: "file", Type: TString, Default: "", Description: "数据文件路径：相对路径基于 <数据目录>/sources，也可用绝对路径；文件必须存在"},
-		{Key: "format", Type: TEnum, Default: "auto", Enum: []string{"auto", "lines", "json", "jsonl", "yaml"}, Description: "文件格式"},
-		{Key: "records", Type: TString, Default: "", Description: "记录路径（如 .contacts），默认的 fzq -r"},
-		{Key: "keys", Type: TStrings, Default: []string{}, Description: "默认参与模糊匹配的字段（最多 4 个）"},
-		{Key: "extract", Type: TString, Default: "", Description: "提取正则（fzq -x），可选"},
-		{Key: "strip", Type: TStrings, Default: []string{}, Description: "匹配前剔除的正则列表（fzq --strip）"},
-	}
-	f := &fieldDef{
-		Field:    Field{Key: "items", Type: TObjects, Default: []any{}, Description: "数据源列表（整体替换）；用于 fuzzy_match / query_json / query_yaml 工具", Items: itemFields},
-		yamlPath: []string{"sources"},
-		get: func(c *config.Config) any {
-			out := make([]config.Source, len(c.Sources))
-			for i, s := range c.Sources {
-				s.Keys, s.Strip = append([]string{}, s.Keys...), append([]string{}, s.Strip...)
-				if s.Format == "" {
-					s.Format = "auto"
-				}
-				out[i] = s
-			}
-			return out
-		},
-		set: func(c *config.Config, raw json.RawMessage) error {
-			var items []config.Source
-			if isNull(raw) || decodeStrict(raw, &items) != nil {
-				return fmt.Errorf("must be an array of {name, file, format, records, keys, extract, strip}")
-			}
-			c.Sources = items
-			return nil
-		},
-		node: func(c *config.Config) (*yamlNode, error) {
-			if len(c.Sources) == 0 {
-				return &yamlNode{Kind: yamlSeq, Tag: "!!seq", Style: yamlFlow}, nil
-			}
-			return yamlOf(c.Sources)
-		},
-	}
-	s := &section{
-		Name: "sources", Title: "数据源",
-		Description: "注册给模型使用的数据文件（JSON/JSONL/YAML/文本行）。修改后立即对数据查询工具生效。",
-		fields:      []*fieldDef{f},
-	}
-	s.validate = func(a *App, old, n *config.Config, provided, changed keySet, fe fieldErrs) {
-		if len(n.Sources) > maxSources {
-			fe["items"] = fmt.Sprintf("at most %d sources", maxSources)
-			return
-		}
-		seen := map[string]bool{}
-		for i := range n.Sources {
-			src := &n.Sources[i]
-			pre := fmt.Sprintf("items[%d].", i)
-			src.Name, src.File = strings.TrimSpace(src.Name), strings.TrimSpace(src.File)
-			switch {
-			case src.Name == config.MediaLibrarySource:
-				fe[pre+"name"] = "reserved: media_library is the built-in read-only media library source"
-			case !sourceNameRe.MatchString(src.Name):
-				fe[pre+"name"] = "must match ^[a-z][a-z0-9_]{0,31}$"
-			case seen[src.Name]:
-				fe[pre+"name"] = "duplicate name"
-			}
-			seen[src.Name] = true
-			switch src.Format {
-			case "":
-				src.Format = "auto"
-			case "auto", "lines", "json", "jsonl", "yaml":
-			default:
-				fe[pre+"format"] = "must be one of auto, lines, json, jsonl, yaml"
-			}
-			if src.File == "" {
-				fe[pre+"file"] = "required"
-			} else if rel := filepath.Clean(src.File); !filepath.IsAbs(src.File) && (rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
-				fe[pre+"file"] = "relative path must stay inside the sources directory"
-			} else if fi, err := os.Stat(n.SourcePath(*src)); err != nil {
-				fe[pre+"file"] = "file does not exist or is not readable"
-			} else if !fi.Mode().IsRegular() {
-				fe[pre+"file"] = "not a regular file"
-			}
-			if len(src.Keys) > 4 {
-				fe[pre+"keys"] = "at most 4 keys"
-			}
-			for _, k := range src.Keys {
-				if strings.TrimSpace(k) == "" {
-					fe[pre+"keys"] = "keys must not be empty"
-				}
-			}
-			if src.Extract != "" {
-				if _, err := regexp.Compile(src.Extract); err != nil {
-					fe[pre+"extract"] = "invalid regular expression: " + err.Error()
-				}
-			}
-			for j, p := range src.Strip {
-				if _, err := regexp.Compile(p); err != nil {
-					fe[fmt.Sprintf("%sstrip[%d]", pre, j)] = "invalid regular expression: " + err.Error()
-				}
-			}
-			if src.Keys == nil {
-				src.Keys = []string{}
-			}
-			if src.Strip == nil {
-				src.Strip = []string{}
-			}
-		}
-	}
-	s.apply = func(ctx context.Context, a *App, old, n *config.Config, changed keySet) (map[string]any, *bool, error) {
-		set, err := buildSources(n)
-		if err != nil {
-			return nil, nil, err
-		}
-		a.sources.Set(set)
-		return map[string]any{"sources": set.Names()}, nil, nil
-	}
-	return s
-}
-
-// buildSources converts the configured sources to the tools' registry.
+// buildSources builds the tools' registry: only the built-in media_library.
 func buildSources(c *config.Config) (*data.Sources, error) {
-	srcs := make([]data.Source, 0, len(c.Sources)+1)
-	srcs = append(srcs, data.MediaLibrary(media.SongsPath(c.DataDir)))
-	for _, s := range c.Sources {
-		if s.Name == config.MediaLibrarySource {
-			return nil, fmt.Errorf("app: sources: name %q is reserved for the built-in media library source", s.Name)
-		}
-		srcs = append(srcs, data.Source{
-			Name: s.Name, File: c.SourcePath(s), Format: s.Format, Records: s.Records,
-			Keys: s.Keys, Extract: s.Extract, Strip: s.Strip,
-		})
-	}
-	set, err := data.NewSources(srcs)
+	set, err := data.NewSources([]data.Source{data.MediaLibrary(media.SongsPath(c.DataDir))})
 	if err != nil {
 		return nil, fmt.Errorf("app: sources: %w", err)
 	}

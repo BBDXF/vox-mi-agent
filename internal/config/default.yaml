@@ -35,17 +35,6 @@ tools:
   # jq_path: /usr/local/bin/jq
   # yq_path: /usr/local/bin/yq
 
-# Registered data sources for fuzzy_match / query_json / query_yaml.
-# file is relative to <dataDir>/sources unless absolute.
-sources: []
-#  - name: contacts
-#    file: contacts.json
-#    format: json                     # json | jsonl | yaml
-#    records: ".contacts"             # default records path
-#    keys: [name, nickname]
-#    extract: ""
-#    strip: []
-
 media:
   folders: ["/vol1/1000/Music"]
   extensions: [mp3, flac, m4a, aac, wav, ogg, ape]
