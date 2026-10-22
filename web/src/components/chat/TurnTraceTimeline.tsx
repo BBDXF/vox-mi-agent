@@ -98,7 +98,7 @@ export function TurnTraceTimeline({ conversationId, turnId }: TurnTraceTimelineP
   if (loading) {
     return (
       <div className="mt-2 p-3 rounded-lg border bg-muted/30 text-xs text-muted-foreground flex items-center gap-2">
-        <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary" />
+        <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-500" />
         <span>正在加载调用链追踪数据...</span>
       </div>
     );
@@ -141,7 +141,7 @@ export function TurnTraceTimeline({ conversationId, turnId }: TurnTraceTimelineP
             首字: {turn.first_token_ms}ms
           </span>
           <span className="flex items-center gap-1">
-            <Clock className="w-3 h-3 text-primary" />
+            <Clock className="w-3 h-3 text-sky-500" />
             总计: {(totalMs / 1000).toFixed(2)}s
           </span>
         </div>
@@ -168,7 +168,7 @@ export function TurnTraceTimeline({ conversationId, turnId }: TurnTraceTimelineP
                     ? 'bg-destructive'
                     : isLLM
                     ? 'bg-indigo-500'
-                    : 'bg-amber-500'
+                    : 'bg-orange-500'
                 }`}
                 title={`${st.name} (${st.duration_ms}ms, ${pct.toFixed(1)}%)`}
               />
@@ -181,7 +181,7 @@ export function TurnTraceTimeline({ conversationId, turnId }: TurnTraceTimelineP
             LLM 推理
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-amber-500" />
+            <span className="w-2 h-2 rounded-full bg-orange-500" />
             工具调用
           </span>
           <span className="flex items-center gap-1">
@@ -210,7 +210,7 @@ export function TurnTraceTimeline({ conversationId, turnId }: TurnTraceTimelineP
                       ? 'border-destructive text-destructive bg-destructive/10'
                       : isLLM
                       ? 'border-indigo-500 text-indigo-500 bg-indigo-500/10'
-                      : 'border-amber-500 text-amber-500 bg-amber-500/10'
+                      : 'border-orange-500 text-orange-500 bg-orange-500/10'
                   }`}
                 >
                   {isLLM ? <Cpu className="w-3 h-3" /> : <Wrench className="w-3 h-3" />}
@@ -309,7 +309,7 @@ export function TurnTraceTimeline({ conversationId, turnId }: TurnTraceTimelineP
             onClick={handleTogglePayload}
             className="gap-1.5 text-xs h-7.5"
           >
-            <Code2 className="w-3.5 h-3.5 text-primary" />
+            <Code2 className="w-3.5 h-3.5 text-indigo-500" />
             {showPayload ? '收起原文报文' : '查看原文 (Payload)'}
           </Button>
 

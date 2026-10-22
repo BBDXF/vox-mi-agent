@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { accent } from '@/lib/accent';
 import {
   Folder,
   FolderPlus,
@@ -301,7 +302,7 @@ export function MediaSettingsCard({
         <CardHeader className="pb-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-primary" />
+              <Sliders className={`w-4 h-4 ${accent('media').text}`} />
               <CardTitle>曲库设置 (Library Configuration)</CardTitle>
             </div>
             {isDirty && (
@@ -321,7 +322,7 @@ export function MediaSettingsCard({
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Folder className="w-4 h-4 text-primary" />
+                <Folder className={`w-4 h-4 ${accent('media').text}`} />
                 <span className="text-xs font-semibold text-foreground">
                   音频扫描目录 (Folders)
                 </span>
@@ -336,7 +337,7 @@ export function MediaSettingsCard({
                 onClick={() => setIsBrowserOpen(true)}
                 className="gap-1.5 text-xs h-8"
               >
-                <FolderPlus className="w-3.5 h-3.5 text-primary" />
+                <FolderPlus className={`w-3.5 h-3.5 ${accent('media').text}`} />
                 添加文件夹
               </Button>
             </div>
@@ -435,7 +436,7 @@ export function MediaSettingsCard({
           <div className="space-y-3 pt-2 border-t">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <FileAudio className="w-4 h-4 text-primary" />
+                <FileAudio className={`w-4 h-4 ${accent('media').text}`} />
                 <span className="text-xs font-semibold text-foreground">
                   音频格式白名单 (Extensions)
                 </span>
@@ -511,7 +512,7 @@ export function MediaSettingsCard({
           <div className="space-y-3 pt-2 border-t">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-primary" />
+                <Clock className={`w-4 h-4 ${accent('media').text}`} />
                 <span className="text-xs font-semibold text-foreground">
                   后台同步间隔 (Sync Interval)
                 </span>
@@ -540,7 +541,7 @@ export function MediaSettingsCard({
           <div className="space-y-3 pt-2 border-t">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <FileAudio className="w-4 h-4 text-primary" />
+                <FileAudio className={`w-4 h-4 ${accent('media').text}`} />
                 <span className="text-xs font-semibold text-foreground">
                   歌名/歌手来源
                 </span>
@@ -579,7 +580,7 @@ export function MediaSettingsCard({
               className="flex items-center justify-between w-full py-1 text-left text-xs font-semibold text-foreground hover:text-primary transition-colors select-none"
             >
               <div className="flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-primary" />
+                <Sliders className={`w-4 h-4 ${accent('media').text}`} />
                 <span>高级设置 (Advanced)</span>
                 <span className="text-[11px] font-normal text-muted-foreground">
                   文件名正则解析、索引规模上限、开机启动同步

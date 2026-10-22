@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { accent } from '@/lib/accent';
 import { ChevronDown, ChevronRight, Wrench, CheckCircle2, AlertCircle, Copy, Check } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
@@ -84,7 +85,7 @@ export function ToolCallCard({
               <ChevronRight className="w-3.5 h-3.5" />
             )}
           </span>
-          <Wrench className="w-3.5 h-3.5 text-primary shrink-0" />
+          <Wrench className={`w-3.5 h-3.5 shrink-0 ${accent('tools').text}`} />
           <span className="font-mono font-medium text-foreground tracking-tight">
             {name}
           </span>

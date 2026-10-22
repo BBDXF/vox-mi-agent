@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { accent } from '@/lib/accent';
 import {
   Database,
   Plus,
@@ -211,7 +212,7 @@ export function SourcesTableEditor() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <Database className="w-4 h-4 text-primary" />
+                  <Database className={`w-4 h-4 ${accent('sources').text}`} />
                   <CardTitle className="text-sm font-bold font-mono">
                     {builtinSource.name}
                   </CardTitle>
@@ -242,7 +243,7 @@ export function SourcesTableEditor() {
                   onClick={() => openPreview(builtinSource.name)}
                   className="gap-1 text-xs h-7.5"
                 >
-                  <Eye className="w-3.5 h-3.5 text-primary" />
+                  <Eye className={`w-3.5 h-3.5 ${accent('sources').text}`} />
                   预览 (20条)
                 </Button>
                 <Button
@@ -297,7 +298,7 @@ export function SourcesTableEditor() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <Database className="w-4 h-4 text-primary" />
+                <Database className={`w-4 h-4 ${accent('sources').text}`} />
                 <CardTitle>自定义数据源 (User Sources)</CardTitle>
                 <Badge variant="secondary" className="font-mono text-xs">
                   {userItems.length}
@@ -383,7 +384,7 @@ export function SourcesTableEditor() {
                         onClick={() => openPreview(src.name)}
                         className="h-8 text-xs gap-1"
                       >
-                        <Eye className="w-3.5 h-3.5 text-primary" />
+                        <Eye className={`w-3.5 h-3.5 ${accent('sources').text}`} />
                         预览
                       </Button>
 

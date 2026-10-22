@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { accent } from '@/lib/accent';
 import { Sidebar, type NavTab } from '@/components/layout/Sidebar';
 import { ChatView } from '@/components/chat/ChatView';
 import { SettingsView } from '@/components/settings/SettingsView';
@@ -107,50 +108,50 @@ export function App() {
               type="button"
               onClick={() => setCurrentTab('guide')}
               className={`flex flex-col items-center gap-0.5 text-[10px] p-1.5 rounded ${
-                currentTab === 'guide' ? 'text-primary font-semibold' : 'text-muted-foreground'
+                currentTab === 'guide' ? 'text-foreground font-semibold' : 'text-muted-foreground'
               }`}
             >
-              <BookOpen className="w-4 h-4" />
+              <BookOpen className={`w-4 h-4 ${accent('guide').text}`} />
               <span>开始</span>
             </button>
             <button
               type="button"
               onClick={() => setCurrentTab('chat')}
               className={`flex flex-col items-center gap-0.5 text-[10px] p-1.5 rounded ${
-                currentTab === 'chat' ? 'text-primary font-semibold' : 'text-muted-foreground'
+                currentTab === 'chat' ? 'text-foreground font-semibold' : 'text-muted-foreground'
               }`}
             >
-              <MessageSquare className="w-4 h-4" />
+              <MessageSquare className={`w-4 h-4 ${accent('chat').text}`} />
               <span>对话</span>
             </button>
             <button
               type="button"
               onClick={() => setCurrentTab('settings')}
               className={`flex flex-col items-center gap-0.5 text-[10px] p-1.5 rounded ${
-                currentTab === 'settings' ? 'text-primary font-semibold' : 'text-muted-foreground'
+                currentTab === 'settings' ? 'text-foreground font-semibold' : 'text-muted-foreground'
               }`}
             >
-              <SettingsIcon className="w-4 h-4" />
+              <SettingsIcon className={`w-4 h-4 ${accent('settings').text}`} />
               <span>设置</span>
             </button>
             <button
               type="button"
               onClick={() => setCurrentTab('media')}
               className={`flex flex-col items-center gap-0.5 text-[10px] p-1.5 rounded ${
-                currentTab === 'media' ? 'text-primary font-semibold' : 'text-muted-foreground'
+                currentTab === 'media' ? 'text-foreground font-semibold' : 'text-muted-foreground'
               }`}
             >
-              <Music className="w-4 h-4" />
+              <Music className={`w-4 h-4 ${accent('media').text}`} />
               <span>曲库</span>
             </button>
             <button
               type="button"
               onClick={() => setCurrentTab('logs')}
               className={`flex flex-col items-center gap-0.5 text-[10px] p-1.5 rounded ${
-                currentTab === 'logs' ? 'text-primary font-semibold' : 'text-muted-foreground'
+                currentTab === 'logs' ? 'text-foreground font-semibold' : 'text-muted-foreground'
               }`}
             >
-              <ScrollText className="w-4 h-4" />
+              <ScrollText className={`w-4 h-4 ${accent('logs').text}`} />
               <span>日志</span>
             </button>
           </div>

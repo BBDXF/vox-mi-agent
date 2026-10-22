@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import { IconChip } from '@/components/ui/icon-chip';
+import { accent } from '@/lib/accent';
 import {
   Music,
   RefreshCw,
@@ -158,7 +160,7 @@ export function MediaView() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <Music className="w-5 h-5 text-primary" />
+            <IconChip icon={Music} color="media" />
             家庭本地曲库与索引管理
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
@@ -199,7 +201,7 @@ export function MediaView() {
         <Card className="p-4 border shadow-xs">
           <div className="flex items-center justify-between text-muted-foreground mb-2">
             <span className="text-xs font-medium">曲目总数</span>
-            <ListMusic className="w-4 h-4 text-primary" />
+            <ListMusic className={`w-4 h-4 ${accent('media').text}`} />
           </div>
           <div className="text-2xl font-bold font-mono tracking-tight text-foreground">
             {tracksCount.toLocaleString()}
@@ -267,7 +269,7 @@ export function MediaView() {
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <FileCheck className="w-4 h-4 text-primary" />
+              <FileCheck className={`w-4 h-4 ${accent('media').text}`} />
               <CardTitle>同步执行详情 (Sync Execution)</CardTitle>
             </div>
             {isSyncing && (
@@ -312,7 +314,7 @@ export function MediaView() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
             <div className="p-3 rounded-lg border bg-card text-xs space-y-1">
               <div className="font-semibold text-foreground flex items-center gap-1.5">
-                <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[11px] flex items-center justify-center font-mono">
+                <span className="w-5 h-5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 text-[11px] flex items-center justify-center font-mono">
                   1
                 </span>
                 文件差异扫描
@@ -324,7 +326,7 @@ export function MediaView() {
 
             <div className="p-3 rounded-lg border bg-card text-xs space-y-1">
               <div className="font-semibold text-foreground flex items-center gap-1.5">
-                <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[11px] flex items-center justify-center font-mono">
+                <span className="w-5 h-5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 text-[11px] flex items-center justify-center font-mono">
                   2
                 </span>
                 原子写盘替换
@@ -336,7 +338,7 @@ export function MediaView() {
 
             <div className="p-3 rounded-lg border bg-card text-xs space-y-1">
               <div className="font-semibold text-foreground flex items-center gap-1.5">
-                <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[11px] flex items-center justify-center font-mono">
+                <span className="w-5 h-5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 text-[11px] flex items-center justify-center font-mono">
                   3
                 </span>
                 fzq 拼音缓存重建
@@ -366,7 +368,7 @@ export function MediaView() {
       <Card className="border shadow-xs bg-muted/10">
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
-            <Search className="w-4 h-4 text-primary" />
+            <Search className={`w-4 h-4 ${accent('media').text}`} />
             <CardTitle>元数据提取与文件匹配规则</CardTitle>
           </div>
           <CardDescription>

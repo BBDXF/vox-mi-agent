@@ -21,7 +21,7 @@ export function FirstRunBanner({ onOpenGuide }: { onOpenGuide: () => void }) {
   if (!show) return null;
   return (
     <div className="shrink-0 flex items-center gap-3 px-4 py-2 bg-primary/10 border-b border-primary/20 text-xs">
-      <BookOpen className="w-4 h-4 text-primary shrink-0" />
+      <BookOpen className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
       <span className="flex-1 min-w-0">第一次使用？还没配置大模型或音乐目录，按「快速开始」几步就能点歌。</span>
       <Button size="sm" onClick={onOpenGuide}>查看快速开始</Button>
       <button type="button" title="不再提示" className="p-1 text-muted-foreground hover:text-foreground"

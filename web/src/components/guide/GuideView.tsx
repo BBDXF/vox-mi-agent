@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { BookOpen, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { IconChip } from '@/components/ui/icon-chip';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -64,15 +65,16 @@ export function GuideView({ onGo }: { onGo: (tab: NavTab, section?: string) => v
     <div key={n} className="flex items-start gap-3 p-3 rounded-lg border bg-card/50">
       {s.done === false
         ? <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-        : <CheckCircle2 className={`w-5 h-5 shrink-0 mt-0.5 ${s.done ? 'text-emerald-500' : 'text-muted-foreground'}`} />}
+        : <CheckCircle2 className={`w-5 h-5 shrink-0 mt-0.5 ${s.done ? 'text-green-500' : 'text-amber-500/60'}`} />}
       <div className="flex-1 min-w-0 space-y-1">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold">{n}. {s.title}</span>
+          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[11px] font-mono">{n}</span>
+          <span className="text-sm font-semibold">{s.title}</span>
           {s.done === true && <Badge variant="success">✅ 已完成</Badge>}
           {s.done === false && <Badge variant="warning">⚠️ 待配置</Badge>}
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed">{s.desc}</p>
-        {s.tip && <p className="text-xs text-primary/90">💡 {s.tip}</p>}
+        {s.tip && <p className="text-xs text-amber-700 dark:text-amber-400">💡 {s.tip}</p>}
       </div>
       <Button size="sm" variant={s.done === false ? 'default' : 'outline'} className="shrink-0" onClick={() => onGo(s.tab, s.section)}>{s.action}</Button>
     </div>
@@ -83,7 +85,7 @@ export function GuideView({ onGo }: { onGo: (tab: NavTab, section?: string) => v
       <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-xl font-bold tracking-tight">快速开始</h1>
+            <h1 className="text-xl font-bold tracking-tight flex items-center gap-2"><IconChip icon={BookOpen} color="guide" />快速开始</h1>
             <p className="text-sm text-muted-foreground mt-1">按下面的步骤配置，几分钟就能让音箱听你的话点歌。状态会自动检测。</p>
           </div>
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>

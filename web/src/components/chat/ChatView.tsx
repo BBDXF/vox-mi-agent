@@ -151,7 +151,7 @@ export function ChatView({ targetConversationId, onOpenGuide }: ChatViewProps = 
 
       <aside className={`fixed inset-y-0 left-0 z-40 w-72 lg:static border-r bg-card/60 backdrop-blur flex flex-col shrink-0 transition-transform duration-200 ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
         <div className="p-3 border-b flex items-center justify-between">
-          <span className="text-sm font-semibold flex items-center gap-2"><Radio className="w-4 h-4 text-primary" />音箱</span>
+          <span className="text-sm font-semibold flex items-center gap-2"><Radio className="w-4 h-4 text-blue-600 dark:text-blue-400" />音箱</span>
           <div className="flex gap-1">
             <Button variant="ghost" size="icon" title="刷新" onClick={() => { loadConversations(); loadStatus(); }}><RefreshCw className="w-4 h-4 text-muted-foreground" /></Button>
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileSidebarOpen(false)}><X className="w-4 h-4" /></Button>
@@ -169,7 +169,7 @@ export function ChatView({ targetConversationId, onOpenGuide }: ChatViewProps = 
               <div key={key} role="button" tabIndex={0} onClick={() => pick(key)}
                 className={`group/item relative cursor-pointer p-2.5 rounded-lg text-xs border transition-all ${active ? 'bg-primary/10 border-primary/30' : 'border-transparent hover:bg-muted/70'}`}>
                 <div className="flex items-center gap-2">
-                  <Radio className={`w-4 h-4 shrink-0 ${isDebug ? 'text-primary' : 'text-indigo-500'}`} />
+                  <Radio className={`w-4 h-4 shrink-0 ${isDebug ? 'text-blue-600 dark:text-blue-400' : 'text-indigo-500'}`} />
                   <span className="font-medium text-[13px] truncate flex-1">{isDebug ? '调试音箱' : d.name}</span>
                   {isDebug ? <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4">可对话</Badge>
                     : d.online === false ? <WifiOff className="w-3 h-3 text-muted-foreground" /> : <Wifi className="w-3 h-3 text-emerald-500" />}
@@ -214,7 +214,7 @@ export function ChatView({ targetConversationId, onOpenGuide }: ChatViewProps = 
         {onOpenGuide && <FirstRunBanner onOpenGuide={onOpenGuide} />}
         <header className="h-13 border-b px-4 flex items-center gap-2 bg-card/40 backdrop-blur shrink-0">
           <Button variant="ghost" size="icon" className="lg:hidden shrink-0 -ml-2" onClick={() => setMobileSidebarOpen(true)}><Menu className="w-4 h-4" /></Button>
-          <Radio className="w-4 h-4 text-primary shrink-0" />
+          <Radio className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
           <h2 className="text-sm font-semibold truncate">{activeTitle}</h2>
           {!editable && <Badge variant="outline" className="text-[10px]">只读</Badge>}
           {status?.driver && status.driver !== 'mock' && editable && <span className="text-[11px] text-amber-600">当前驱动为 {status.driver}，调试音箱可能不响应</span>}
@@ -224,7 +224,7 @@ export function ChatView({ targetConversationId, onOpenGuide }: ChatViewProps = 
         <div className="flex-1 overflow-y-auto py-3">
           {showEmpty ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-6 text-muted-foreground">
-              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3"><Mic className="w-6 h-6 text-primary" /></div>
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3"><Mic className="w-6 h-6 text-blue-600 dark:text-blue-400" /></div>
               <h3 className="font-medium text-foreground text-sm mb-1">{editable ? '对调试音箱说点什么' : '暂无记录'}</h3>
               <p className="text-xs max-w-sm mb-4">{editable ? '每次提问都会展示完整流程：检测 → 打断 → 大模型 → 工具 → 播报 → 播放。' : '该音箱收到提问后，处理流程会实时显示在这里。'}</p>
               {editable && (

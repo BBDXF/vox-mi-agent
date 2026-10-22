@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { accent } from '@/lib/accent';
 import {
   ListMusic,
   Plus,
@@ -152,7 +153,7 @@ export function AliasesTableEditor() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <ListMusic className="w-4 h-4 text-primary" />
+              <ListMusic className={`w-4 h-4 ${accent('media').text}`} />
               <CardTitle>音乐别名词典 (Aliases)</CardTitle>
             </div>
             <CardDescription className="text-xs mt-0.5">

@@ -9,7 +9,11 @@ import {
   ScrollText,
   RefreshCw,
   Sliders,
+  Info,
 } from 'lucide-react';
+import { accent, type Area } from '@/lib/accent';
+import { IconChip } from '@/components/ui/icon-chip';
+import { AboutCard } from '@/components/about/AboutCard';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -28,7 +32,7 @@ const SECTION_METADATA: Record<
   string,
   { label: string; icon: React.ComponentType<{ className?: string }> }
 > = {
-  llm: { label: 'LLM', icon: Cpu },
+  llm: { label: '大模型', icon: Cpu },
   search: { label: '检索', icon: Search },
   sources: { label: '数据源', icon: Database },
   tools: { label: '工具', icon: Wrench },
@@ -83,7 +87,7 @@ export function SettingsView({ initialSection }: { initialSection?: string } = {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <Sliders className="w-5 h-5 text-primary" />
+            <IconChip icon={Sliders} color="settings" />
             系统配置与参数规范
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
@@ -126,16 +130,28 @@ export function SettingsView({ initialSection }: { initialSection?: string } = {
                     : 'text-muted-foreground hover:bg-muted/80 hover:text-foreground'
                 }`}
               >
-                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-primary-foreground' : 'text-primary'}`} />
+                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-primary-foreground' : accent(sec.name in SECTION_METADATA ? (sec.name as Area) : 'settings').text}`} />
                 <span className="truncate">{meta.label}</span>
               </button>
             );
           })}
+          <button
+            type="button"
+            onClick={() => setActiveSection('about')}
+            className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors shrink-0 md:w-full text-left select-none ${
+              activeSection === 'about'
+                ? 'bg-primary text-primary-foreground shadow-xs font-semibold'
+                : 'text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+            }`}
+          >
+            <Info className={`w-4 h-4 shrink-0 ${activeSection === 'about' ? 'text-primary-foreground' : accent('about').text}`} />
+            <span className="truncate">关于</span>
+          </button>
         </div>
 
         {/* Right Content Area */}
         <div className="md:col-span-9 lg:col-span-9 min-w-0 space-y-6">
-          {!currentSection ? (
+          {activeSection === 'about' ? <AboutCard /> : !currentSection ? (
             <div className="text-sm text-muted-foreground py-12 text-center">
               {loading ? '正在加载配置…' : '配置加载失败，请点击「刷新配置」重试'}
             </div>

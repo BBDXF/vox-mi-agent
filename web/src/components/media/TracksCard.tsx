@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { accent } from '@/lib/accent';
 import {
   Music2,
   Search,
@@ -213,7 +214,7 @@ export function TracksCard() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <Music2 className="w-4 h-4 text-primary" />
+              <Music2 className={`w-4 h-4 ${accent('media').text}`} />
               <CardTitle>曲目列表与检索 (Tracks)</CardTitle>
               <Badge variant="secondary" className="font-mono text-xs">
                 {total.toLocaleString()} 首

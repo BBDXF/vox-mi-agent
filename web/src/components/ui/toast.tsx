@@ -70,7 +70,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <AlertCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
             )}
             {t.type === 'info' && (
-              <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+              <Info className="w-5 h-5 text-sky-500 shrink-0 mt-0.5" />
             )}
             <div className="flex-1 min-w-0">
               {t.title && (

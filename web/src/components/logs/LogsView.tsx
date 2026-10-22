@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { accent } from '@/lib/accent';
+import { IconChip } from '@/components/ui/icon-chip';
 import {
   ScrollText,
   RefreshCw,
@@ -200,7 +202,7 @@ export function LogsView({ onNavigateToConversation }: LogsViewProps) {
       <header className="px-4 md:px-8 py-3.5 border-b bg-card/60 backdrop-blur shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-bold tracking-tight text-foreground flex items-center gap-2">
-            <ScrollText className="w-5 h-5 text-primary" />
+            <IconChip icon={ScrollText} color="logs" />
             运行日志与调用追踪 (Trace Logs)
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -396,7 +398,7 @@ export function LogsView({ onNavigateToConversation }: LogsViewProps) {
                             ) : row.kind === 'tool' ? (
                               <Wrench className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                             ) : (
-                              <Cpu className="w-3.5 h-3.5 text-primary shrink-0" />
+                              <Cpu className={`w-3.5 h-3.5 shrink-0 ${accent('llm').text}`} />
                             )}
                             <span className="truncate max-w-[160px]">{row.name}</span>
                           </div>
@@ -481,7 +483,7 @@ export function LogsView({ onNavigateToConversation }: LogsViewProps) {
             {/* Drawer Header */}
             <div className="px-5 py-4 border-b bg-muted/20 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2 min-w-0">
-                <ScrollText className="w-4 h-4 text-primary shrink-0" />
+                <ScrollText className={`w-4 h-4 shrink-0 ${accent('logs').text}`} />
                 <div className="min-w-0">
                   <h3 className="text-sm font-bold text-foreground truncate">
                     追踪节点详情: {selectedTrace.name}
@@ -593,7 +595,7 @@ export function LogsView({ onNavigateToConversation }: LogsViewProps) {
               <div className="p-3.5 rounded-lg border bg-primary/5 border-primary/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="space-y-0.5">
                   <div className="font-semibold text-foreground flex items-center gap-1.5">
-                    <MessageSquare className="w-3.5 h-3.5 text-primary" />
+                    <MessageSquare className={`w-3.5 h-3.5 ${accent('chat').text}`} />
                     关联历史对话
                   </div>
                   <div className="font-mono text-[10px] text-muted-foreground">

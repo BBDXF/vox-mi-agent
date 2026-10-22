@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { accent } from '@/lib/accent';
 import {
   Table,
   FileCode,
@@ -92,7 +93,7 @@ export function SourcePreviewDialog({
         {/* Header */}
         <div className="px-5 py-3.5 border-b bg-muted/20 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
-            <Eye className="w-4 h-4 text-primary" />
+            <Eye className={`w-4 h-4 ${accent('sources').text}`} />
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-bold text-foreground">

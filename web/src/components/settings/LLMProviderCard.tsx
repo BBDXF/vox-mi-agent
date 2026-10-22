@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { IconChip } from '@/components/ui/icon-chip';
 import type { FormEvent } from 'react';
 import {
   Cpu,
@@ -324,7 +325,7 @@ export function LLMProviderCard({ currentSettings, onSaved }: LLMProviderCardPro
       <CardHeader className="pb-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Cpu className="w-5 h-5 text-primary" />
+            <IconChip icon={Cpu} color="llm" />
             <CardTitle>大语言模型 (LLM Provider)</CardTitle>
           </div>
           {loadingProviders && (

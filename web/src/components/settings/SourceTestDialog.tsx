@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { accent } from '@/lib/accent';
 import {
   Play,
   RefreshCw,
@@ -152,7 +153,7 @@ export function SourceTestDialog({
         {/* Header */}
         <div className="px-5 py-3.5 border-b bg-muted/20 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
-            <FileTerminal className="w-4 h-4 text-primary" />
+            <FileTerminal className={`w-4 h-4 ${accent('sources').text}`} />
             <div>
               <h3 className="text-sm font-bold text-foreground">
                 数据源交互测试 (Test Run): {sourceName}

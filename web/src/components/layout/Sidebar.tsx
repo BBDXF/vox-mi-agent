@@ -8,6 +8,10 @@ import {
   ScrollText,
   BookOpen,
 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { accent, type Area } from '@/lib/accent';
+import { getVersion, type VersionInfo } from '@/lib/version';
+import { AboutDialog } from '@/components/about/AboutDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -29,6 +33,10 @@ export function Sidebar({
   onToggleTheme,
   healthOk,
 }: SidebarProps) {
+  const [ver, setVer] = useState<VersionInfo | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  useEffect(() => { getVersion().then(setVer); }, []);
+
   const navItems: Array<{
     id: NavTab;
     label: string;
@@ -128,7 +136,7 @@ export function Sidebar({
                 )}
               >
                 <div className="flex items-center gap-2.5">
-                  <Icon className="w-4 h-4 shrink-0" />
+                  <Icon className={cn('w-4 h-4 shrink-0', !isActive && accent(item.id as Area).text)} />
                   <span>{item.label}</span>
                 </div>
               </button>
@@ -154,6 +162,16 @@ export function Sidebar({
           </div>
           <Activity className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
         </div>
+
+        <button
+          type="button"
+          onClick={() => setAboutOpen(true)}
+          className="w-full text-left px-2 text-[10px] font-mono text-muted-foreground/70 hover:text-foreground truncate"
+          title="关于"
+        >
+          {ver ? `v${ver.version}${ver.commit ? ` · ${ver.commit.slice(0, 7)}` : ''}` : ' '}
+        </button>
+        {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
 
         {/* Theme Toggle */}
         <div className="flex items-center justify-between pt-1">

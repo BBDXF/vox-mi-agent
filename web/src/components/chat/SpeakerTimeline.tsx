@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { PALETTE, STEP } from '@/lib/accent';
 import { Check, Copy, ExternalLink, Mic, Music, Pause, Square, Play, Volume2, Wrench, Brain, Ear, Radio, Activity, ChevronRight, ChevronDown, User, Flag } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { MessageBubble } from './MessageBubble';
@@ -68,6 +69,10 @@ function ToolStep({ call, res }: { call?: MockEvent; res?: MockEvent }) {
   );
 }
 
+const iconStep = (I: any): keyof typeof STEP =>
+  I === Radio ? 'detect' : I === Pause || I === Square ? 'interrupt' : I === Brain ? 'llm' : I === Wrench ? 'tool'
+  : I === Mic ? 'tts' : I === Play || I === Music || I === Volume2 ? 'play' : 'native';
+
 interface Step { key: string; icon: any; label: React.ReactNode; body?: React.ReactNode; tone?: string; }
 
 function buildSteps(evs: MockEvent[]): Step[] {
@@ -133,7 +138,7 @@ function TurnCard({ id, evs, conversationId }: { id: string; evs: MockEvent[]; c
   return (
     <div className="mx-4 my-3 max-w-3xl rounded-xl border bg-card shadow-xs">
       <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b">
-        <User className="w-3.5 h-3.5 text-primary shrink-0" />
+        <User className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
         <span className="font-medium text-sm flex-1 min-w-0 break-words">{ask?.text || det?.text || '（无提问文本）'}</span>
         {routeLabel && <Badge variant={route === 'ignored' ? 'secondary' : 'default'} className="text-[10px]">{routeLabel}</Badge>}
         {end?.canceled && <Badge variant="warning" className="text-[10px]">已取消</Badge>}
@@ -146,9 +151,10 @@ function TurnCard({ id, evs, conversationId }: { id: string; evs: MockEvent[]; c
         <ol className="relative space-y-3 border-l border-border ml-2">
           {steps.map((st) => {
             const Icon = st.icon;
+            const ic = st.tone === 'err' ? 'error' : iconStep(Icon);
             return (
               <li key={st.key} className="pl-5 relative">
-                <span className={`absolute -left-[9px] top-0 w-[18px] h-[18px] rounded-full border bg-background flex items-center justify-center ${st.tone === 'err' ? 'border-destructive text-destructive' : 'text-muted-foreground'}`}><Icon className="w-2.5 h-2.5" /></span>
+                <span className={`absolute -left-[9px] top-0 w-[18px] h-[18px] rounded-full border bg-background flex items-center justify-center ${PALETTE[STEP[ic]].ring} ${PALETTE[STEP[ic]].chip}`}><Icon className="w-2.5 h-2.5" /></span>
                 <div className="text-xs flex items-center gap-1.5 min-h-[18px]">{st.label}</div>
                 {st.body && <div className="mt-1">{st.body}</div>}
               </li>
