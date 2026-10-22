@@ -89,7 +89,7 @@ const flattenEvents = (r: { events: MockEvent[]; last_seq?: number }) => ({
 });
 export const getSpeakerEvents = (after: number, conversation_id?: string) =>
   req<{ events: MockEvent[]; last_seq?: number }>(`api/speaker/events?after=${after}${conversation_id ? '&conversation_id=' + encodeURIComponent(conversation_id) : ''}`).then(flattenEvents);
-export const mockAsk = (text: string, device_id?: string, native_reply = true) =>
-  req<{ ok?: boolean; conversation_id?: string }>('api/speaker/mock/ask', 'POST', { text, device_id, native_reply });
+export const mockAsk = (text: string, device_id?: string) =>
+  req<{ ok?: boolean; conversation_id?: string }>('api/speaker/mock/ask', 'POST', { text, device_id });
 export const getMockEvents = (after: number) =>
   req<{ events: MockEvent[]; last_seq?: number }>(`api/speaker/mock/events?after=${after}`);

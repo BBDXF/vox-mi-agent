@@ -37,7 +37,6 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
   const afterRef = useRef(0);
 
   const [input, setInput] = useState('');
-  const [nativeReply, setNativeReply] = useState(true);
   const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -121,7 +120,7 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
     if (!text || sending || !editable) return;
     setSending(true);
     try {
-      const r = await mockAsk(text, DEBUG_ID, nativeReply);
+      const r = await mockAsk(text, DEBUG_ID);
       setInput('');
       if (r.conversation_id) setDebugConvOverride(r.conversation_id);
       loadStatus(); loadConversations();
@@ -247,9 +246,6 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
                   {EXAMPLES.map((p) => <button key={p} onClick={() => send(p)} disabled={sending} className="shrink-0 px-2 py-0.5 rounded-full border bg-background hover:bg-muted text-muted-foreground hover:text-foreground">{p}</button>)}
                 </div>
               )}
-              <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer w-fit">
-                <input type="checkbox" role="switch" checked={nativeReply} onChange={(e) => setNativeReply(e.target.checked)} className="accent-primary w-3.5 h-3.5" />模拟小爱原生回复
-              </label>
               <div className="flex items-end gap-2 bg-background rounded-xl border border-input focus-within:ring-1 focus-within:ring-ring p-1.5">
                 <Textarea value={input} onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}

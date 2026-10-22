@@ -198,7 +198,7 @@ func (s *Server) mockAsk(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		DeviceID    string `json:"device_id"`
 		Text        string `json:"text"`
-		NativeReply bool   `json:"native_reply"`
+		NativeReply *bool  `json:"native_reply"` // default true: the debug device always simulates XiaoAi answering
 	}
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -225,7 +225,8 @@ func (s *Server) mockAsk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "conversation: "+err.Error())
 		return
 	}
-	s.app.Mock.SetNativeReply(in.NativeReply)
+	native := in.NativeReply == nil || *in.NativeReply
+	s.app.Mock.SetNativeReply(native)
 	a := s.app.Mock.InjectAsk(dev.DeviceID, strings.TrimSpace(in.Text))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "ask": a, "conversation_id": conv})
 }
