@@ -29,7 +29,7 @@ web:
 	  if [ ! -d node_modules ] || [ package-lock.json -nt node_modules ]; then \
 	    $(if $(wildcard certs/extra-ca.crt),[ -s ../certs/extra-ca.crt ] && export NODE_EXTRA_CA_CERTS=../certs/extra-ca.crt;) npm ci --silent --no-audit --no-fund; fi && \
 	  npm run build; fi
-	@if [ -d web/dist ]; then rm -rf internal/webui/dist && mkdir -p internal/webui/dist && cp -r web/dist/. internal/webui/dist/; fi
+	@if [ -d web/dist ]; then rm -rf internal/webui/dist && mkdir -p internal/webui/dist && cp -r web/dist/. internal/webui/dist/ && touch internal/webui/dist/.gitkeep; fi
 
 test: tools
 	go test ./...
