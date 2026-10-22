@@ -33,5 +33,6 @@ appcenter-cli install-fpk vox-mi-agent.fpk
 - [ ] 桌面入口 url 方式 vs iframe
 - [ ] 未来可选：网关模式（gatewayPrefix + socket）提供 `/app/vox`
 - [ ] manifest 更新日志键名：`changelog` 还是 `change_log`
-- [ ] 向导端口修改后 `ui/config` 的 port 是否需 `${wizard_port}`
+- [ ] `ui/config` 的 port 已写成 `${wizard_port}`：确认改端口后桌面入口打开的是新端口；`manifest` 的 `service_port=8080` 与端口检查（`checkport`、`TRIM_SERVICE_PORT`）是否也需跟随
+- [ ] 平台自行启动 compose 时能否读到 `docker/.env`（`cmd/main` 已显式 `--env-file`）
 - [ ] 卸载向导 `wizard_keep_data` 的处理（目前 uninstall 回调未删数据）
