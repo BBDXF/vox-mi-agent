@@ -247,13 +247,18 @@ type SpeakerMock struct {
 	FailRate  float64 `yaml:"fail_rate" json:"fail_rate"`
 }
 
+// DefaultBasePath is the default reverse-proxy sub path. Requests without the
+// prefix are still served, so direct http://IP:port/ access keeps working.
+const DefaultBasePath = "/app/vox"
+
 // Defaults returns the built-in defaults (before file/env). Tool paths are
 // left empty and resolved from Tools.Dir by Load.
 func Defaults() *Config {
 	return &Config{
 		DataDir: DefaultDataDir,
 		Server: Server{
-			Listen: "tcp://127.0.0.1:8080",
+			Listen:   "tcp://127.0.0.1:8080",
+			BasePath: DefaultBasePath,
 		},
 		LLM: LLM{
 			Provider:    llm.CustomPresetID,

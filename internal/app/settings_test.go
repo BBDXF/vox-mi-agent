@@ -560,12 +560,12 @@ func TestSectionSpeakerLoggingServer(t *testing.T) {
 		}
 	}
 	// server: persisted, restart required, listener untouched
-	res = put(t, a, "server", `{"listen":"tcp://0.0.0.0:9999","base_path":"/app/vox","auth":{"require_admin":true}}`)
+	res = put(t, a, "server", `{"listen":"tcp://0.0.0.0:9999","base_path":"/app/x","auth":{"require_admin":true}}`)
 	if !res.RestartRequired || len(res.Applied) != 0 || len(res.Changed) != 3 {
 		t.Fatalf("%+v", res)
 	}
 	r = reload(t, dir)
-	if r.Server.Listen != "tcp://0.0.0.0:9999" || r.Server.BasePath != "/app/vox" || !r.Server.Auth.RequireAdmin {
+	if r.Server.Listen != "tcp://0.0.0.0:9999" || r.Server.BasePath != "/app/x" || !r.Server.Auth.RequireAdmin {
 		t.Fatalf("persisted %+v", r.Server)
 	}
 	if a.Cfg.Server.Listen == "tcp://0.0.0.0:9999" {

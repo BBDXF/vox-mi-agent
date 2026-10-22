@@ -5,7 +5,7 @@
 
 server:
   listen: "tcp://127.0.0.1:8080"      # or "unix:///data/app.sock"
-  base_path: ""                       # reverse-proxy sub path, e.g. "/app/vox"
+  base_path: "/app/vox"               # sub path; requests without it are served too
   auth:
     require_admin: false
 

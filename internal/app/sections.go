@@ -857,7 +857,7 @@ func serverSection() *section {
 		RestartRequired: true,
 		fields: []*fieldDef{
 			withRestart(strField("listen", "监听地址：tcp://host:port 或 unix:///path/app.sock", func(c *config.Config) *string { return &c.Server.Listen })),
-			withRestart(strField("base_path", "反向代理子路径（如 /app/vox），留空表示根路径", func(c *config.Config) *string { return &c.Server.BasePath })),
+			withRestart(strField("base_path", "子路径，默认 /app/vox；不带前缀的访问同样可用，留空表示仅根路径", func(c *config.Config) *string { return &c.Server.BasePath })),
 			withRestart(boolField("auth.require_admin", "要求请求头 X-Trim-Isadmin: true 才能访问 API", func(c *config.Config) *bool { return &c.Server.Auth.RequireAdmin })),
 		},
 		validate: func(a *App, old, n *config.Config, provided, changed keySet, fe fieldErrs) {
