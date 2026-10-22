@@ -15,9 +15,9 @@
 ## 构建
 ```sh
 make fpk            # 等价 fnos/build.sh $(VERSION)，输出 dist/fpk/
-fnpack build vox-mi-agent   # 在 dist/fpk 内（build.sh 检测到 fnpack 会自动执行）
+# 装了 fnpack 时自动在 dist/fpk/vox-mi-agent 内执行 fnpack build，输出 dist/fpk/vox-mi-agent_<版本>.fpk
 ```
-无 fnpack 时只生成 tar.gz。新建骨架可用 `fnpack create`。
+无 fnpack 时只生成 tar.gz。发版时 CI 用官方 fnpack 1.2.3 打包，`.fpk` 附在 GitHub Release 中。新建骨架可用 `fnpack create`。
 
 ## 安装测试
 ```sh
