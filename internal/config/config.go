@@ -248,7 +248,7 @@ type SpeakerMock struct {
 }
 
 // DefaultBasePath is the default reverse-proxy sub path. Requests without the
-// prefix are still served, so direct http://IP:port/ access keeps working.
+// prefix redirect ("/") or 404, except /healthz.
 const DefaultBasePath = "/app/vox"
 
 // Defaults returns the built-in defaults (before file/env). Tool paths are

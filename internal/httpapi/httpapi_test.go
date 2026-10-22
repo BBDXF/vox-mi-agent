@@ -72,7 +72,7 @@ func newEnv(t *testing.T, p llm.Provider, mod func(*config.Config), opts ...Opti
 		"index.html":    {Data: []byte("<html>spa</html>")},
 		"assets/app.js": {Data: []byte("console.log(1)")},
 	}
-	srv := httptest.NewServer(New(a, append([]Option{WithStatic(static)}, opts...)...).Handler())
+	srv := httptest.NewServer(New(a, append([]Option{WithStatic(static), WithBasePath("")}, opts...)...).Handler())
 	t.Cleanup(srv.Close)
 	return &testEnv{app: a, dir: dir, srv: srv}
 }
@@ -322,7 +322,7 @@ func (b blockingProvider) Stream(ctx context.Context, _ llm.Request) (<-chan llm
 func (blockingProvider) ctxDone(*testing.T) <-chan struct{} { return cancelledCh }
 
 func TestBasePathStripping(t *testing.T) {
-	e := newEnv(t, llm.NewFake(), func(c *config.Config) { c.Server.BasePath = "/app/vox" })
+	e := newEnv(t, llm.NewFake(), func(c *config.Config) { c.Server.BasePath = "/app/vox" }, WithBasePath("/app/vox"))
 	for _, p := range []string{"/healthz", "/app/vox/healthz"} {
 		resp, b := e.do(t, "GET", p, "")
 		if resp.StatusCode != 200 || !strings.Contains(string(b), `"status":"ok"`) {
@@ -347,6 +347,21 @@ func TestBasePathStripping(t *testing.T) {
 	}
 	if resp.StatusCode == 200 && strings.Contains(string(b), "running") {
 		t.Errorf("/app/voxel must not be stripped as /app/vox")
+	}
+	// single canonical location: "/" redirects, other unprefixed paths 404
+	nc := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	for p, want := range map[string]string{"/": "/app/vox/", "/app/vox?a=1": "/app/vox/?a=1"} {
+		r, err := nc.Get(e.srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		if r.StatusCode != http.StatusFound || r.Header.Get("Location") != want {
+			t.Errorf("%s: %d -> %q", p, r.StatusCode, r.Header.Get("Location"))
+		}
+	}
+	if resp, _ = e.do(t, "GET", "/api/media/status", ""); resp.StatusCode != 404 {
+		t.Errorf("unprefixed api: %d", resp.StatusCode)
 	}
 }
 

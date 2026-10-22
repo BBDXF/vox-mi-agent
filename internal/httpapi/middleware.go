@@ -25,7 +25,30 @@ func stripBase(basePath string, next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == bp || strings.HasPrefix(p, bp+"/") {
+		if p == bp {
+			// The UI uses relative asset/API paths; without the trailing slash
+			// they would resolve against the parent directory.
+			target := bp + "/"
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusFound)
+			return
+		}
+		if !strings.HasPrefix(p, bp+"/") {
+			// One canonical location: the root sends browsers to the base path;
+			// only /healthz (container healthcheck) stays reachable outside it.
+			switch p {
+			case "/", "/index.html":
+				http.Redirect(w, r, bp+"/", http.StatusFound)
+			case "/healthz":
+				next.ServeHTTP(w, r)
+			default:
+				http.NotFound(w, r)
+			}
+			return
+		}
+		{
 			r2 := new(http.Request)
 			*r2 = *r
 			u := *r.URL

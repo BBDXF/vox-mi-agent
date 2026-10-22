@@ -72,7 +72,7 @@ func spkEnv(t *testing.T, xm *httptest.Server, p llm.Provider) *testEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { a.Close() })
-	srv := httptest.NewServer(New(a, WithStatic(fstest.MapFS{"index.html": {Data: []byte("x")}})).Handler())
+	srv := httptest.NewServer(New(a, WithStatic(fstest.MapFS{"index.html": {Data: []byte("x")}}), WithBasePath("")).Handler())
 	t.Cleanup(srv.Close)
 	return &testEnv{app: a, dir: dir, srv: srv}
 }
