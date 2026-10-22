@@ -27,6 +27,4 @@ web/dist/
 /vendor-src/
 .tools/
 
-# Local-only extra CAs (corporate proxy); never used by CI
-/certs/
 /internal/webui/dist/assets/

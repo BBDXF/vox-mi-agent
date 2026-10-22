@@ -19,7 +19,7 @@ var audioTypes = map[string]string{
 }
 
 // serveAudio handles GET/HEAD /audio/{file} where file = {track_id}.{ext}.
-// Access is authorised solely by the HMAC signature (PROJECT_DESIGN.md §5.4).
+// Access is authorised solely by the HMAC signature (docs/DESIGN.md §5.4).
 func (s *Server) serveAudio(w http.ResponseWriter, r *http.Request) {
 	file := chi.URLParam(r, "file")
 	dot := strings.LastIndexByte(file, '.')

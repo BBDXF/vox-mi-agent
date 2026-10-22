@@ -1,4 +1,4 @@
-# fnOS conventional path. Also usable standalone: docker compose -f app/docker/docker-compose.yaml up
+# Usage: docker compose --env-file .env up -d  (add -f compose.local.yaml for local CA; see certs/README.md)
 services:
   app:
     image: vox-mi-agent:dev

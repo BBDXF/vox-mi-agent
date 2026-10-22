@@ -1,5 +1,5 @@
 // Package mediaurl signs and verifies the temporary media URLs handed to the
-// speaker (PROJECT_DESIGN.md §5.4) and manages the persistent server secret.
+// speaker (docs/DESIGN.md §5.4) and manages the persistent server secret.
 package mediaurl
 
 import (

@@ -1,6 +1,6 @@
 // Package speaker defines the speaker driver abstraction (mock | log |
 // xiaomi), the Manager that adapts it to the audio tools, and the Hook that
-// lets the agent take over the speaker's conversations (PROJECT_DESIGN.md §6.7).
+// lets the agent take over the speaker's conversations (docs/DESIGN.md §6.7).
 package speaker
 
 import (

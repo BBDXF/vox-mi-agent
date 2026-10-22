@@ -1,5 +1,5 @@
 // Package audio implements the search_audio, play_audio and set_volume tools
-// (PROJECT_DESIGN.md §6.3 / §6.4.2). File paths never reach the LLM.
+// (docs/DESIGN.md §6.3 / §6.4.2). File paths never reach the LLM.
 package audio
 
 import (

@@ -1,6 +1,6 @@
 // Package media owns the local music library: scanning folders, writing the
 // songs list, prebuilding the fzq index cache, and searching it
-// (PROJECT_DESIGN.md §6.4.2).
+// (docs/DESIGN.md §6.4.2).
 package media
 
 import (

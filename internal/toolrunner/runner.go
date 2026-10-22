@@ -1,5 +1,5 @@
 // Package toolrunner is the only place that spawns external tool binaries
-// (fzq / jq / yq). See PROJECT_DESIGN.md §6.9.
+// (fzq / jq / yq). See docs/DESIGN.md §6.9.
 //
 // Rules enforced here: no shell, argv-only; environment cleared to
 // LANG/PATH; own process group killed on timeout/cancel; stdin/stdout/stderr

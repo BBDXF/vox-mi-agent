@@ -225,7 +225,7 @@ type SpeakerDevice struct {
 	MiotTTS  string `yaml:"miot_tts" json:"miot_tts"`   // "siid-aiid", empty = by model
 }
 
-// SpeakerHook configures the conversation hook (PROJECT_DESIGN.md §6.7.3).
+// SpeakerHook configures the conversation hook (docs/DESIGN.md §6.7.3).
 type SpeakerHook struct {
 	Mode     string   `yaml:"mode" json:"mode"` // music|keyword|all|off
 	Keywords []string `yaml:"keywords" json:"keywords"`
