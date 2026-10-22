@@ -4,7 +4,6 @@ import { ChatView } from '@/components/chat/ChatView';
 import { SettingsView } from '@/components/settings/SettingsView';
 import { MediaView } from '@/components/media/MediaView';
 import { LogsView } from '@/components/logs/LogsView';
-import { SpeakerSimulatorView } from '@/components/speaker/SpeakerSimulatorView';
 import { ToastProvider } from '@/components/ui/toast';
 import { getHealth } from '@/lib/api';
 import {
@@ -81,7 +80,6 @@ export function App() {
             )}
             {currentTab === 'settings' && <SettingsView />}
             {currentTab === 'media' && <MediaView />}
-            {currentTab === 'speaker_simulator' && <SpeakerSimulatorView onGoSettings={() => setCurrentTab('settings')} />}
             {currentTab === 'logs' && (
               <LogsView
                 onNavigateToConversation={(convId) => {

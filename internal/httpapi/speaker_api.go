@@ -13,13 +13,14 @@ import (
 )
 
 type speakerDeviceView struct {
-	DeviceID          string `json:"device_id"`
-	Name              string `json:"name"`
-	Hardware          string `json:"hardware"`
-	Enabled           bool   `json:"enabled"`
-	Online            *bool  `json:"online,omitempty"`
-	PlayModeEffective string `json:"play_mode_effective"`
-	TTSModeEffective  string `json:"tts_mode_effective"`
+	DeviceID          string  `json:"device_id"`
+	ConversationID    *string `json:"conversation_id"` // null until the first handled ask
+	Name              string  `json:"name"`
+	Hardware          string  `json:"hardware"`
+	Enabled           bool    `json:"enabled"`
+	Online            *bool   `json:"online,omitempty"`
+	PlayModeEffective string  `json:"play_mode_effective"`
+	TTSModeEffective  string  `json:"tts_mode_effective"`
 }
 
 func (s *Server) speakerStatus(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +31,11 @@ func (s *Server) speakerStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	views := make([]speakerDeviceView, 0, len(devs))
 	for _, d := range devs {
-		views = append(views, speakerDeviceView{DeviceID: d.DeviceID, Name: d.Name, Hardware: d.Hardware, Enabled: d.Enabled, Online: d.Online,
+		var conv *string
+		if id := a.Hook.LookupConversation(d.DeviceID); id != "" {
+			conv = &id
+		}
+		views = append(views, speakerDeviceView{DeviceID: d.DeviceID, ConversationID: conv, Name: d.Name, Hardware: d.Hardware, Enabled: d.Enabled, Online: d.Online,
 			PlayModeEffective: xiaomi.PlayMode(d.PlayMode, d.Hardware), TTSModeEffective: xiaomi.TTSMode(d.TTSMode)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -214,14 +219,21 @@ func (s *Server) mockAsk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	conv, err := s.app.Hook.Conversation(r.Context(), dev)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "conversation: "+err.Error())
+		return
+	}
 	s.app.Mock.SetNativeReply(in.NativeReply)
 	a := s.app.Mock.InjectAsk(dev.DeviceID, strings.TrimSpace(in.Text))
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "ask": a})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "ask": a, "conversation_id": conv})
 }
 
-func (s *Server) mockEvents(w http.ResponseWriter, r *http.Request) {
-	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
-	ev := s.app.Mock.Events(after)
+// speakerEvents serves GET /api/speaker/events (and the mock/events alias).
+func (s *Server) speakerEvents(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	after, _ := strconv.ParseInt(q.Get("after"), 10, 64)
+	ev := s.app.Speaker.Log().Events(after, q.Get("device_id"), q.Get("conversation_id"))
 	if ev == nil {
 		ev = []speaker.MockEvent{}
 	}
@@ -230,4 +242,32 @@ func (s *Server) mockEvents(w http.ResponseWriter, r *http.Request) {
 		last = ev[n-1].Seq
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": ev, "last_seq": last})
+}
+
+// speakerConversations maps conversation id -> device id.
+func (s *Server) speakerConversations(ctx context.Context) map[string]string {
+	const prefix = "speaker.conversation."
+	kv, err := s.app.Store.SettingsWithPrefix(ctx, prefix)
+	out := map[string]string{}
+	if err != nil {
+		return out
+	}
+	for k, v := range kv {
+		out[v] = strings.TrimPrefix(k, prefix)
+	}
+	return out
+}
+
+func (s *Server) deviceName(id, fallback string) string {
+	for _, d := range s.app.Speaker.Configured() {
+		if d.DeviceID == id && d.Name != "" {
+			return d.Name
+		}
+	}
+	for _, d := range s.app.Speaker.Devices() {
+		if d.DeviceID == id && d.Name != "" {
+			return d.Name
+		}
+	}
+	return fallback
 }

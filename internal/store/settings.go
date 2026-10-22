@@ -27,6 +27,24 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 	return err
 }
 
+// SettingsWithPrefix returns all settings whose key starts with prefix.
+func (s *Store) SettingsWithPrefix(ctx context.Context, prefix string) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key,value FROM settings WHERE substr(key,1,?)=?`, len(prefix), prefix)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
 // AuditEntry is a row of audit_log.
 type AuditEntry struct {
 	ID     int64           `json:"id"`

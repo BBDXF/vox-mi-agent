@@ -2,6 +2,8 @@ export interface Conversation {
   id: string;
   title?: string;
   channel?: string;
+  device_id?: string;
+  device_name?: string;
   created_at: string;
   updated_at: string;
 }

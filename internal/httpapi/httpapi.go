@@ -96,7 +96,8 @@ func New(a *app.App, opts ...Option) *Server {
 	r.Get("/api/speaker/devices/discover", s.speakerDiscover)
 	r.Post("/api/speaker/test", s.speakerTest)
 	r.Post("/api/speaker/mock/ask", s.mockAsk)
-	r.Get("/api/speaker/mock/events", s.mockEvents)
+	r.Get("/api/speaker/events", s.speakerEvents)
+	r.Get("/api/speaker/mock/events", s.speakerEvents) // alias
 	r.NotFound(s.notFound)
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -205,11 +206,14 @@ type conversationDTO struct {
 	Channel   string `json:"channel"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+	// speaker channel only: the device this conversation belongs to.
+	DeviceID   string `json:"device_id,omitempty"`
+	DeviceName string `json:"device_name,omitempty"`
 }
 
 func toConv(c store.Conversation) conversationDTO {
-	return conversationDTO{c.ID, c.Title, c.Channel,
-		c.CreatedAt.UTC().Format(time.RFC3339), c.UpdatedAt.UTC().Format(time.RFC3339)}
+	return conversationDTO{ID: c.ID, Title: c.Title, Channel: c.Channel,
+		CreatedAt: c.CreatedAt.UTC().Format(time.RFC3339), UpdatedAt: c.UpdatedAt.UTC().Format(time.RFC3339)}
 }
 
 func (s *Server) listConversations(w http.ResponseWriter, r *http.Request) {
@@ -248,8 +252,21 @@ func (s *Server) listConversations(w http.ResponseWriter, r *http.Request) {
 		rows = rows[:limit]
 		resp.NextBefore = rows[limit-1].ID
 	}
+	var devOf map[string]string // conversation id -> device id
 	for _, c := range rows {
-		resp.Items = append(resp.Items, toConv(c))
+		if c.Channel == store.ChannelSpeaker {
+			if devOf == nil {
+				devOf = s.speakerConversations(r.Context())
+			}
+			break
+		}
+	}
+	for _, c := range rows {
+		dto := toConv(c)
+		if id, ok := devOf[c.ID]; ok && c.Channel == store.ChannelSpeaker {
+			dto.DeviceID, dto.DeviceName = id, s.deviceName(id, c.Title)
+		}
+		resp.Items = append(resp.Items, dto)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

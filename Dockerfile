@@ -34,6 +34,9 @@ RUN --mount=type=secret,id=extraca,required=false \
 RUN apk add --no-cache ca-certificates curl tzdata bash coreutils findutils \
  && addgroup -g 1000 app && adduser -D -u 1000 -G app app \
  && mkdir -p /data /tmp/toolrun && chown -R app:app /data /tmp/toolrun
+# apk's ca-certificates trigger rebuilds the bundle: re-append the local-only CA.
+RUN --mount=type=secret,id=extraca,required=false \
+    if [ -s /run/secrets/extraca ]; then cat /run/secrets/extraca >> /etc/ssl/certs/ca-certificates.crt; fi
 COPY --from=tools /out/ /usr/local/bin/
 COPY dist/linux_${TARGETARCH}/ /usr/local/bin/
 ENV VOX_TOOLS_DIR=/usr/local/bin VOX_DATA_DIR=/data

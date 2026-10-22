@@ -21,41 +21,17 @@ const (
 	EvReply       = "reply"
 )
 
-// MockEvent is one entry of the mock action log.
-type MockEvent struct {
-	Seq    int64     `json:"seq"`
-	TS     time.Time `json:"ts"`
-	Device string    `json:"device_id"`
-	Kind   string    `json:"kind"`
-	Text   string    `json:"text,omitempty"`
-	URL    string    `json:"url,omitempty"`
-	Volume int       `json:"volume,omitempty"`
-	// LatencyMS is the time since the latest ask on this device (set on every
-	// event except "ask", within 60s of that ask).
-	LatencyMS *int64 `json:"latency_ms,omitempty"`
-	// play_url: track metadata (when known).
-	Title  string `json:"title,omitempty"`
-	Artist string `json:"artist,omitempty"`
-	// ask_detected: the hook's decision.
-	Handled *bool  `json:"handled,omitempty"`
-	Route   string `json:"route,omitempty"` // direct|artist_random|agent|ignored
-}
-
 // ErrInjected is returned by the mock when fault injection fires.
 var ErrInjected = errors.New("mock: injected failure")
-
-const mockRing = 500
 
 // Mock is an in-memory driver with two fake devices. It records every action
 // in a ring buffer and can simulate latency and failures.
 type Mock struct {
 	mu      sync.Mutex
 	devices []Device
-	events  []MockEvent
-	seq     int64
+	log     *EventLog
 	asks    map[string][]Ask
 	lastAsk time.Time
-	askAt   map[string]time.Time // latest ask time per device
 	playing map[string]time.Time // device -> playback end (zero = until paused)
 	paused  map[string]bool
 	volume  map[string]int
@@ -79,7 +55,7 @@ func NewMock() *Mock {
 			{DeviceID: "mock-1", Name: "Mock Living Room", Hardware: "LX06", Enabled: true, PlayMode: "auto", TTSMode: "auto", Online: &t},
 			{DeviceID: "mock-2", Name: "Mock Bedroom", Hardware: "L05B", Enabled: true, PlayMode: "auto", TTSMode: "auto", Online: &t},
 		},
-		asks: map[string][]Ask{}, askAt: map[string]time.Time{}, playing: map[string]time.Time{}, paused: map[string]bool{},
+		asks: map[string][]Ask{}, log: NewEventLog(), playing: map[string]time.Time{}, paused: map[string]bool{},
 		volume: map[string]int{}, rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 		CharsPerSec: 20,
 	}
@@ -95,38 +71,23 @@ func (m *Mock) Configure(latencyMS int, failRate float64) {
 // Name implements Driver.
 func (m *Mock) Name() string { return "mock" }
 
-func (m *Mock) record(ev MockEvent) {
-	m.seq++
-	ev.Seq, ev.TS = m.seq, time.Now()
-	if t, ok := m.askAt[ev.Device]; ok && ev.Kind != EvAsk && ev.LatencyMS == nil {
-		if d := ev.TS.Sub(t).Milliseconds(); d >= 0 && d <= 60000 {
-			ev.LatencyMS = &d
-		}
-	}
-	m.events = append(m.events, ev)
-	if len(m.events) > mockRing {
-		m.events = append([]MockEvent(nil), m.events[len(m.events)-mockRing:]...)
-	}
-}
+func (m *Mock) record(ev MockEvent) { m.log.Record(ev) }
 
-// Record appends an event (used by the hook to log agent replies).
-func (m *Mock) Record(ev MockEvent) {
-	m.mu.Lock()
-	m.record(ev)
-	m.mu.Unlock()
-}
+// SelfRecords marks that the mock logs to the shared event log itself.
+func (m *Mock) SelfRecords() bool { return true }
+
+// UseLog makes the mock record into l (the Manager's shared log).
+func (m *Mock) UseLog(l *EventLog) { m.mu.Lock(); m.log = l; m.mu.Unlock() }
+
+// Record appends an event to the log.
+func (m *Mock) Record(ev MockEvent) { m.record(ev) }
 
 // Events returns events with Seq > after (oldest first).
 func (m *Mock) Events(after int64) []MockEvent {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	var out []MockEvent
-	for _, e := range m.events {
-		if e.Seq > after {
-			out = append(out, e)
-		}
-	}
-	return out
+	l := m.log
+	m.mu.Unlock()
+	return l.Events(after, "", "")
 }
 
 // inject applies latency and the failure roll; it returns with m.mu unlocked.
@@ -169,7 +130,6 @@ func (m *Mock) InjectAsk(deviceID, text string) Ask {
 	m.lastAsk = now
 	a := Ask{DeviceID: deviceID, Query: text, Time: now}
 	m.asks[deviceID] = append(m.asks[deviceID], a)
-	m.askAt[deviceID] = now
 	m.record(MockEvent{Device: deviceID, Kind: EvAsk, Text: text})
 	if m.NativeReply {
 		m.playing[deviceID] = time.Time{}
@@ -203,7 +163,7 @@ func (m *Mock) TextToSpeech(ctx context.Context, d Device, text string) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.record(MockEvent{Device: d.DeviceID, Kind: EvTTS, Text: text})
+	m.record(MockEvent{Device: d.DeviceID, Kind: EvTTS, Text: text, TurnID: turnFrom(ctx)})
 	m.startPlayback(d.DeviceID, len([]rune(text)))
 	return nil
 }
@@ -225,7 +185,7 @@ func (m *Mock) PlayByURL(ctx context.Context, d Device, url string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	meta, _ := ctx.Value(playMetaKey{}).(PlayMeta)
-	m.record(MockEvent{Device: d.DeviceID, Kind: EvPlayURL, URL: url, Title: meta.Title, Artist: meta.Artist})
+	m.record(MockEvent{Device: d.DeviceID, Kind: EvPlayURL, URL: url, Title: meta.Title, Artist: meta.Artist, TurnID: turnFrom(ctx)})
 	delete(m.paused, d.DeviceID)
 	m.playing[d.DeviceID] = time.Time{}
 	return nil
@@ -239,7 +199,7 @@ func (m *Mock) PlayerSetVolume(ctx context.Context, d Device, v int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.volume[d.DeviceID] = v
-	m.record(MockEvent{Device: d.DeviceID, Kind: EvVolume, Volume: v})
+	m.record(MockEvent{Device: d.DeviceID, Kind: EvVolume, Volume: v, TurnID: turnFrom(ctx)})
 	return nil
 }
 
@@ -254,7 +214,7 @@ func (m *Mock) PlayerPause(ctx context.Context, d Device) error {
 		m.paused[d.DeviceID] = true
 		delete(m.playing, d.DeviceID)
 	}
-	m.record(MockEvent{Device: d.DeviceID, Kind: EvPause})
+	m.record(MockEvent{Device: d.DeviceID, Kind: EvPause, TurnID: turnFrom(ctx)})
 	return nil
 }
 
@@ -269,7 +229,7 @@ func (m *Mock) PlayerPlay(ctx context.Context, d Device) error {
 		delete(m.paused, d.DeviceID)
 		m.playing[d.DeviceID] = time.Time{}
 	}
-	m.record(MockEvent{Device: d.DeviceID, Kind: EvPlay})
+	m.record(MockEvent{Device: d.DeviceID, Kind: EvPlay, TurnID: turnFrom(ctx)})
 	return nil
 }
 
@@ -282,7 +242,7 @@ func (m *Mock) PlayerStop(ctx context.Context, d Device) error {
 	defer m.mu.Unlock()
 	delete(m.playing, d.DeviceID)
 	delete(m.paused, d.DeviceID)
-	m.record(MockEvent{Device: d.DeviceID, Kind: EvStop})
+	m.record(MockEvent{Device: d.DeviceID, Kind: EvStop, TurnID: turnFrom(ctx)})
 	return nil
 }
 

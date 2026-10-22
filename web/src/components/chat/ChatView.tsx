@@ -11,11 +11,14 @@ import {
   Menu,
   X,
   Trash2,
+  Globe,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { MessageBubble } from './MessageBubble';
+import { SpeakerTimeline } from './SpeakerTimeline';
+import { getSpeakerStatus, getSpeakerEvents, mockAsk, type SpeakerStatus, type MockEvent } from '@/lib/speakerApi';
 import {
   type Conversation,
   type Message,
@@ -55,6 +58,13 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
     Record<string, { result?: unknown; error?: string; durationMs?: number }>
   >({});
 
+  const [filter, setFilter] = useState<'all' | 'web' | 'speaker'>('all');
+  const [status, setStatus] = useState<SpeakerStatus | null>(null);
+  const [target, setTarget] = useState<string>('web'); // 'web' or device_id
+  const [nativeReply, setNativeReply] = useState(true);
+  const [spEvents, setSpEvents] = useState<MockEvent[]>([]);
+  const spAfterRef = useRef(0);
+
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -69,6 +79,26 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
       behavior: smooth ? 'smooth' : 'auto',
     });
   }, []);
+
+  const isMock = status?.driver === 'mock';
+  const activeConv = conversations.find((c) => c.id === activeConvId);
+  const isSpeakerConv = activeConv?.channel === 'speaker';
+  const speakerDevices = status?.devices || [];
+
+  useEffect(() => {
+    const load = () => getSpeakerStatus().then(setStatus).catch(() => {});
+    load();
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  // keep composer target in sync with the selected conversation
+  useEffect(() => {
+    if (!activeConv) return;
+    if (activeConv.channel === 'speaker') {
+      if (isMock && activeConv.device_id) setTarget(activeConv.device_id);
+    } else setTarget('web');
+  }, [activeConvId, isMock]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch initial conversations
   const fetchConversationsList = useCallback(async () => {
@@ -147,10 +177,45 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
     };
   }, [activeConvId, scrollToBottom, toastError]);
 
+  const reloadMessages = useCallback(async (id: string) => {
+    try {
+      const res = await getMessages(id);
+      setMessages(res.items || []);
+      const map: Record<string, { result?: unknown }> = {};
+      for (const m of res.items || []) if (m.role === 'tool' && m.tool_call_id) map[m.tool_call_id] = { result: m.content };
+      setToolResults((prev) => ({ ...prev, ...map }));
+    } catch { /* ignore */ }
+  }, []);
+
+  // Poll speaker events for the active speaker conversation
+  useEffect(() => {
+    setSpEvents([]);
+    spAfterRef.current = 0;
+    if (!activeConvId || !isSpeakerConv) return;
+    const convId = activeConvId;
+    const dev = activeConv?.device_id;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const r = await getSpeakerEvents(spAfterRef.current, dev);
+        if (stop) return;
+        const evs = (r.events || []).filter((e) => e.conversation_id ? e.conversation_id === convId : !dev || e.device_id === dev);
+        if (r.last_seq != null) spAfterRef.current = r.last_seq;
+        if (evs.length) {
+          setSpEvents((p) => [...p, ...evs]);
+          if (evs.some((e) => e.kind === 'reply')) { reloadMessages(convId); fetchConversationsList(); }
+        }
+      } catch { /* backend may not support yet */ }
+    };
+    tick();
+    const t = setInterval(tick, 700);
+    return () => { stop = true; clearInterval(t); };
+  }, [activeConvId, isSpeakerConv]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Scroll on message updates
   useEffect(() => {
     scrollToBottom(false);
-  }, [messages, scrollToBottom]);
+  }, [messages, spEvents.length, scrollToBottom]);
 
   // Create new conversation
   const handleNewChat = async () => {
@@ -232,8 +297,23 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
     const textToSend = (overrideText ?? input).trim();
     if (!textToSend || isStreaming) return;
 
+    if (target !== 'web') {
+      if (!isMock) return;
+      setInput('');
+      try {
+        const r = await mockAsk(textToSend, target, nativeReply);
+        await fetchConversationsList();
+        const cid = r.conversation_id || speakerDevices.find((d) => d.device_id === target)?.conversation_id;
+        if (cid) setActiveConvId(cid);
+      } catch (err: any) {
+        toastError(err.message || '发送给模拟音箱失败');
+      }
+      return;
+    }
+
     setInput('');
-    const currentConvId = activeConvId;
+    const currentConvId = isSpeakerConv ? null : activeConvId;
+    if (isSpeakerConv) { setMessages([]); setToolResults({}); }
 
     const userMsgId = 'u_' + Date.now();
     const userMsg: Message = {
@@ -381,12 +461,17 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
     messages.flatMap((m) => (m.tool_calls || []).map((t) => t.id))
   );
 
-  const quickPrompts = [
+  const webPrompts = [
     '播放周杰伦的晴天',
     '检索本地曲库中的无损音频',
     '查一下明天出门的天气',
     '检查本地 fzq 和 jq 工具链状态',
   ];
+  const speakerPrompts = ['小爱同学，播放一首周杰伦的晴天', '播放海阔天空', '来点陈奕迅的歌', '我想听七里香', '今天天气怎么样', '问问 我的曲库有多少首歌'];
+  const quickPrompts = target === 'web' ? webPrompts : speakerPrompts;
+  const readOnlySpeaker = isSpeakerConv && !isMock;
+  const visibleConversations = conversations.filter((c) =>
+    filter === 'all' ? true : filter === 'speaker' ? c.channel === 'speaker' : c.channel !== 'speaker');
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-background">
@@ -454,6 +539,13 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
           </div>
         )}
 
+        <div className="px-3 py-1.5 border-b flex gap-1.5">
+          {([['all', '全部'], ['web', '网页'], ['speaker', '音箱']] as const).map(([k, l]) => (
+            <button key={k} type="button" onClick={() => setFilter(k)}
+              className={`text-[11px] px-2.5 py-0.5 rounded-full border ${filter === k ? 'bg-primary text-primary-foreground border-primary' : 'text-muted-foreground hover:bg-muted'}`}>{l}</button>
+          ))}
+        </div>
+
         {/* List items */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {conversations.length === 0 && !loadingList && (
@@ -462,7 +554,7 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
             </div>
           )}
 
-          {conversations.map((c) => {
+          {visibleConversations.map((c) => {
             const isActive = c.id === activeConvId;
             return (
               <div
@@ -489,7 +581,7 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
                       className="text-[9px] px-1 py-0 h-4 gap-0.5 text-indigo-500 border-indigo-200 dark:border-indigo-800 shrink-0"
                     >
                       <Radio className="w-2.5 h-2.5" />
-                      音箱
+                      {c.device_name || c.device_id || '音箱'}
                     </Badge>
                   ) : (
                     <Badge
@@ -497,7 +589,7 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
                       className="text-[9px] px-1 py-0 h-4 gap-0.5 shrink-0"
                     >
                       <Monitor className="w-2.5 h-2.5" />
-                      控制台
+                      网页
                     </Badge>
                   )}
                 </div>
@@ -550,7 +642,7 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
             >
               <Menu className="w-4 h-4" />
             </Button>
-            <MessageSquare className="w-4 h-4 text-primary shrink-0" />
+            {isSpeakerConv ? <Radio className="w-4 h-4 text-indigo-500 shrink-0" /> : <MessageSquare className="w-4 h-4 text-primary shrink-0" />}
             <div className="min-w-0">
               <h2 className="text-sm font-semibold truncate text-foreground flex items-center gap-2">
                 <span>
@@ -586,7 +678,7 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
               <RefreshCw className="w-4 h-4 animate-spin mr-2" />
               正在加载历史消息...
             </div>
-          ) : messages.length === 0 ? (
+          ) : messages.length === 0 && !(isSpeakerConv && spEvents.length > 0) ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-6 text-muted-foreground">
               <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
                 <Sparkles className="w-6 h-6 text-primary" />
@@ -611,7 +703,9 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
             </div>
           ) : (
             <>
-              {messages.map((msg) => (
+              {isSpeakerConv ? (
+                <SpeakerTimeline messages={messages} events={spEvents} toolResults={toolResults} calledIds={calledIds} conversationId={activeConvId || undefined} />
+              ) : messages.map((msg) => (
                 <MessageBubble
                   key={msg.id}
                   orphanTool={msg.role === 'tool' && !calledIds.has(msg.tool_call_id || '')}
@@ -647,13 +741,34 @@ export function ChatView({ targetConversationId }: ChatViewProps = {}) {
               </div>
             )}
 
+            {/* Target switch */}
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              <div className="inline-flex rounded-md border overflow-hidden">
+                <button type="button" onClick={() => setTarget('web')} className={`px-2.5 py-1 flex items-center gap-1 ${target === 'web' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}><Globe className="w-3 h-3" />网页</button>
+                {(speakerDevices.length ? speakerDevices : []).map((d) => (
+                  <button key={d.device_id} type="button" disabled={!isMock}
+                    title={isMock ? undefined : '真实音箱请直接对音箱说话'}
+                    onClick={() => setTarget(d.device_id)}
+                    className={`px-2.5 py-1 flex items-center gap-1 border-l ${target === d.device_id ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent`}>
+                    <Radio className="w-3 h-3" />音箱: {d.name}
+                  </button>
+                ))}
+              </div>
+              {!isMock && <span className="text-muted-foreground">真实音箱请直接对音箱说话{readOnlySpeaker && '（当前为只读实时视图，在此发送将新建网页对话）'}</span>}
+              {target !== 'web' && (
+                <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer">
+                  <input type="checkbox" role="switch" checked={nativeReply} onChange={(e) => setNativeReply(e.target.checked)} className="accent-primary w-3.5 h-3.5" />模拟小爱原生回复
+                </label>
+              )}
+            </div>
+
             {/* Input Box */}
             <div className="relative flex items-end gap-2 bg-background rounded-xl border border-input focus-within:ring-1 focus-within:ring-ring p-1.5 shadow-xs">
               <Textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="发送调试指令给小爱音箱 AI 伴侣... (Enter 发送，Shift+Enter 换行)"
+                placeholder={target === 'web' ? '发送调试指令给小爱音箱 AI 伴侣... (Enter 发送，Shift+Enter 换行)' : '对音箱说话… (Enter 发送)'}
                 className="border-0 focus-visible:ring-0 shadow-none min-h-[44px] max-h-36 py-2 px-3 text-sm bg-transparent"
                 rows={1}
                 disabled={isStreaming}

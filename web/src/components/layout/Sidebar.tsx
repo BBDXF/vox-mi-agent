@@ -2,7 +2,6 @@ import {
   MessageSquare,
   Settings,
   Music,
-  Radio,
   Sun,
   Moon,
   Activity,
@@ -12,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-export type NavTab = 'chat' | 'settings' | 'media' | 'logs' | 'speaker_simulator';
+export type NavTab = 'chat' | 'settings' | 'media' | 'logs';
 
 interface SidebarProps {
   currentTab: NavTab;
@@ -30,7 +29,7 @@ export function Sidebar({
   healthOk,
 }: SidebarProps) {
   const navItems: Array<{
-    id: NavTab | 'speaker_simulator';
+    id: NavTab;
     label: string;
     icon: typeof MessageSquare;
     badge?: string;
@@ -61,13 +60,6 @@ export function Sidebar({
       id: 'logs',
       label: '日志',
       icon: ScrollText,
-      badge: undefined,
-      disabled: false,
-    },
-    {
-      id: 'speaker_simulator',
-      label: '模拟音箱',
-      icon: Radio,
       badge: undefined,
       disabled: false,
     },

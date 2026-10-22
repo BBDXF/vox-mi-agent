@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -214,7 +215,8 @@ func TestSpeakerSettingsHotReload(t *testing.T) {
 	}
 	e.do(t, "POST", "/api/speaker/test", `{"action":"tts","text":"x","device_id":"A"}`)
 	_, b = e.do(t, "GET", "/api/speaker/mock/events", "")
-	if len(jsonOf(t, b)["events"].([]any)) != 1 {
+	// the log driver's volume action and the mock's tts share one log
+	if evs := jsonOf(t, b)["events"].([]any); len(evs) != 2 || evs[0].(map[string]any)["kind"] != "volume" || evs[1].(map[string]any)["kind"] != "tts" {
 		t.Fatalf("%s", b)
 	}
 }
@@ -277,5 +279,90 @@ func TestXiaomiVerifyEndpoints(t *testing.T) {
 	}
 	if resp, _ = e.do(t, "POST", "/api/speaker/xiaomi/retry", ""); resp.StatusCode != 502 {
 		t.Fatal(resp.StatusCode)
+	}
+}
+
+func TestSpeakerEventsConversationsAndStatus(t *testing.T) {
+	e := spkEnv(t, nil, llm.NewFake(llm.FakeTurn{Text: "你好呀。"}))
+	// status: conversation_id null before the first ask
+	_, b := e.do(t, "GET", "/api/speaker/status", "")
+	for _, d := range jsonOf(t, b)["devices"].([]any) {
+		v, ok := d.(map[string]any)["conversation_id"]
+		if !ok || v != nil {
+			t.Fatalf("conversation_id must be present and null: %s", b)
+		}
+	}
+	e.app.StartSpeaker()
+	resp, b := e.do(t, "POST", "/api/speaker/mock/ask", `{"text":"你好","device_id":"mock-2"}`)
+	ask := jsonOf(t, b)
+	conv, _ := ask["conversation_id"].(string)
+	if resp.StatusCode != 200 || conv == "" {
+		t.Fatalf("%d %s", resp.StatusCode, b)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var evs []any
+	for time.Now().Before(deadline) {
+		_, b = e.do(t, "GET", "/api/speaker/events?device_id=mock-2&conversation_id="+conv, "")
+		evs = jsonOf(t, b)["events"].([]any)
+		if len(evs) > 0 && evs[len(evs)-1].(map[string]any)["kind"] == "reply" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(evs) == 0 || evs[len(evs)-1].(map[string]any)["kind"] != "reply" {
+		t.Fatalf("%s", b)
+	}
+	for _, x := range evs {
+		m := x.(map[string]any)
+		if m["device_id"] != "mock-2" || m["conversation_id"] != conv {
+			t.Fatalf("%v", m)
+		}
+		if k := m["kind"]; k != "ask" && m["turn_id"] == nil {
+			t.Fatalf("%v lacks turn_id", m)
+		}
+	}
+	// filters + alias + after
+	if _, b = e.do(t, "GET", "/api/speaker/events?device_id=mock-1", ""); len(jsonOf(t, b)["events"].([]any)) != 0 {
+		t.Fatalf("%s", b)
+	}
+	_, b1 := e.do(t, "GET", "/api/speaker/events", "")
+	_, b2 := e.do(t, "GET", "/api/speaker/mock/events", "")
+	if string(b1) != string(b2) {
+		t.Fatal("alias differs")
+	}
+	last := jsonOf(t, b1)["last_seq"].(float64)
+	if _, b = e.do(t, "GET", "/api/speaker/events?after="+strconv.Itoa(int(last)), ""); len(jsonOf(t, b)["events"].([]any)) != 0 {
+		t.Fatalf("%s", b)
+	}
+	// status now has the conversation id for mock-2 only
+	_, b = e.do(t, "GET", "/api/speaker/status", "")
+	for _, d := range jsonOf(t, b)["devices"].([]any) {
+		m := d.(map[string]any)
+		if (m["device_id"] == "mock-2") != (m["conversation_id"] == conv) {
+			t.Fatalf("%s", b)
+		}
+	}
+	// conversations list: channel + device
+	_, wb := e.do(t, "POST", "/api/conversations", `{"title":"web chat"}`)
+	_ = wb
+	_, b = e.do(t, "GET", "/api/conversations", "")
+	var found, web bool
+	for _, it := range jsonOf(t, b)["items"].([]any) {
+		m := it.(map[string]any)
+		switch m["channel"] {
+		case "speaker":
+			found = true
+			if m["id"] != conv || m["device_id"] != "mock-2" || m["device_name"] != "Mock Bedroom" {
+				t.Fatalf("%v", m)
+			}
+		default:
+			web = true
+			if m["channel"] == nil || m["device_id"] != nil {
+				t.Fatalf("%v", m)
+			}
+		}
+	}
+	if !found || !web {
+		t.Fatalf("%s", b)
 	}
 }

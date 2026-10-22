@@ -959,3 +959,116 @@ func TestKeywordModeStripsWakeWord(t *testing.T) {
 		t.Fatalf("%+v", in)
 	}
 }
+
+// ---- shared event log ----
+
+func TestEventLogAllDriversWithConversationAndTurn(t *testing.T) {
+	ag := &fakeAgent{sentences: []string{"好的。"}}
+	r := newRig(t, ag)
+	// log driver (not self-recording): the Manager's wrapper records for it.
+	r.mgr.Set(NewLog(quiet), []Device{{DeviceID: "L1", Name: "Log One", Enabled: true}}, 0)
+	ctx := WithTurnID(context.Background(), "spk-test")
+	d, _ := r.mgr.Resolve("")
+	drv := r.mgr.Driver()
+	_ = drv.TextToSpeech(ctx, d, "你好")
+	_ = drv.PlayByURL(WithPlayMeta(ctx, "晴天", "周杰伦"), d, "http://u/a.mp3")
+	_ = drv.PlayerPause(ctx, d)
+	_ = drv.PlayerSetVolume(ctx, d, 20)
+	ev := r.mgr.Log().Events(0, "", "")
+	if k := kinds(ev); len(k) != 4 || k[0] != "tts" || k[1] != "play_url" || k[2] != "pause" || k[3] != "volume" {
+		t.Fatalf("%v", k)
+	}
+	if ev[0].TurnID != "spk-test" || ev[1].Title != "晴天" || ev[1].Artist != "周杰伦" || ev[1].URL != "http://u/a.mp3" || ev[0].Device != "L1" {
+		t.Fatalf("%+v", ev)
+	}
+	if ev[0].ConversationID != "" {
+		t.Fatal("no conversation before the first handled ask")
+	}
+	// A hook turn on a (non-mock) driver: ask, ask_detected, pause, tts, reply, all with conversation + turn ids.
+	r.mgr.Set(NewLog(quiet), nil, 0) // same type, new instance
+	m := NewMock()
+	m.CharsPerSec = 0
+	r.mgr.Set(m, nil, 0)
+	r.start("all")
+	m.InjectAsk("mock-1", "q")
+	waitFor(t, "reply", func() bool { return count(r.mgr.Log().Events(0, "", ""), EvReply) == 1 })
+	conv := r.hook.LookupConversation("mock-1")
+	if conv == "" {
+		t.Fatal("conversation should exist")
+	}
+	got := r.mgr.Log().Events(0, "mock-1", conv)
+	var turn string
+	for _, e := range got {
+		if e.Kind == EvAsk {
+			continue // recorded before the conversation existed
+		}
+		if e.ConversationID != conv {
+			t.Fatalf("%s lacks conversation: %+v", e.Kind, e)
+		}
+		if e.Kind == EvAskDetected || e.Kind == EvPause || e.Kind == EvTTS || e.Kind == EvReply {
+			if e.TurnID == "" || (turn != "" && e.TurnID != turn) {
+				t.Fatalf("%s turn id %q (want %q)", e.Kind, e.TurnID, turn)
+			}
+			turn = e.TurnID
+		}
+	}
+	if turn == "" {
+		t.Fatal("no turn ids")
+	}
+	if n := len(r.mgr.Log().Events(0, "mock-2", "")); n != 0 {
+		t.Fatalf("device filter: %d", n)
+	}
+	if n := len(r.mgr.Log().Events(0, "", "nope")); n != 0 {
+		t.Fatalf("conversation filter: %d", n)
+	}
+}
+
+// recDriver is a minimal non-mock driver that also reports asks (like xiaomi).
+type recDriver struct {
+	Log
+	mu   sync.Mutex
+	ask  *Ask
+	done bool
+}
+
+func (d *recDriver) Name() string { return "fake-xiaomi" }
+func (d *recDriver) GetLatestAsk(_ context.Context, _ Device, since time.Time) (*Ask, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.ask != nil && d.ask.Time.After(since) {
+		return d.ask, nil
+	}
+	return nil, nil
+}
+
+func TestEventLogRecordsAsksOfRealDrivers(t *testing.T) {
+	ag := &fakeAgent{sentences: []string{"好。"}}
+	r := newRig(t, ag)
+	d := &recDriver{Log: *NewLog(quiet)}
+	r.mgr.Set(d, []Device{{DeviceID: "X1", Name: "客厅", Enabled: true}}, 0)
+	r.start("all")
+	d.mu.Lock()
+	d.ask = &Ask{DeviceID: "X1", Query: "你好", Time: time.Now().Add(5 * time.Millisecond)}
+	d.mu.Unlock()
+	waitFor(t, "reply", func() bool { return count(r.mgr.Log().Events(0, "", ""), EvReply) == 1 })
+	k := kinds(r.mgr.Log().Events(0, "", ""))
+	if k[0] != "ask" || k[1] != "pause" || k[2] != "tts" {
+		t.Fatalf("%v", k)
+	}
+	for _, e := range r.mgr.Log().Events(0, "", "") {
+		if e.Kind != EvAsk && e.LatencyMS == nil {
+			t.Fatalf("%s lacks latency", e.Kind)
+		}
+	}
+}
+
+func TestEventLogRing(t *testing.T) {
+	l := NewEventLog()
+	for i := 0; i < eventRing+50; i++ {
+		l.Record(MockEvent{Device: "d", Kind: EvPause})
+	}
+	ev := l.Events(0, "", "")
+	if len(ev) != eventRing || ev[0].Seq != 51 || l.LastSeq() != int64(eventRing+50) {
+		t.Fatalf("%d %d", len(ev), ev[0].Seq)
+	}
+}

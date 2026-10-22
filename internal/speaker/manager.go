@@ -14,7 +14,9 @@ import (
 // audio.Player (PlayByURL / volume on the default device).
 type Manager struct {
 	mu      sync.RWMutex
-	drv     Driver
+	drv     Driver // what callers use (inner, wrapped to log its actions)
+	inner   Driver
+	events  *EventLog
 	devices []Device // configured devices
 	volume  int
 	log     *slog.Logger
@@ -27,13 +29,34 @@ func NewManager(log *slog.Logger) *Manager {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Manager{drv: NewLog(log), log: log}
+	m := &Manager{log: log, events: NewEventLog()}
+	m.setDriverLocked(NewLog(log))
+	return m
 }
+
+func (m *Manager) setDriverLocked(d Driver) {
+	if d == m.inner && m.drv != nil {
+		return
+	}
+	m.inner = d
+	if _, ok := d.(selfRecorder); ok {
+		if mk, ok := d.(interface{ UseLog(*EventLog) }); ok {
+			mk.UseLog(m.events)
+		}
+		m.drv = d
+		return
+	}
+	m.drv = &recordingDriver{Driver: d, log: m.events}
+}
+
+// Log returns the shared event log (all drivers).
+func (m *Manager) Log() *EventLog { return m.events }
 
 // Set swaps the driver and device list (hot reload).
 func (m *Manager) Set(drv Driver, devices []Device, volumeDefault int) {
 	m.mu.Lock()
-	m.drv, m.volume = drv, volumeDefault
+	m.setDriverLocked(drv)
+	m.volume = volumeDefault
 	m.devices = append([]Device(nil), devices...)
 	m.mu.Unlock()
 }
@@ -63,7 +86,7 @@ func (m *Manager) Devices() []Device {
 		}
 	}
 	if len(out) == 0 && len(m.devices) == 0 {
-		if s, ok := m.drv.(interface{ StaticDevices() []Device }); ok {
+		if s, ok := m.inner.(interface{ StaticDevices() []Device }); ok {
 			out = s.StaticDevices()
 		}
 	}
@@ -160,20 +183,22 @@ func (m *Manager) Speak(ctx context.Context, text string) error {
 	return m.Driver().TextToSpeech(ctx, d, text)
 }
 
-// Recorder is implemented by drivers that keep an action log (mock).
-type Recorder interface{ Record(MockEvent) }
-
-// NoteAsk records the hook's decision about an ask (lag = detection lag).
-func (m *Manager) NoteAsk(deviceID, query string, lag time.Duration, handled bool, route string) {
-	if r, ok := m.Driver().(Recorder); ok {
-		ms := max(lag.Milliseconds(), 0)
-		r.Record(MockEvent{Device: deviceID, Kind: EvAskDetected, Text: query, LatencyMS: &ms, Handled: &handled, Route: route})
-	}
+// NoteReply records an agent reply in the event log.
+func (m *Manager) NoteReply(deviceID, text, turnID string) {
+	m.events.Record(MockEvent{Device: deviceID, Kind: EvReply, Text: text, TurnID: turnID})
 }
 
-// NoteReply records an agent reply in the driver's action log, if it has one.
-func (m *Manager) NoteReply(deviceID, text string) {
-	if r, ok := m.Driver().(Recorder); ok {
-		r.Record(MockEvent{Device: deviceID, Kind: EvReply, Text: text})
+// NoteAsk records the hook's decision about an ask (lag = detection lag).
+func (m *Manager) NoteAsk(deviceID, query string, lag time.Duration, handled bool, route, turnID string) {
+	ms := max(lag.Milliseconds(), 0)
+	m.events.Record(MockEvent{Device: deviceID, Kind: EvAskDetected, Text: query, LatencyMS: &ms, Handled: &handled, Route: route, TurnID: turnID})
+}
+
+// NoteAskSeen records the ask itself for drivers that do not log it (the
+// mock logs asks when injected).
+func (m *Manager) NoteAskSeen(deviceID, query string, at time.Time) {
+	if _, ok := m.Driver().(selfRecorder); ok {
+		return
 	}
+	m.events.Record(MockEvent{Device: deviceID, Kind: EvAsk, Text: query, TS: at})
 }

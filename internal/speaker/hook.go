@@ -105,8 +105,12 @@ func NewHook(d HookDeps) *Hook {
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
-	return &Hook{d: d, RecheckEvery: 300 * time.Millisecond, StatusPoll: 300 * time.Millisecond,
+	h := &Hook{d: d, RecheckEvery: 300 * time.Millisecond, StatusPoll: 300 * time.Millisecond,
 		StartGrace: 1500 * time.Millisecond, CharsPerSec: 4.5, turns: map[string]*turn{}, convs: map[string]string{}}
+	if d.Mgr != nil {
+		d.Mgr.Log().SetConvLookup(h.LookupConversation)
+	}
+	return h
 }
 
 // Status returns the hook state.
@@ -324,17 +328,23 @@ func (h *Hook) handle(ctx context.Context, drv Driver, dev Device, s HookSetting
 	h.cancelTurn(dev.DeviceID)
 	d := h.decide(ctx, s, ask)
 	ok := d.route != RouteIgnored
+	var conv string
+	var cerr error
+	if ok {
+		conv, cerr = h.conversation(ctx, dev)
+	}
+	tid := newTurnID()
 	h.mu.Lock()
 	h.last = &LastAsk{Device: dev.DeviceID, Query: ask.Query, Time: ask.Time, Handled: ok, Route: d.route}
 	h.mu.Unlock()
-	h.d.Mgr.NoteAsk(dev.DeviceID, ask.Query, time.Since(ask.Time), ok, d.route)
+	h.d.Mgr.NoteAskSeen(dev.DeviceID, ask.Query, ask.Time)
+	h.d.Mgr.NoteAsk(dev.DeviceID, ask.Query, time.Since(ask.Time), ok, d.route, tid)
 	h.d.Log.Info("speaker hook: ask", "device", dev.DeviceID, "query", ask.Query, "handled", ok, "route", d.route)
 	if !ok {
 		return
 	}
-	conv, err := h.conversation(ctx, dev)
-	if err != nil {
-		h.d.Log.Error("speaker hook: conversation", "device", dev.DeviceID, "err", err)
+	if cerr != nil {
+		h.d.Log.Error("speaker hook: conversation", "device", dev.DeviceID, "err", cerr)
 		return
 	}
 	tctx, cancel := context.WithCancel(ctx)
@@ -355,19 +365,18 @@ func (h *Hook) handle(ctx context.Context, drv Driver, dev Device, s HookSetting
 			h.mu.Unlock()
 		}()
 		if d.route == RouteAgent {
-			h.runTurn(tctx, drv, dev, s, conv, d.text, ask, t0)
+			h.runTurn(tctx, drv, dev, s, conv, d.text, ask, t0, tid)
 		} else {
-			h.runDirect(tctx, drv, dev, s, conv, ask, d, t0)
+			h.runDirect(tctx, drv, dev, s, conv, ask, d, t0, tid)
 		}
 	}()
 }
 
 // runDirect answers a music request without the LLM: TTS confirmation, then
 // (after it finished) PlayByURL; the exchange is stored in the conversation.
-func (h *Hook) runDirect(ctx context.Context, drv Driver, dev Device, s HookSettings, conv string, ask Ask, d decision, t0 time.Time) {
-	var rb [4]byte
-	_, _ = crand.Read(rb[:])
-	sp := &spans{h: h, id: "spk-" + hex.EncodeToString(rb[:]), conv: conv, query: ask.Query, t0: t0, marks: map[string]int64{}}
+func (h *Hook) runDirect(ctx context.Context, drv Driver, dev Device, s HookSettings, conv string, ask Ask, d decision, t0 time.Time, tid string) {
+	ctx = WithTurnID(ctx, tid)
+	sp := &spans{h: h, id: tid, conv: conv, query: ask.Query, t0: t0, marks: map[string]int64{}}
 	sp.markMS("ask_detected", max(0, min(time.Since(ask.Time).Milliseconds(), 60000)), store.TraceOK)
 	status, errMsg := store.TraceOK, ""
 	defer func() {
@@ -406,7 +415,7 @@ func (h *Hook) runDirect(ctx context.Context, drv Driver, dev Device, s HookSett
 	} else {
 		sp.mark("first_tts", t0, store.TraceOK)
 	}
-	h.d.Mgr.NoteReply(dev.DeviceID, d.reply)
+	h.d.Mgr.NoteReply(dev.DeviceID, d.reply, sp.id)
 	if h.d.Store != nil {
 		bg := context.WithoutCancel(ctx)
 		for _, m := range []store.Message{{Role: "user", Content: ask.Query}, {Role: "assistant", Content: d.reply}} {
@@ -436,6 +445,41 @@ func (h *Hook) runDirect(ctx context.Context, drv Driver, dev Device, s HookSett
 		h.d.Log.Warn("speaker hook: direct play failed", "device", dev.DeviceID, "err", err)
 	}
 	h.d.Log.Info("speaker turn", "device", dev.DeviceID, "turn_id", sp.id, "route", d.route, "search_ms", d.searchMS, "total_ms", time.Since(t0).Milliseconds())
+}
+
+func newTurnID() string {
+	var rb [4]byte
+	_, _ = crand.Read(rb[:])
+	return "spk-" + hex.EncodeToString(rb[:])
+}
+
+// LookupConversation returns the device's existing speaker conversation id
+// ("" if none yet); it never creates one.
+func (h *Hook) LookupConversation(deviceID string) string {
+	h.mu.Lock()
+	id := h.convs[deviceID]
+	h.mu.Unlock()
+	if id != "" || h.d.Store == nil {
+		return id
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	v, err := h.d.Store.GetSetting(ctx, "speaker.conversation."+deviceID)
+	if err != nil || v == "" {
+		return ""
+	}
+	if _, err := h.d.Store.GetConversation(ctx, v); err != nil {
+		return ""
+	}
+	h.mu.Lock()
+	h.convs[deviceID] = v
+	h.mu.Unlock()
+	return v
+}
+
+// Conversation returns the device's speaker conversation, creating it.
+func (h *Hook) Conversation(ctx context.Context, dev Device) (string, error) {
+	return h.conversation(ctx, dev)
 }
 
 func (h *Hook) cancelTurn(devID string) {
@@ -527,10 +571,9 @@ func (sp *spans) markMS(name string, ms int64, status string) {
 	}
 }
 
-func (h *Hook) runTurn(ctx context.Context, drv Driver, dev Device, s HookSettings, conv, text string, ask Ask, t0 time.Time) {
-	var rb [4]byte
-	_, _ = crand.Read(rb[:])
-	sp := &spans{h: h, id: "spk-" + hex.EncodeToString(rb[:]), conv: conv, query: text, t0: t0, marks: map[string]int64{}}
+func (h *Hook) runTurn(ctx context.Context, drv Driver, dev Device, s HookSettings, conv, text string, ask Ask, t0 time.Time, tid string) {
+	ctx = WithTurnID(ctx, tid)
+	sp := &spans{h: h, id: tid, conv: conv, query: text, t0: t0, marks: map[string]int64{}}
 	// Detection lag since the device recorded the ask (clock skew clamped).
 	sp.markMS("ask_detected", max(0, min(time.Since(ask.Time).Milliseconds(), 60000)), store.TraceOK)
 
@@ -596,7 +639,7 @@ func (h *Hook) runTurn(ctx context.Context, drv Driver, dev Device, s HookSettin
 		prev = sentence
 	}
 	if reply.Len() > 0 {
-		h.d.Mgr.NoteReply(dev.DeviceID, reply.String())
+		h.d.Mgr.NoteReply(dev.DeviceID, reply.String(), sp.id)
 	}
 	// A queued play_audio starts only after the last sentence has been spoken.
 	if req := pq.Take(); req != nil && ctx.Err() == nil {
