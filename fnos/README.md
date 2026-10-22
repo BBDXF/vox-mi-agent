@@ -38,3 +38,10 @@ appcenter-cli install-fpk vox-mi-agent.fpk
 - [ ] 端口固定为 18080（manifest service_port / compose `TRIM_SERVICE_PORT` / ui/config）；确认 checkport 生效、桌面入口可打开
 - [ ] 平台自行启动 compose 时能否读到 `docker/.env`（`cmd/main` 已显式 `--env-file`）
 - [ ] 卸载向导 `wizard_keep_data` 的处理（目前 uninstall 回调未删数据）
+
+## 参考文档
+
+- 飞牛开发者文档（全文，适合 AI 检索）：https://developer.fnnas.com/llms-full.txt
+- 网关入口（socket 转发）：https://developer.fnnas.com/docs/core-concepts/gateway-registration
+- fnpack 打包工具：https://developer.fnnas.com/docs/cli/fnpack
+- 参考项目：[TencentCloud/Octop](https://github.com/TencentCloud/Octop/tree/main/fnos/docker)、[conversun/fnos-apps](https://github.com/conversun/fnos-apps)、[langbot-app/LangBot](https://github.com/langbot-app/LangBot/tree/master/packaging/fnos)
