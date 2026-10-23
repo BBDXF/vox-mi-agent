@@ -118,9 +118,19 @@ function buildSteps(evs: MockEvent[]): Step[] {
   flushTts();
   // ask_detected first with latency
   const det = evs.find((e) => e.kind === 'ask_detected');
-  if (det) steps.unshift({ key: 'det', icon: Radio, label: <>检测到提问<Lat ms={det.latency_ms} /></> });
+  if (det) {
+    const d = (det.data || {}) as { mode?: string; match?: string };
+    const mode = d.mode ? MODES[d.mode] || d.mode : '';
+    steps.unshift({
+      key: 'det', icon: Radio,
+      label: <>检测到提问<Lat ms={det.latency_ms} />{mode && <span className="text-[10px] text-muted-foreground">接管模式：{mode}</span>}</>,
+      body: d.match ? <div className={`text-xs ${det.handled === false ? 'text-muted-foreground' : ''}`}>{det.handled === false ? '未接管：' : '已接管：'}{d.match}</div> : undefined,
+    });
+  }
   return steps;
 }
+
+const MODES: Record<string, string> = { all: '全部接管', keyword: '关键词触发', music: '音乐点播', off: '关闭' };
 
 function TurnCard({ id, evs, conversationId }: { id: string; evs: MockEvent[]; conversationId?: string }) {
   const [trace, setTrace] = useState(false);

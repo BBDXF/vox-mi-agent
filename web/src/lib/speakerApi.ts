@@ -38,7 +38,7 @@ export interface SpeakerTestReq {
 export interface SpeakerTestRes { ok: boolean; note?: string; action?: string; error?: string; elapsed_ms?: number; volume?: number; status?: { status: number; volume: number } }
 export interface MockEvent {
   seq: number; ts: number | string; device_id?: string; conversation_id?: string; turn_id?: string;
-  kind: string;
+  kind: string; data?: Record<string, unknown>;
   text?: string; url?: string; volume?: number; latency_ms?: number;
   title?: string; artist?: string; route?: 'direct' | 'artist_random' | 'agent' | 'ignored' | string; handled?: boolean;
   model?: string; duration_ms?: number; error?: string; canceled?: boolean;

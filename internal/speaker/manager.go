@@ -300,9 +300,9 @@ func (m *Manager) NoteReply(deviceID, text, turnID string) {
 }
 
 // NoteAsk records the hook's decision about an ask (lag = detection lag).
-func (m *Manager) NoteAsk(deviceID, query string, lag time.Duration, handled bool, route, turnID string) {
+func (m *Manager) NoteAsk(deviceID, query string, lag time.Duration, handled bool, route, turnID string, data map[string]any) {
 	ms := max(lag.Milliseconds(), 0)
-	m.events.Record(MockEvent{Device: deviceID, Kind: EvAskDetected, Text: query, LatencyMS: &ms, Handled: &handled, Route: route, TurnID: turnID})
+	m.events.Record(MockEvent{Device: deviceID, Kind: EvAskDetected, Text: query, LatencyMS: &ms, Handled: &handled, Route: route, TurnID: turnID, Data: data})
 }
 
 // NoteAskSeen records the ask itself for drivers that do not log it (the

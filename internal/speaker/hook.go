@@ -228,6 +228,8 @@ func stripKeyword(q string, kws []string) (string, bool) {
 
 // decision is what the hook does with an ask.
 type decision struct {
+	mode     string // hook mode used for the decision
+	match    string // human-readable reason (shown in the debug UI)
 	route string
 	text  string // agent route: the user text
 	// direct / artist_random:
@@ -243,24 +245,36 @@ type decision struct {
 
 // decide routes an ask according to the mode.
 func (h *Hook) decide(ctx context.Context, s HookSettings, ask Ask) decision {
+	d := h.decide0(ctx, s, ask)
+	d.mode = s.Mode
+	return d
+}
+
+func (h *Hook) decide0(ctx context.Context, s HookSettings, ask Ask) decision {
 	switch s.Mode {
 	case "all":
-		return decision{route: RouteAgent, text: ask.Query}
+		return decision{route: RouteAgent, text: ask.Query, match: "全部接管"}
 	case "keyword":
 		if t, ok := stripKeyword(Normalize(ask.Query, s.WakeWords, false), s.Keywords); ok {
-			return decision{route: RouteAgent, text: t}
+			return decision{route: RouteAgent, text: t, match: "命中关键词，交给大模型：" + t}
 		}
+		return decision{route: RouteIgnored, match: "未命中关键词（" + strings.Join(s.Keywords, "、") + "），交给小爱"}
 	case "music":
 		p := ParseMusic(ask.Query, s.WakeWords, s.MusicTriggers, s.MusicExclude)
 		if !p.Music {
-			break
+			return decision{route: RouteIgnored, match: "不是点歌请求，交给小爱"}
 		}
 		if d, ok := h.resolveMusic(ctx, s, p.Content); ok {
+			if d.route == RouteArtistRandom {
+				d.match = "点歌「" + p.Content + "」：匹配到歌手，随机播放"
+			} else {
+				d.match = "点歌「" + p.Content + "」：曲库命中，直接播放"
+			}
 			return d
 		}
-		return decision{route: RouteAgent, text: ask.Query}
+		return decision{route: RouteAgent, text: ask.Query, match: "点歌「" + p.Content + "」：曲库没有确定匹配，交给大模型"}
 	}
-	return decision{route: RouteIgnored}
+	return decision{route: RouteIgnored, match: "接管已关闭"}
 }
 
 func norm(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), "")) }
@@ -341,7 +355,7 @@ func (h *Hook) handle(ctx context.Context, drv Driver, dev Device, s HookSetting
 	h.cancelTurn(dev.DeviceID)
 	d := h.decide(ctx, s, ask)
 	if ask.TextTriggered && d.route == RouteIgnored { // typed by the user: always answer
-		d = decision{route: RouteAgent, text: ask.Query}
+		d = decision{route: RouteAgent, text: ask.Query, mode: d.mode, match: "网页文字触发，交给大模型（原判定：" + d.match + "）"}
 	}
 	ok := d.route != RouteIgnored
 	var conv string
@@ -354,8 +368,8 @@ func (h *Hook) handle(ctx context.Context, drv Driver, dev Device, s HookSetting
 	h.last = &LastAsk{Device: dev.DeviceID, Query: ask.Query, Time: ask.Time, Handled: ok, Route: d.route}
 	h.mu.Unlock()
 	h.d.Mgr.NoteAskSeen(dev.DeviceID, ask.Query, ask.Time)
-	h.d.Mgr.NoteAsk(dev.DeviceID, ask.Query, time.Since(ask.Time), ok, d.route, tid)
-	h.d.Log.Info("speaker hook: ask", "device", dev.DeviceID, "query", ask.Query, "handled", ok, "route", d.route)
+	h.d.Mgr.NoteAsk(dev.DeviceID, ask.Query, time.Since(ask.Time), ok, d.route, tid, map[string]any{"mode": d.mode, "match": d.match})
+	h.d.Log.Info("speaker hook: ask", "device", dev.DeviceID, "query", ask.Query, "handled", ok, "route", d.route, "match", d.match)
 	if !ok {
 		if ask.Native && dev.DeviceID == DebugDeviceID {
 			h.d.Mgr.Log().Record(MockEvent{Device: dev.DeviceID, Kind: EvNativeReply, Text: "（小爱原生回复）", TurnID: tid})
