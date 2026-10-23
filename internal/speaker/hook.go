@@ -452,6 +452,7 @@ func (h *Hook) runDirect(ctx context.Context, drv Driver, dev Device, s HookSett
 		if ctx.Err() == nil {
 			errMsg, status = err.Error(), store.TraceError
 			h.d.Log.Warn("speaker hook: tts failed", "device", dev.DeviceID, "err", err)
+			h.flow(dev.DeviceID, tid, EvError, "", map[string]any{"error": "播报失败：" + err.Error()})
 		}
 	} else {
 		sp.mark("first_tts", t0, store.TraceOK)
@@ -492,6 +493,7 @@ func (h *Hook) runDirect(ctx context.Context, drv Driver, dev Device, s HookSett
 	if err != nil && ctx.Err() == nil {
 		errMsg, status = err.Error(), store.TraceError
 		h.d.Log.Warn("speaker hook: direct play failed", "device", dev.DeviceID, "err", err)
+		h.flow(dev.DeviceID, tid, EvError, "", map[string]any{"error": "播放失败：" + err.Error()})
 	}
 	h.d.Log.Info("speaker turn", "device", dev.DeviceID, "turn_id", sp.id, "route", d.route, "search_ms", d.searchMS, "total_ms", time.Since(t0).Milliseconds())
 }
@@ -778,6 +780,7 @@ func (h *Hook) runTurn(ctx context.Context, drv Driver, dev Device, s HookSettin
 				return
 			}
 			h.d.Log.Warn("speaker hook: tts failed", "device", dev.DeviceID, "err", err)
+			h.flow(dev.DeviceID, tid, EvError, "", map[string]any{"error": "播报失败：" + err.Error()})
 			continue
 		}
 		sp.mark("first_tts", t0, store.TraceOK)
@@ -797,6 +800,7 @@ func (h *Hook) runTurn(ctx context.Context, drv Driver, dev Device, s HookSettin
 		if prev == "" || h.waitFinish(ctx, drv, dev, prev) {
 			if err := drv.PlayByURL(WithPlayMeta(ctx, req.Title, req.Artist), dev, req.URL); err != nil && ctx.Err() == nil {
 				h.d.Log.Warn("speaker hook: queued play failed", "device", dev.DeviceID, "err", err)
+				h.flow(dev.DeviceID, tid, EvError, "", map[string]any{"error": "播放失败：" + err.Error()})
 			}
 		}
 	}
