@@ -1182,8 +1182,10 @@ func TestFlowEventsAgentTurnWithTool(t *testing.T) {
 	m.InjectAsk(DebugDeviceID, "查晴天")
 	waitFor(t, "turn_end", func() bool { return count(m.Events(0), EvTurnEnd) == 1 })
 	ev := m.Events(0)
-	want := "turn_start,llm_start,llm_end,tool_call,tool_result,llm_start,llm_end,tts,turn_end"
-	if got := strings.Join(flowOf(ev), ","); got != want {
+	// tts streams while the final LLM step is still running: it may precede llm_end
+	got := strings.Join(flowOf(ev), ",")
+	got = strings.Replace(got, "llm_start,tts,llm_end", "llm_start,llm_end,tts", 1)
+	if want := "turn_start,llm_start,llm_end,tool_call,tool_result,llm_start,llm_end,tts,turn_end"; got != want {
 		t.Fatalf("flow %s want %s", got, want)
 	}
 	var tid string

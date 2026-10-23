@@ -336,7 +336,9 @@ func TestSpeakerEventsConversationsAndStatus(t *testing.T) {
 			flow = append(flow, k)
 		}
 	}
-	if got := strings.Join(flow, ","); got != "ask,ask_detected,turn_start,llm_start,llm_end,tts,reply,turn_end" || len(flow) != len(kinds)-1 {
+	// tts streams while the LLM step is still running: it may precede llm_end
+	got := strings.Replace(strings.Join(flow, ","), "llm_start,tts,llm_end", "llm_start,llm_end,tts", 1)
+	if got != "ask,ask_detected,turn_start,llm_start,llm_end,tts,reply,turn_end" || len(flow) != len(kinds)-1 {
 		t.Fatalf("flow: %v", kinds)
 	}
 	// filters + alias + after
