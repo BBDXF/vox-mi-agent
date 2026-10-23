@@ -101,10 +101,10 @@ func NewSearchAudio(d Deps) tools.Tool { return &searchAudio{d: d} }
 
 func (*searchAudio) Name() string { return "search_audio" }
 func (*searchAudio) Description() string {
-	return "Search ONLY the user's local music library (songs on the NAS); there is no online search or streaming service. " +
+	return "Search the user's local music library (songs on the NAS) — it does not search the internet. " +
 		"Query by song title and/or artist, as the user said it " +
 		"(homophones, pinyin, typos and partial names are tolerated). Returns candidates {id,title,artist,score 0-100}. " +
-		"count 0: the song is not in the local library; say so briefly, do not pretend to play it or offer online sources. ambiguous true: ask which one. Otherwise call play_audio with the top id. " +
+		"count 0: the song is not in the local library; say so briefly and never claim it is playing. ambiguous true: ask which one. Otherwise call play_audio with the top id. " +
 		"Searching does not play anything."
 }
 func (*searchAudio) Schema() json.RawMessage {
