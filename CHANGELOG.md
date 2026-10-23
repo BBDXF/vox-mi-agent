@@ -6,6 +6,7 @@
 
 ### 新增
 - 服务可同时监听多个地址（`--listen` 逗号分隔），例如 unix socket + TCP 端口。
+- 小米账号支持 passToken 登录（浏览器登录后从 Cookie 复制 passToken/userId，或粘贴整段 Cookie），作为账号密码登录失败时的备选。
 
 ### 变更
 - 「对外地址」（`public_base_url`）在网页中只读，只能通过环境变量 `VOX_PUBLIC_BASE_URL` 或配置文件设置。
