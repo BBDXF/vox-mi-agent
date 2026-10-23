@@ -101,10 +101,10 @@ func NewSearchAudio(d Deps) tools.Tool { return &searchAudio{d: d} }
 
 func (*searchAudio) Name() string { return "search_audio" }
 func (*searchAudio) Description() string {
-	return "Fuzzy-search the local music library by a spoken song title and/or artist. " +
-		"Returns candidates with id, title, artist and score (0-100). If 'ambiguous' is true " +
-		"the top candidates are close: ask the user which one. count 0 means nothing found. " +
-		"Use the returned id with play_audio."
+	return "Search the local music library by song title and/or artist, as the user said it " +
+		"(homophones, pinyin, typos and partial names are tolerated). Returns candidates {id,title,artist,score 0-100}. " +
+		"count 0: nothing found, tell the user. ambiguous true: ask which one. Otherwise call play_audio with the top id. " +
+		"Searching does not play anything."
 }
 func (*searchAudio) Schema() json.RawMessage {
 	return json.RawMessage(`{
@@ -177,8 +177,8 @@ func NewPlayAudio(d Deps) tools.Tool { return &playAudio{d: d} }
 
 func (*playAudio) Name() string { return "play_audio" }
 func (*playAudio) Description() string {
-	return "Play audio on the speaker. For library songs pass 'id' from search_audio. " +
-		"Pass 'url' (http/https) only for non-library audio. Provide exactly one of id or url."
+	return "Play a track on the speaker. Library songs: pass 'id' from search_audio. " +
+		"Pass 'url' only for an http(s) audio link the user gave. Exactly one of id or url."
 }
 func (*playAudio) Schema() json.RawMessage {
 	return json.RawMessage(`{
@@ -254,8 +254,10 @@ type setVolume struct{ d Deps }
 // NewSetVolume returns the set_volume tool.
 func NewSetVolume(d Deps) tools.Tool { return &setVolume{d: d} }
 
-func (*setVolume) Name() string        { return "set_volume" }
-func (*setVolume) Description() string { return "Set the speaker volume (0-100)." }
+func (*setVolume) Name() string { return "set_volume" }
+func (*setVolume) Description() string {
+	return "Set the speaker volume to an absolute level 0-100 (e.g. 「音量调到三十」 → 30)."
+}
 func (*setVolume) Schema() json.RawMessage {
 	return json.RawMessage(`{
   "type": "object",

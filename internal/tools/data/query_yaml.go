@@ -14,9 +14,8 @@ func NewQueryYAML(d Deps) tools.Tool { return &queryYAML{d: d.withDefaults()} }
 func (*queryYAML) Name() string { return "query_yaml" }
 
 func (t *queryYAML) Description() string {
-	return sourcesHint(t.d, "Run a yq (v4) expression over YAML data (read-only). Provide exactly one of 'source' "+
-		"(a built-in data source name, default 'media_library') or 'input' (inline YAML text, max 256 KiB). "+
-		"File access and environment access are disabled.")
+	return sourcesHint(t.d, "Run a read-only yq (v4) expression over YAML data. Give 'source' (default 'media_library') or inline 'input', not both. "+
+		"For the media library prefer query_json.")
 }
 
 func (*queryYAML) Schema() json.RawMessage {

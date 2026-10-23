@@ -89,7 +89,19 @@ func TestSchemasValid(t *testing.T) {
 
 func TestQueryJSON(t *testing.T) {
 	e := setup(t)
-	m := call(t, e.jq, `{"filter":".title","source":"songs","raw":true}`)
+	m := call(t, e.jq, `{"filter":".[].title","source":"songs","raw":true}`)
+	if !strings.Contains(m["output"].(string), "七里香") {
+		t.Fatalf("got %v", m)
+	}
+	m = call(t, e.jq, `{"filter":"map(select(.artist==\"周杰伦\"))|length","source":"songs"}`) // JSONL source: slurp by default
+	if strings.TrimSpace(m["output"].(string)) != "2" {
+		t.Fatalf("got %v", m)
+	}
+	m = call(t, e.jq, `{"filter":"map(select(.artist|contains($q)))|length","q":"周杰伦","source":"songs"}`)
+	if strings.TrimSpace(m["output"].(string)) != "2" {
+		t.Fatalf("got %v", m)
+	}
+	m = call(t, e.jq, `{"filter":".title","source":"songs","raw":true,"slurp":false}`)
 	if !strings.Contains(m["output"].(string), "七里香") {
 		t.Fatalf("got %v", m)
 	}

@@ -305,6 +305,13 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 		msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: cfg.SystemPrompt})
 		msgs = append(msgs, prior...)
 		msgs = append(msgs, cur...)
+		// Last allowed step after tool use: offer no tools so the model must
+		// answer from what it has instead of failing with ErrMaxSteps.
+		stepDefs := defs
+		if stepNo == cfg.MaxSteps && step > 0 && len(defs) > 0 {
+			stepDefs = nil
+			msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: "工具调用次数已用完。请根据已有的工具结果直接回答用户；如果没能完成，简短说明原因。"})
+		}
 		// shrink drops history after a context-length error; false = nothing to drop.
 		shrink := func(err error) bool {
 			if overflowTries >= 2 || len(prior) == 0 || !isContextOverflow(err) {
@@ -341,7 +348,7 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 				Kind: store.TraceLLM, Name: model, Status: status,
 				DurationMS: max(time.Since(stepStart).Milliseconds(), stepFirst), FirstTokenMS: stepFirst,
 				FinishReason: stepFinish, Channel: ts.channel,
-				Args:          fmt.Sprintf("messages=%d tools=%d", len(msgs), len(defs)),
+				Args:          fmt.Sprintf("messages=%d tools=%d", len(msgs), len(stepDefs)),
 				ResultSummary: summarizeStep(text, stepCalls),
 			}
 			if stepUsage != nil {
@@ -363,13 +370,13 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 				}
 				r.opt.Tracer.Payload(Payload{
 					TS: stepStart, TurnID: ts.id, Step: stepNo, Kind: "llm",
-					Request:  &PayloadRequest{Model: model, Temperature: cfg.Temperature, Messages: msgs, Tools: defs},
+					Request:  &PayloadRequest{Model: model, Temperature: cfg.Temperature, Messages: msgs, Tools: stepDefs},
 					Response: resp,
 				})
 			}
 		}
 		ch, err := r.opt.Provider.Stream(ctx, llm.Request{
-			Messages: msgs, Tools: defs, Temperature: cfg.Temperature, Model: r.opt.Model,
+			Messages: msgs, Tools: stepDefs, Temperature: cfg.Temperature, Model: r.opt.Model,
 		})
 		if err != nil {
 			recStep(err, "")
@@ -513,8 +520,17 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 			switch a := strings.TrimSpace(string(calls[i].Arguments)); {
 			case a == "":
 				calls[i].Arguments = json.RawMessage(`{}`)
+			case !json.Valid([]byte(a)) && json.Valid([]byte(repairJSON(a))):
+				// small models often leave inner quotes unescaped, e.g. jq filters
+				log.InfoContext(ctx, "tool arguments repaired", "tool", calls[i].Name)
+				calls[i].Arguments = json.RawMessage(repairJSON(a))
 			case !json.Valid([]byte(a)):
-				argErrs[i] = "invalid arguments: not valid JSON"
+				snip := []rune(a)
+				if len(snip) > 300 {
+					snip = append(snip[:300], '…')
+				}
+				argErrs[i] = "invalid arguments: not valid JSON (received: " + string(snip) + "). Resend the call with a single valid JSON object."
+				log.WarnContext(ctx, "tool arguments not valid JSON", "tool", calls[i].Name, "raw", string(snip))
 				calls[i].Arguments = json.RawMessage(`{}`)
 			}
 		}

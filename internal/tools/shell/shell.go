@@ -36,9 +36,9 @@ func New(d Deps) tools.Tool { return &runShell{d: d} }
 
 func (*runShell) Name() string { return "run_shell" }
 func (*runShell) Description() string {
-	return "Run a bash command for system tasks (files, curl, jq, yq, and any installed node/bun/uv). " +
-		"Runs in the workspace directory; returns exit_code and combined stdout/stderr (tail kept if long). " +
-		"Default timeout 60s (max 600)."
+	return "Run a bash command in the workspace directory (no sandbox). Available: coreutils, curl, jq, yq, " +
+		"plus node/npx, bun/bunx, uv/uvx if installed. Returns exit_code and combined stdout/stderr (tail kept if long). " +
+		"Timeout default 60s, max 600s. Use only when no dedicated tool fits."
 }
 func (*runShell) Schema() json.RawMessage {
 	return json.RawMessage(`{
