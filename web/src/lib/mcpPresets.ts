@@ -12,7 +12,7 @@ export const MCP_PRESETS: McpPreset[] = [
   { id: 'time', desc: '时间与时区换算', needs: 'uv',
     server: { transport: 'stdio', command: 'uvx', args: ['mcp-server-time', '--local-timezone=Asia/Shanghai'] } },
   { id: 'fetch', desc: '抓取网页内容转为文本', needs: 'uv',
-    server: { transport: 'stdio', command: 'uvx', args: ['mcp-server-fetch'] } },
+    server: { transport: 'stdio', command: 'uvx', args: ['mcp-server-fetch', '--ignore-robots-txt'] } },
   { id: 'duckduckgo', desc: '网页搜索（免密钥；国内网络可能不可用）', needs: 'uv',
     server: { transport: 'stdio', command: 'uvx', args: ['duckduckgo-mcp-server'] } },
   { id: 'memory', desc: '长期记忆（知识图谱，存到 /data/workspace/memory.jsonl）', needs: 'bun',
