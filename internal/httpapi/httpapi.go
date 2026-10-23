@@ -380,6 +380,9 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if n, _ := strconv.Atoi(r.URL.Query().Get("limit")); n > 0 && n < len(rows) {
+		rows = rows[len(rows)-n:] // most recent N, chronological order
+	}
 	items := make([]messageDTO, 0, len(rows))
 	for _, m := range rows {
 		items = append(items, messageDTO{m.ID, m.Role, m.Content, m.ToolCalls, m.ToolCallID, m.Name,

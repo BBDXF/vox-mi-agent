@@ -39,6 +39,8 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
   const [events, setEvents] = useState<MockEvent[]>([]);
   const afterRef = useRef(0);
 
+  const [lastReal, setLastReal] = useState<string>('');
+  const [showOlder, setShowOlder] = useState(false);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
@@ -71,7 +73,10 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
     activeDevice = devices.find((d) => 'device:' + d.device_id === selected) || debugDev;
     activeConvId = convOfDevice(activeDevice);
   } else activeConvId = selected.slice(5);
-  const editable = activeDevice?.device_id === DEBUG_ID;
+  const editable = !!activeDevice;
+  const isReal = !!activeDevice && activeDevice.device_id !== DEBUG_ID;
+  const realDevices = devices.filter((d) => d.device_id !== DEBUG_ID);
+  const lastRealId = realDevices.find((d) => d.device_id === lastReal)?.device_id || realDevices[0]?.device_id;
   const activeTitle = activeDevice ? (activeDevice.device_id === DEBUG_ID ? '调试音箱' : activeDevice.name) : conversations.find((c) => c.id === activeConvId)?.title || '历史会话';
 
   // sync selection from the URL (back/forward, logs jump)
@@ -123,9 +128,10 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
     if (!text || sending || !editable) return;
     setSending(true);
     try {
-      const r = await mockAsk(text, DEBUG_ID);
+      const targetId = activeDevice!.device_id;
+      const r = await mockAsk(text, targetId);
       setInput('');
-      if (r.conversation_id) setDebugConvOverride(r.conversation_id);
+      if (r.conversation_id && targetId === DEBUG_ID) setDebugConvOverride(r.conversation_id);
       loadStatus(); loadConversations();
     } catch (e: any) { toastError(e.message || '发送失败'); }
     finally { setSending(false); }
@@ -142,8 +148,19 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
     } catch (e: any) { toastError(e.message || '删除失败'); }
   };
 
+  useEffect(() => { setShowOlder(false); if (isReal && activeDevice) setLastReal(activeDevice.device_id); }, [activeDevice?.device_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toMs = (ts: number | string | undefined) => {
+    if (ts == null) return NaN;
+    if (typeof ts === 'number') return ts < 1e12 ? ts * 1000 : ts;
+    const n = Number(ts); return Number.isFinite(n) ? (n < 1e12 ? n * 1000 : n) : Date.parse(ts);
+  };
   const calledIds = new Set<string>(messages.flatMap((m) => (m.tool_calls || []).map((t) => t.id)));
-  const showEmpty = messages.length === 0 && events.length === 0;
+  const trimmed = isReal && !showOlder;
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  const shownMessages = trimmed ? messages.slice(-20) : messages;
+  const shownEvents = trimmed ? events.filter((e) => { const t = toMs(e.ts); return !Number.isFinite(t) || t >= cutoff; }) : events;
+  const hiddenCount = (messages.length - shownMessages.length) + (events.length - shownEvents.length);
+  const showEmpty = shownMessages.length === 0 && shownEvents.length === 0 && !(isReal && hiddenCount > 0);
   const pick = (key: string) => { setSelected(key); onSelectKey?.(key); setMobileSidebarOpen(false); };
 
   return (
@@ -218,11 +235,37 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
           <Radio className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
           <h2 className="text-sm font-semibold truncate">{activeTitle}</h2>
           {!editable && <Badge variant="outline" className="text-[10px]">只读</Badge>}
-          {status?.driver && status.driver !== 'mock' && editable && <span className="text-[11px] text-amber-600">当前驱动为 {status.driver}，调试音箱可能不响应</span>}
+          {status?.driver && status.driver !== 'mock' && editable && !isReal && <span className="text-[11px] text-amber-600">当前驱动为 {status.driver}，调试音箱可能不响应</span>}
           {activeConvId && <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline ml-auto">ID: {activeConvId}</span>}
         </header>
 
+        <div className="border-b px-4 py-2 flex flex-wrap items-center gap-2 bg-card/30 shrink-0">
+          <span className="text-[11px] text-muted-foreground">发送目标</span>
+          <div className="inline-flex rounded-lg border bg-background p-0.5 text-xs">
+            <button type="button" onClick={() => pick('device:' + DEBUG_ID)}
+              className={`px-3 py-1 rounded-md transition-colors ${!isReal && editable ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>调试音箱（mock）</button>
+            <button type="button" disabled={realDevices.length === 0} title={realDevices.length === 0 ? '未绑定真实音箱' : undefined}
+              onClick={() => lastRealId && pick('device:' + lastRealId)}
+              className={`px-3 py-1 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${isReal ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>真实音箱</button>
+          </div>
+          {realDevices.length > 1 && (
+            <select value={isReal ? activeDevice!.device_id : lastRealId} onChange={(e) => pick('device:' + e.target.value)}
+              className="h-7 rounded-md border bg-background px-2 text-xs">
+              {realDevices.map((d) => <option key={d.device_id} value={d.device_id}>{d.name || d.device_id}</option>)}
+            </select>
+          )}
+          {isReal && <span className="text-[11px] text-amber-600 dark:text-amber-400">文字直接触发，真实音箱会出声/播放</span>}
+        </div>
+
         <div className="flex-1 overflow-y-auto py-3">
+          {isReal && !showEmpty && (
+            <div className="max-w-4xl mx-auto px-4 pb-2 flex items-center justify-between text-[11px] text-muted-foreground">
+              <span className="font-medium text-foreground">真实音箱对话</span>
+              <button type="button" onClick={() => setShowOlder(!showOlder)} className="hover:text-foreground underline-offset-2 hover:underline">
+                {showOlder ? '只看最近' : `显示更早${hiddenCount > 0 ? `（${hiddenCount}）` : ''}`}
+              </button>
+            </div>
+          )}
           {showEmpty ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-6 text-muted-foreground">
               <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3"><Mic className="w-6 h-6 text-blue-600 dark:text-blue-400" /></div>
@@ -236,7 +279,7 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
             </div>
           ) : (
             <>
-              <SpeakerTimeline messages={messages} events={events} toolResults={toolResults} calledIds={calledIds} conversationId={activeConvId} />
+              <SpeakerTimeline messages={shownMessages} events={shownEvents} toolResults={toolResults} calledIds={calledIds} conversationId={activeConvId} />
               <div ref={endRef} className="h-4" />
             </>
           )}
@@ -253,7 +296,7 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
               <div className="flex items-end gap-2 bg-background rounded-xl border border-input focus-within:ring-1 focus-within:ring-ring p-1.5">
                 <Textarea value={input} onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-                  placeholder="对调试音箱说话… (Enter 发送，Shift+Enter 换行)"
+                  placeholder={`${isReal ? '发给真实音箱' : '对调试音箱说话'}… (Enter 发送，Shift+Enter 换行)`}
                   className="border-0 focus-visible:ring-0 shadow-none min-h-[44px] max-h-36 py-2 px-3 text-sm bg-transparent" rows={1} />
                 <Button type="button" size="sm" onClick={() => send()} disabled={!input.trim() || sending} className="gap-1.5 h-8 px-3 text-xs mb-1 mr-1">发送<Send className="w-3.5 h-3.5" /></Button>
               </div>

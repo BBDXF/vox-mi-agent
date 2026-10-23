@@ -37,6 +37,8 @@ type Ask struct {
 	Answer   string    `json:"answer,omitempty"` // the speaker's native answer, if any
 	// Native is set by the mock when it simulates a native assistant reply.
 	Native bool `json:"native,omitempty"`
+	// TextTriggered: typed via the web UI, not heard by the device (no interrupt).
+	TextTriggered bool `json:"text_triggered,omitempty"`
 }
 
 // Status is the player state.

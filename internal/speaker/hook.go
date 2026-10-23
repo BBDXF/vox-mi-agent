@@ -340,6 +340,9 @@ func (h *Hook) handle(ctx context.Context, drv Driver, dev Device, s HookSetting
 	// A new ask always ends the running turn.
 	h.cancelTurn(dev.DeviceID)
 	d := h.decide(ctx, s, ask)
+	if ask.TextTriggered && d.route == RouteIgnored { // typed by the user: always answer
+		d = decision{route: RouteAgent, text: ask.Query}
+	}
 	ok := d.route != RouteIgnored
 	var conv string
 	var cerr error
@@ -395,7 +398,7 @@ func (h *Hook) runDirect(ctx context.Context, drv Driver, dev Device, s HookSett
 	sp := &spans{h: h, id: tid, conv: conv, query: ask.Query, t0: t0, marks: map[string]int64{}}
 	sp.markMS("ask_detected", max(0, min(time.Since(ask.Time).Milliseconds(), 60000)), store.TraceOK)
 	status, errMsg := store.TraceOK, ""
-	h.flow(dev.DeviceID, tid, EvTurnStart, d.route, map[string]any{"route": d.route, "text": ask.Query})
+	h.flow(dev.DeviceID, tid, EvTurnStart, d.route, askData(ask, map[string]any{"route": d.route, "text": ask.Query}))
 	callID := "call_" + tid
 	h.flow(dev.DeviceID, tid, EvToolCall, "", map[string]any{"name": "search_audio", "args": d.toolIn, "call_id": callID + "_s"})
 	h.flow(dev.DeviceID, tid, EvToolResult, "", map[string]any{"call_id": callID + "_s", "name": "search_audio", "ok": true,
@@ -421,8 +424,10 @@ func (h *Hook) runDirect(ctx context.Context, drv Driver, dev Device, s HookSett
 	intDone := make(chan struct{})
 	go func() {
 		defer close(intDone)
-		h.interrupt(ctx, drv, dev, s.InterruptWindow, stop)
-		sp.mark("interrupt", t0, store.TraceOK)
+		if !ask.TextTriggered { // XiaoAi never heard a text ask: nothing to interrupt
+			h.interrupt(ctx, drv, dev, s.InterruptWindow, stop)
+			sp.mark("interrupt", t0, store.TraceOK)
+		}
 	}()
 	select {
 	case <-intDone:
@@ -475,6 +480,25 @@ func (h *Hook) runDirect(ctx context.Context, drv Driver, dev Device, s HookSett
 		h.d.Log.Warn("speaker hook: direct play failed", "device", dev.DeviceID, "err", err)
 	}
 	h.d.Log.Info("speaker turn", "device", dev.DeviceID, "turn_id", sp.id, "route", d.route, "search_ms", d.searchMS, "total_ms", time.Since(t0).Milliseconds())
+}
+
+// askData marks web-originated (text-triggered) asks in flow event data.
+func askData(ask Ask, m map[string]any) map[string]any {
+	if ask.TextTriggered {
+		m["source"] = "web"
+		m["text_triggered"] = true
+	}
+	return m
+}
+
+// HandleText feeds typed text into the pipeline as if the device heard it,
+// but without the XiaoAi interrupt step (it never heard it). It returns once
+// the turn is started; the turn runs in the background.
+func (h *Hook) HandleText(dev Device, text string) {
+	h.mu.Lock()
+	s := h.cur
+	h.mu.Unlock()
+	h.handle(context.Background(), h.d.Mgr.Driver(), dev, s, Ask{DeviceID: dev.DeviceID, Query: text, Time: time.Now(), TextTriggered: true})
 }
 
 // flow records a timeline event of a hook turn.
@@ -624,7 +648,7 @@ func (h *Hook) runTurn(ctx context.Context, drv Driver, dev Device, s HookSettin
 	sp := &spans{h: h, id: tid, conv: conv, query: text, t0: t0, marks: map[string]int64{}}
 	// Detection lag since the device recorded the ask (clock skew clamped).
 	sp.markMS("ask_detected", max(0, min(time.Since(ask.Time).Milliseconds(), 60000)), store.TraceOK)
-	h.flow(dev.DeviceID, tid, EvTurnStart, RouteAgent, map[string]any{"route": RouteAgent, "text": text})
+	h.flow(dev.DeviceID, tid, EvTurnStart, RouteAgent, askData(ask, map[string]any{"route": RouteAgent, "text": text}))
 	defer func() {
 		h.flow(dev.DeviceID, tid, EvTurnEnd, "", map[string]any{"duration_ms": time.Since(t0).Milliseconds(), "canceled": ctx.Err() != nil})
 	}()
@@ -634,8 +658,10 @@ func (h *Hook) runTurn(ctx context.Context, drv Driver, dev Device, s HookSettin
 	intDone := make(chan struct{})
 	go func() {
 		defer close(intDone)
-		h.interrupt(ctx, drv, dev, s.InterruptWindow, firstSentence)
-		sp.mark("interrupt", t0, store.TraceOK)
+		if !ask.TextTriggered {
+			h.interrupt(ctx, drv, dev, s.InterruptWindow, firstSentence)
+			sp.mark("interrupt", t0, store.TraceOK)
+		}
 	}()
 
 	pq := &PlayQueue{}

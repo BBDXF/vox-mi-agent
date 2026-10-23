@@ -1325,3 +1325,26 @@ func TestFlowTurnEndCanceled(t *testing.T) {
 		t.Fatalf("%v", ends)
 	}
 }
+
+func TestHandleTextSkipsInterrupt(t *testing.T) {
+	r := newRig(t, &fakeAgent{})
+	r.hook.Apply(HookSettings{Mode: "keyword", Keywords: []string{"请"}, PollInterval: time.Hour, InterruptWindow: 200 * time.Millisecond})
+	dev, _ := r.mgr.Resolve(DebugDeviceID)
+	r.hook.HandleText(dev, "随便聊聊")
+	waitFor(t, "turn_end", func() bool {
+		for _, e := range r.mgr.Log().Events(0, "", "") {
+			if e.Kind == EvTurnEnd {
+				return true
+			}
+		}
+		return false
+	})
+	for _, e := range r.mgr.Log().Events(0, "", "") {
+		if e.Kind == EvPause {
+			t.Fatalf("interrupt ran for a text ask: %+v", e)
+		}
+		if e.Kind == EvTurnStart && e.Data["source"] != "web" {
+			t.Fatalf("missing source: %+v", e)
+		}
+	}
+}

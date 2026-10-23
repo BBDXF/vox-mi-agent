@@ -258,13 +258,17 @@ func (s *Server) mockAsk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if dev.DeviceID != speaker.DebugDeviceID && s.app.Speaker.Driver().Name() != "mock" {
-		writeError(w, http.StatusConflict, "only the debug device (or the mock driver's devices) accepts simulated asks")
-		return
-	}
 	conv, err := s.app.Hook.Conversation(r.Context(), dev)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "conversation: "+err.Error())
+		return
+	}
+	text := strings.TrimSpace(in.Text)
+	if dev.DeviceID != speaker.DebugDeviceID && s.app.Speaker.Driver().Name() != "mock" {
+		// Real device: run the pipeline as if heard, minus the XiaoAi interrupt; native_reply is ignored.
+		s.app.Hook.HandleText(dev, text)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "text_triggered": true, "conversation_id": conv,
+			"ask": speaker.Ask{DeviceID: dev.DeviceID, Query: text, Time: time.Now(), TextTriggered: true}})
 		return
 	}
 	native := in.NativeReply == nil || *in.NativeReply

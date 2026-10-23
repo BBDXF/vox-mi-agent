@@ -414,9 +414,19 @@ func TestDebugDeviceWorksWithAnyDriver(t *testing.T) {
 	if !strings.Contains(string(b), `"kind":"tts"`) {
 		t.Fatalf("%s", b)
 	}
-	// a real device cannot be driven with simulated asks
-	if resp, _ = e.do(t, "POST", "/api/speaker/mock/ask", `{"text":"x","device_id":"R1"}`); resp.StatusCode != 409 {
-		t.Fatal(resp.StatusCode)
+	// a real device accepts text asks (pipeline runs, flow events tagged source=web)
+	resp, b = e.do(t, "POST", "/api/speaker/mock/ask", `{"text":"x","device_id":"R1"}`)
+	if r := jsonOf(t, b); resp.StatusCode != 200 || r["text_triggered"] != true || r["conversation_id"] == "" {
+		t.Fatalf("%d %s", resp.StatusCode, b)
+	}
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		_, b = e.do(t, "GET", "/api/speaker/events?device_id=R1", "")
+		if strings.Contains(string(b), `"turn_end"`) {
+			break
+		}
+	}
+	if !strings.Contains(string(b), `"source":"web"`) {
+		t.Fatalf("%s", b)
 	}
 	// test action without device goes to the real device (not logged in -> 502), debug explicitly works
 	if resp, _ = e.do(t, "POST", "/api/speaker/test", `{"action":"tts","text":"x","device_id":"debug"}`); resp.StatusCode != 200 {
