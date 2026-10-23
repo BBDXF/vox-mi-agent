@@ -54,6 +54,7 @@ func newApp(t *testing.T, p llm.Provider, mod func(*config.Config)) (*app.App, s
 	cfg.Media.Folders = []string{filepath.Join(dir, "music")}
 	cfg.Media.SyncOnStart = false
 	cfg.LLM.APIKey = "sk-secret-1234567890"
+	cfg.Agent.ToolsDisabled = []string{"run_shell"} // tests exercise the data tools
 	if mod != nil {
 		mod(cfg)
 	}

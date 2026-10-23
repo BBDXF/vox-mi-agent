@@ -26,7 +26,7 @@ agent:
   history_messages: 40                # stored messages kept as context; 0 = all
   idle_reset: 30m                     # speaker only: no talk for this long -> next turn starts a fresh context; 0 = off
   context_tokens: 16000               # estimated token budget sent to the model (oldest history dropped); 0 = off
-  tools_disabled: [run_shell]         # built-in tool names hidden from the LLM (run_shell is opt-in)
+  tools_disabled: [fuzzy_match, query_json, query_yaml, run_shell]  # built-in tools hidden from the LLM; only search_audio/play_audio/set_volume on by default
 
 mcp:
   servers: []                         # {name, enabled, transport: http|sse|stdio, url, headers, command, args, env, timeout, tools_allow}

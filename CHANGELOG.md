@@ -11,6 +11,7 @@
 - 补全错误日志：小米登录结果、接口 5xx 错误、运行环境安装失败；音箱轮询失败告警去重。
 
 ### 变更
+- 内置工具默认只开启点歌必需的 search_audio、play_audio、set_volume；fuzzy_match、query_json、query_yaml、run_shell 默认关闭，可在「工具」页开启。
 - 「对外地址」（`public_base_url`）在网页中只读，只能通过环境变量 `VOX_PUBLIC_BASE_URL` 或配置文件设置。
 - 由环境变量设置的项在网页中显示为只读，并标明对应的变量名。
 - GitHub Release 说明由 CHANGELOG 对应版本一节加提交列表生成。

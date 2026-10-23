@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
+	"github.com/BBDXF/vox-mi-agent/internal/config"
 	"github.com/BBDXF/vox-mi-agent/internal/llm"
 )
 
@@ -54,7 +56,7 @@ func TestRunShellAvailableAndDisable(t *testing.T) {
 	if _, ok := e.app.Tools.Get("run_shell"); !ok {
 		t.Fatal("run_shell not registered")
 	}
-	if d := e.app.Config().Agent.ToolsDisabled; len(d) != 1 || d[0] != "run_shell" {
+	if d := config.Defaults().Agent.ToolsDisabled; !slices.Contains(d, "run_shell") {
 		t.Fatalf("run_shell must be disabled by default: %v", d)
 	}
 }
