@@ -24,6 +24,7 @@ func (s *Server) mcpTest(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var ve *app.ValidationError
 		if errors.As(err, &ve) {
+			setErrMsg(w, ve.Error())
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": ve.Error(), "fields": ve.Fields})
 			return
 		}

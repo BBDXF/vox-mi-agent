@@ -176,6 +176,7 @@ func (h *Hook) Stop() {
 func (h *Hook) poll(ctx context.Context, drv Driver, dev Device, s HookSettings, since time.Time) {
 	defer h.wg.Done()
 	errs := 0
+	var th pollThrottle
 	for {
 		wait := s.PollInterval
 		if errs > 0 {
@@ -192,12 +193,16 @@ func (h *Hook) poll(ctx context.Context, drv Driver, dev Device, s HookSettings,
 				return
 			}
 			errs++
-			if errs == 1 || errs%30 == 0 {
-				h.d.Log.Warn("speaker hook: poll failed", "device", dev.DeviceID, "err", err)
+			if th.shouldLog(time.Now(), err) {
+				h.d.Log.Warn("speaker hook: poll failed", "device", dev.DeviceID, "err", err, "consecutive", errs)
 			}
 			continue
 		}
+		if errs > 0 {
+			h.d.Log.Info("speaker hook: poll recovered", "device", dev.DeviceID, "failures", errs)
+		}
 		errs = 0
+		th.reset()
 		if ask == nil || ask.Query == "" || !ask.Time.After(since) {
 			continue
 		}
@@ -829,3 +834,23 @@ func (h *Hook) waitFinish(ctx context.Context, drv Driver, dev Device, text stri
 		}
 	}
 }
+
+const pollLogEvery = 30 * time.Minute
+
+// pollThrottle logs the first failure, a changed error, then at most once per
+// pollLogEvery while the failure persists.
+type pollThrottle struct {
+	last time.Time
+	msg  string
+}
+
+func (t *pollThrottle) shouldLog(now time.Time, err error) bool {
+	m := err.Error()
+	if t.last.IsZero() || m != t.msg || now.Sub(t.last) >= pollLogEvery {
+		t.last, t.msg = now, m
+		return true
+	}
+	return false
+}
+
+func (t *pollThrottle) reset() { *t = pollThrottle{} }

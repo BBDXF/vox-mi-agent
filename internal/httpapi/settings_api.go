@@ -23,7 +23,6 @@ func (s *Server) getSection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		s.log.ErrorContext(r.Context(), "get settings section", "err", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -50,7 +49,6 @@ func (s *Server) putSection(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, app.ErrInvalid):
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:
-			s.log.ErrorContext(r.Context(), "put settings section", "err", err)
 			writeError(w, http.StatusInternalServerError, err.Error())
 		}
 		return

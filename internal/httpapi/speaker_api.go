@@ -48,6 +48,9 @@ func (s *Server) accountReply(w http.ResponseWriter, code int, err error) {
 	out := map[string]any{"account": s.app.Xiaomi().Account().Status()}
 	if err != nil {
 		out["error"] = err.Error()
+		if e, ok := w.(interface{ setErr(string) }); ok {
+			e.setErr(err.Error())
+		}
 	}
 	writeJSON(w, code, out)
 }

@@ -97,7 +97,6 @@ func (s *Server) mediaTracks(w http.ResponseWriter, r *http.Request) {
 		minScore := int(s.app.Config().Search.MinScore)
 		hits, _, err := s.app.Index.Search(r.Context(), query, maxTrackSearch, minScore)
 		if err != nil && !errors.Is(err, media.ErrNoLibrary) {
-			s.log.ErrorContext(r.Context(), "media tracks search", "err", err)
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

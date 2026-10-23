@@ -76,7 +76,11 @@ type statusWriter struct {
 	status int
 	bytes  int64
 	wrote  bool
+	errMsg string
 }
+
+// setErr records the error message for the access/error log.
+func (w *statusWriter) setErr(msg string) { w.errMsg = msg }
 
 func (w *statusWriter) WriteHeader(code int) {
 	if !w.wrote {
@@ -145,6 +149,14 @@ func accessLog(log *slog.Logger) func(http.Handler) http.Handler {
 			start := time.Now()
 			sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 			defer func() {
+				if sw.errMsg != "" || sw.status >= 500 {
+					lvl := slog.LevelDebug
+					if sw.status >= 500 {
+						lvl = slog.LevelError
+					}
+					log.Log(r.Context(), lvl, "http error",
+						"method", r.Method, "path", r.URL.Path, "status", sw.status, "error", sw.errMsg)
+				}
 				log.InfoContext(r.Context(), "http",
 					"method", r.Method, "path", r.URL.Path, "status", sw.status,
 					"bytes", sw.bytes, "duration_ms", time.Since(start).Milliseconds(),

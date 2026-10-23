@@ -122,7 +122,16 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func setErrMsg(w http.ResponseWriter, msg string) {
+	if e, ok := w.(interface{ setErr(string) }); ok {
+		e.setErr(msg)
+	}
+}
+
 func writeError(w http.ResponseWriter, code int, msg string) {
+	if e, ok := w.(interface{ setErr(string) }); ok {
+		e.setErr(msg)
+	}
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
@@ -497,7 +506,6 @@ func (s *Server) putLLM(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		s.log.ErrorContext(r.Context(), "update llm settings", "err", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

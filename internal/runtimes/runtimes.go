@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -291,6 +292,7 @@ func (m *Manager) Install(name string) (done <-chan struct{}, err error) {
 				msg = msg[:500] + "…"
 			}
 			m.errs[name] = msg
+			slog.Error("runtime install failed", "runtime", name, "err", msg)
 		}
 		m.mu.Unlock()
 	}()

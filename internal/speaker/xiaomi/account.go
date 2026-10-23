@@ -321,7 +321,8 @@ func (a *Account) Logout() {
 // Login performs the password login. The password is never stored. The
 // resulting state is available via Status (logged_in / need_verify / error /
 // cooldown); the returned error is the failure message, if any.
-func (a *Account) Login(ctx context.Context, username, password string) error {
+func (a *Account) Login(ctx context.Context, username, password string) (err error) {
+	defer func() { a.logOutcome(ctx, "password", "login", err) }()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if username == "" || password == "" {
@@ -336,7 +337,7 @@ func (a *Account) Login(ctx context.Context, username, password string) error {
 	a.otp = nil
 	a.tok.Method = "password"
 	a.st = Status{State: StateLoggingIn}
-	err := a.passwordLogin(ctx, SIDMina, username, password)
+	err = a.passwordLogin(ctx, SIDMina, username, password)
 	if err != nil && a.st.State == StateLoggingIn {
 		a.st = Status{State: StateError, Message: err.Error()}
 	}
@@ -360,7 +361,8 @@ func parseCookieFields(s string) map[string]string {
 // account.xiaomi.com (workaround for captcha/risk-control failures). passToken
 // may be the bare value, "passToken=...", or a whole Cookie header string
 // (which may also carry userId and deviceId).
-func (a *Account) LoginWithToken(ctx context.Context, userID, passToken, deviceID string) error {
+func (a *Account) LoginWithToken(ctx context.Context, userID, passToken, deviceID string) (err error) {
+	defer func() { a.logOutcome(ctx, "token", "login", err) }()
 	userID, passToken, deviceID = strings.TrimSpace(userID), strings.TrimSpace(passToken), strings.TrimSpace(deviceID)
 	if strings.Contains(passToken, ";") || strings.HasPrefix(passToken, "passToken=") || strings.Contains(passToken, "userId=") {
 		f := parseCookieFields(passToken)
@@ -393,7 +395,7 @@ func (a *Account) LoginWithToken(ctx context.Context, userID, passToken, deviceI
 	a.tok.UserID, a.tok.PassToken, a.tok.Method = userID, passToken, "token"
 	a.tok.Micoapi, a.tok.Xiaomiio = nil, nil
 	a.st = Status{State: StateLoggingIn, UserID: userID}
-	err := a.silentLocked(ctx, SIDMina)
+	err = a.silentLocked(ctx, SIDMina)
 	if err == nil {
 		err = a.silentLocked(ctx, SIDMiIO)
 	}
@@ -579,7 +581,8 @@ func (s *otpSession) flagFor(method string) (int, string) {
 }
 
 // SendCode asks Xiaomi to send the verification code ("phone" | "email").
-func (a *Account) SendCode(ctx context.Context, method string) error {
+func (a *Account) SendCode(ctx context.Context, method string) (err error) {
+	defer func() { a.logOutcome(ctx, a.methodName(), "send_code", err) }()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := a.otp
@@ -620,7 +623,8 @@ func (a *Account) SendCode(ctx context.Context, method string) error {
 }
 
 // Verify submits the verification code and completes the login.
-func (a *Account) Verify(ctx context.Context, code string) error {
+func (a *Account) Verify(ctx context.Context, code string) (err error) {
+	defer func() { a.logOutcome(ctx, a.methodName(), "verify", err) }()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := a.otp
@@ -658,7 +662,8 @@ func (a *Account) Verify(ctx context.Context, code string) error {
 }
 
 // Retry redoes serviceLogin after the user verified in a browser.
-func (a *Account) Retry(ctx context.Context) error {
+func (a *Account) Retry(ctx context.Context) (err error) {
+	defer func() { a.logOutcome(ctx, a.methodName(), "retry", err) }()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := a.otp
@@ -847,4 +852,44 @@ func randString(n int) string {
 		b[i] = alnum[x.Int64()]
 	}
 	return string(b)
+}
+
+func maskID(id string) string {
+	if len(id) <= 4 {
+		return "****"
+	}
+	return "****" + id[len(id)-4:]
+}
+
+func (a *Account) methodName() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.tok.Method == "" {
+		return "password"
+	}
+	return a.tok.Method
+}
+
+// logOutcome records a login/verify outcome. It never logs secrets.
+func (a *Account) logOutcome(ctx context.Context, method, stage string, err error) {
+	if a.log == nil {
+		return
+	}
+	a.mu.Lock()
+	st, uid, until := a.st, a.tok.UserID, a.tok.CooldownUntil
+	fails := a.tok.Failures
+	a.mu.Unlock()
+	if err != nil {
+		attrs := []any{"method", method, "stage", stage, "state", string(st.State), "err", err.Error(), "failures", fails}
+		if !until.IsZero() && a.opt.Now().Before(until) {
+			attrs = append(attrs, "cooldown_until", until.Format(time.RFC3339))
+		}
+		a.log.WarnContext(ctx, "xiaomi: "+stage+" failed", attrs...)
+		return
+	}
+	if st.State == StateLoggedIn {
+		a.log.InfoContext(ctx, "xiaomi: login succeeded", "method", method, "stage", stage, "user_id", maskID(uid))
+	} else {
+		a.log.InfoContext(ctx, "xiaomi: "+stage+" ok", "method", method, "stage", stage, "state", string(st.State))
+	}
 }
