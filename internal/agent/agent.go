@@ -603,8 +603,9 @@ func (r *Runtime) callTool(ctx context.Context, cfg *liveSettings, tc llm.ToolCa
 	if r.opt.Tools == nil {
 		return nil, fmt.Errorf("unknown tool %q", tc.Name)
 	}
-	t, ok := r.opt.Tools.Get(tc.Name)
-	if !ok || cfg.disabled[tc.Name] {
+	name := r.resolveToolName(tc.Name)
+	t, ok := r.opt.Tools.Get(name)
+	if !ok || cfg.disabled[name] {
 		return nil, fmt.Errorf("unknown tool %q", tc.Name)
 	}
 	tctx, cancel := context.WithTimeout(ctx, r.opt.ToolTimeout)
@@ -720,4 +721,29 @@ func titleOf(s string) string {
 		rs = rs[:30]
 	}
 	return string(rs)
+}
+
+// resolveToolName maps names small models commonly mangle back to a
+// registered tool: a dropped "mcp__" prefix ("fetch__fetch") or just the
+// bare MCP tool name ("fetch") when it is unique.
+func (r *Runtime) resolveToolName(name string) string {
+	if _, ok := r.opt.Tools.Get(name); ok {
+		return name
+	}
+	if _, ok := r.opt.Tools.Get("mcp__" + name); ok {
+		return "mcp__" + name
+	}
+	match := ""
+	for _, t := range r.opt.Tools.List() {
+		if n := t.Name(); strings.HasPrefix(n, "mcp__") && strings.HasSuffix(n, "__"+name) {
+			if match != "" {
+				return name // ambiguous
+			}
+			match = n
+		}
+	}
+	if match != "" {
+		return match
+	}
+	return name
 }
