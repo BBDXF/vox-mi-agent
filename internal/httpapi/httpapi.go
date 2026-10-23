@@ -69,6 +69,7 @@ func New(a *app.App, opts ...Option) *Server {
 	r.Post("/api/conversations", s.createConversation)
 	r.Delete("/api/conversations", s.deleteAllConversations)
 	r.Delete("/api/conversations/{id}", s.deleteConversation)
+	r.Delete("/api/conversations/{id}/messages", s.clearMessages)
 	r.Get("/api/conversations/{id}/messages", s.listMessages)
 	r.Post("/sse/chat", s.chat)
 	r.Get("/api/settings", s.getSettings)
@@ -341,6 +342,31 @@ func (s *Server) deleteConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DELETE /api/conversations/{id}/messages -> 204, or 404 if unknown. Keeps the
+// conversation; cancels a running turn and drops its speaker events.
+func (s *Server) clearMessages(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if _, err := s.app.Store.GetConversation(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "conversation not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.app.Agent.CancelConversation(id)
+	if err := s.app.Store.ClearMessages(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "conversation not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.app.Speaker.Log().DropConversation(id)
 	w.WriteHeader(http.StatusNoContent)
 }
 

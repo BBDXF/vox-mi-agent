@@ -173,6 +173,39 @@ func mk(t *testing.T, dir string) {
 	}
 }
 
+func TestClearMessages(t *testing.T) {
+	ctx := context.Background()
+	s, _ := open(t)
+	a, _ := s.CreateConversation(ctx, "a", ChannelWeb)
+	b, _ := s.CreateConversation(ctx, "b", ChannelWeb)
+	for _, c := range []*Conversation{a, b} {
+		if _, err := s.AppendMessage(ctx, c.ID, Message{Role: "user", Content: "hi"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.InsertTraces(ctx, []TraceRow{{TS: time.Now(), ConversationID: c.ID, TurnID: "t", Kind: TraceTurn, Status: TraceOK}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.ClearMessages(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearMessages(ctx, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown: %v", err)
+	}
+	if _, err := s.GetConversation(ctx, a.ID); err != nil {
+		t.Fatalf("conversation must stay: %v", err)
+	}
+	if m, _ := s.ListMessages(ctx, a.ID); len(m) != 0 {
+		t.Fatalf("messages left: %v", m)
+	}
+	if tr, _ := s.QueryTraces(ctx, TraceFilter{ConversationID: a.ID}); len(tr) != 0 {
+		t.Fatalf("traces left: %v", tr)
+	}
+	if m, _ := s.ListMessages(ctx, b.ID); len(m) != 1 {
+		t.Fatalf("b messages: %v", m)
+	}
+}
+
 func TestDeleteConversation(t *testing.T) {
 	ctx := context.Background()
 	s, _ := open(t)

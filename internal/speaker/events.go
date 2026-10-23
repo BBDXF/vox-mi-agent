@@ -109,6 +109,19 @@ func (l *EventLog) Events(after int64, device, conversation string) []MockEvent 
 	return out
 }
 
+// DropConversation removes all events of the conversation.
+func (l *EventLog) DropConversation(conversation string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	kept := l.events[:0:0]
+	for _, e := range l.events {
+		if e.ConversationID != conversation {
+			kept = append(kept, e)
+		}
+	}
+	l.events = kept
+}
+
 // LastSeq is the newest sequence number.
 func (l *EventLog) LastSeq() int64 { l.mu.Lock(); defer l.mu.Unlock(); return l.seq }
 

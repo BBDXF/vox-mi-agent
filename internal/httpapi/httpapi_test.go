@@ -944,6 +944,35 @@ func (b convBlockProvider) Stream(ctx context.Context, _ llm.Request) (<-chan ll
 	return out, nil
 }
 
+func TestClearConversationMessages(t *testing.T) {
+	e := newEnv(t, llm.NewFake(), nil)
+	resp, b := e.do(t, "POST", "/api/conversations", `{"title":"x"}`)
+	if resp.StatusCode != 201 {
+		t.Fatalf("create: %d %s", resp.StatusCode, b)
+	}
+	var c struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(b, &c)
+	ctx := context.Background()
+	if _, err := e.app.Store.AppendMessage(ctx, c.ID, store.Message{Role: "user", Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	resp, body := e.do(t, "DELETE", "/api/conversations/"+c.ID+"/messages", "")
+	if resp.StatusCode != 204 || len(body) != 0 {
+		t.Fatalf("clear: %d %q", resp.StatusCode, body)
+	}
+	if m, _ := e.app.Store.ListMessages(ctx, c.ID); len(m) != 0 {
+		t.Fatalf("messages left: %v", m)
+	}
+	if _, err := e.app.Store.GetConversation(ctx, c.ID); err != nil {
+		t.Fatalf("conversation must stay: %v", err)
+	}
+	if resp, _ := e.do(t, "DELETE", "/api/conversations/nope/messages", ""); resp.StatusCode != 404 {
+		t.Fatalf("unknown: %d", resp.StatusCode)
+	}
+}
+
 func TestDeleteConversations(t *testing.T) {
 	e := newEnv(t, llm.NewFake(), nil)
 	create := func() string {

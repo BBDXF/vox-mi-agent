@@ -11,7 +11,7 @@ import {
   getSpeakerStatus, getSpeakerEvents, mockAsk,
   type SpeakerStatus, type SpeakerDeviceStatus, type MockEvent,
 } from '@/lib/speakerApi';
-import { type Conversation, type Message, getConversations, deleteConversation, getMessages } from '@/lib/api';
+import { type Conversation, type Message, getConversations, deleteConversation, getMessages, getAgentSettings, clearConversationMessages } from '@/lib/api';
 import { useToast } from '@/components/ui/toast';
 import { formatRelativeTime } from '@/lib/utils';
 
@@ -44,6 +44,8 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const [historyLimit, setHistoryLimit] = useState(40);
+  useEffect(() => { getAgentSettings().then((s) => { if (typeof s.history_messages === 'number') setHistoryLimit(s.history_messages); }).catch(() => {}); }, []);
 
   // ---------- data ----------
   const loadConversations = useCallback(async () => {
@@ -155,12 +157,25 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
     const n = Number(ts); return Number.isFinite(n) ? (n < 1e12 ? n * 1000 : n) : Date.parse(ts);
   };
   const calledIds = new Set<string>(messages.flatMap((m) => (m.tool_calls || []).map((t) => t.id)));
-  const trimmed = isReal && !showOlder;
-  const cutoff = Date.now() - 30 * 60 * 1000;
-  const shownMessages = trimmed ? messages.slice(-20) : messages;
-  const shownEvents = trimmed ? events.filter((e) => { const t = toMs(e.ts); return !Number.isFinite(t) || t >= cutoff; }) : events;
+  const limit = historyLimit > 0 ? historyLimit : 0;
+  const trimmed = !showOlder && limit > 0 && messages.length > limit;
+  const shownMessages = trimmed ? messages.slice(-limit) : messages;
+  const cutoff = trimmed ? toMs(shownMessages[0]?.created_at) : NaN;
+  const shownEvents = trimmed && Number.isFinite(cutoff) ? events.filter((e) => { const t = toMs(e.ts); return !Number.isFinite(t) || t >= cutoff; }) : events;
   const hiddenCount = (messages.length - shownMessages.length) + (events.length - shownEvents.length);
-  const showEmpty = shownMessages.length === 0 && shownEvents.length === 0 && !(isReal && hiddenCount > 0);
+  const showEmpty = shownMessages.length === 0 && shownEvents.length === 0 && hiddenCount === 0;
+  const canToggle = hiddenCount > 0 || showOlder;
+
+  const clearHistory = async () => {
+    if (!activeConvId) return;
+    if (!window.confirm('清空该会话的全部消息？会话本身保留，之后的对话从空白上下文开始。')) return;
+    try {
+      await clearConversationMessages(activeConvId);
+      setMessages([]); setToolResults({}); setEvents([]); setShowOlder(false);
+      await Promise.all([reloadMessages(activeConvId), loadConversations()]);
+      toast({ type: 'success', title: '已清空历史', message: activeTitle });
+    } catch (e: any) { toastError(e.message || '清空失败'); }
+  };
   const pick = (key: string) => { setSelected(key); onSelectKey?.(key); setMobileSidebarOpen(false); };
 
   return (
@@ -237,6 +252,10 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
           {!editable && <Badge variant="outline" className="text-[10px]">只读</Badge>}
           {status?.driver && status.driver !== 'mock' && editable && !isReal && <span className="text-[11px] text-amber-600">当前驱动为 {status.driver}，调试音箱可能不响应</span>}
           {activeConvId && <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline ml-auto">ID: {activeConvId}</span>}
+          <Button variant="outline" size="sm" className={`h-7 text-xs gap-1 shrink-0 ${activeConvId ? '' : 'ml-auto'}`} disabled={!activeConvId || messages.length === 0}
+            title="清空该会话的全部消息" onClick={clearHistory}>
+            <Trash2 className="w-3 h-3" />清空历史
+          </Button>
         </header>
 
         <div className="border-b px-4 py-2 flex flex-wrap items-center gap-2 bg-card/30 shrink-0">
@@ -258,10 +277,10 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
         </div>
 
         <div className="flex-1 overflow-y-auto py-3">
-          {isReal && !showEmpty && (
-            <div className="max-w-4xl mx-auto px-4 pb-2 flex items-center justify-between text-[11px] text-muted-foreground">
-              <span className="font-medium text-foreground">真实音箱对话</span>
-              <button type="button" onClick={() => setShowOlder(!showOlder)} className="hover:text-foreground underline-offset-2 hover:underline">
+          {canToggle && (
+            <div className="max-w-4xl mx-auto px-4 pb-2 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+              <span>与 设置 → 智能体 → 历史消息数 一致（发送给模型的也是这些）</span>
+              <button type="button" onClick={() => setShowOlder(!showOlder)} className="shrink-0 hover:text-foreground underline-offset-2 hover:underline">
                 {showOlder ? '只看最近' : `显示更早${hiddenCount > 0 ? `（${hiddenCount}）` : ''}`}
               </button>
             </div>

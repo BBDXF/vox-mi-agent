@@ -442,6 +442,12 @@ export async function getMessages(conversationId: string): Promise<MessageListRe
   return handleResponse<MessageListResponse>(res);
 }
 
+/** DELETE api/conversations/{id}/messages (204) — clears messages, keeps the conversation */
+export async function clearConversationMessages(id: string): Promise<void> {
+  const res = await fetch(`api/conversations/${encodeURIComponent(id)}/messages`, { method: 'DELETE' });
+  return handleResponse<void>(res);
+}
+
 /**
  * DELETE api/conversations/{id}
  */
