@@ -112,6 +112,7 @@ function buildSteps(evs: MockEvent[]): Step[] {
       case 'reply': if (!hasTts && e.text) steps.push({ key: 'k' + e.seq, icon: Mic, label: <>播报 <Badge variant="warning" className="text-[10px] px-1 py-0">未播报</Badge></>, body: <div className="text-sm whitespace-pre-wrap rounded-lg bg-muted/60 px-3 py-2 max-w-xl">{e.text}</div> }); break;
       case 'native_reply': steps.push({ key: 'k' + e.seq, icon: Ear, label: '小爱原生回复', body: e.text ? <div className="text-sm text-muted-foreground">{e.text}</div> : undefined }); break;
       case 'play_url': steps.push({ key: 'k' + e.seq, icon: Music, label: <>播放链接<Lat ms={e.latency_ms} /></>, body: <PlayUrlStep e={e} /> }); break;
+      case 'error': steps.push({ key: 'k' + e.seq, icon: Activity, tone: 'err', label: <span className="text-destructive">出错</span>, body: <div className="text-xs text-destructive break-all">{String((e.data as { error?: string } | undefined)?.error || e.text || '')}</div> }); break;
       default: steps.push({ key: 'k' + e.seq, icon: Activity, label: <span className="text-muted-foreground text-xs">{e.kind}{e.text ? `：${e.text}` : ''}</span> });
     }
   }

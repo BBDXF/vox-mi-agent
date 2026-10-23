@@ -26,6 +26,7 @@ const (
 	EvToolCall    = "tool_call"
 	EvToolResult  = "tool_result"
 	EvTurnEnd     = "turn_end"
+	EvError       = "error"        // turn failed (data.error)
 	EvNativeReply = "native_reply" // simulated native reply of an ignored ask (debug device)
 )
 

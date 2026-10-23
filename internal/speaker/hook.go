@@ -228,8 +228,8 @@ func stripKeyword(q string, kws []string) (string, bool) {
 
 // decision is what the hook does with an ask.
 type decision struct {
-	mode     string // hook mode used for the decision
-	match    string // human-readable reason (shown in the debug UI)
+	mode  string // hook mode used for the decision
+	match string // human-readable reason (shown in the debug UI)
 	route string
 	text  string // agent route: the user text
 	// direct / artist_random:
@@ -587,11 +587,23 @@ func (h *Hook) conversation(ctx context.Context, dev Device) (string, error) {
 	h.mu.Lock()
 	id := h.convs[dev.DeviceID]
 	h.mu.Unlock()
-	if id != "" {
-		return id, nil
-	}
 	if h.d.Store == nil {
+		if id != "" {
+			return id, nil
+		}
 		return "", errors.New("no store")
+	}
+	if id != "" {
+		// the conversation may have been deleted in the web UI since
+		if _, err := h.d.Store.GetConversation(ctx, id); err == nil {
+			return id, nil
+		}
+		h.mu.Lock()
+		if h.convs[dev.DeviceID] == id {
+			delete(h.convs, dev.DeviceID)
+		}
+		h.mu.Unlock()
+		id = ""
 	}
 	key := "speaker.conversation." + dev.DeviceID
 	if v, err := h.d.Store.GetSetting(ctx, key); err == nil && v != "" {
@@ -743,6 +755,7 @@ func (h *Hook) runTurn(ctx context.Context, drv Driver, dev Device, s HookSettin
 		})
 		if err != nil && ctx.Err() == nil {
 			h.d.Log.Warn("speaker hook: agent run failed", "device", dev.DeviceID, "err", err)
+			h.flow(dev.DeviceID, tid, EvError, "", map[string]any{"error": err.Error()})
 		}
 		firstOnce.Do(func() { close(firstSentence) })
 	}()

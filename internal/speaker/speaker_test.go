@@ -1348,3 +1348,21 @@ func TestHandleTextSkipsInterrupt(t *testing.T) {
 		}
 	}
 }
+
+func TestHookConversationRecreatedAfterDelete(t *testing.T) {
+	ag := &fakeAgent{sentences: []string{"嗯。"}}
+	r := newRig(t, ag)
+	ctx := context.Background()
+	dev := Device{DeviceID: "debug", Name: "调试音箱"}
+	id1, err := r.hook.Conversation(ctx, dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.hook.d.Store.DeleteConversation(ctx, id1); err != nil {
+		t.Fatal(err)
+	}
+	id2, err := r.hook.Conversation(ctx, dev)
+	if err != nil || id2 == "" || id2 == id1 {
+		t.Fatalf("want a new conversation, got %q (old %q) %v", id2, id1, err)
+	}
+}
