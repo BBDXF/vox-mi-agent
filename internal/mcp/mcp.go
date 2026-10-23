@@ -28,7 +28,7 @@ const (
 	// Prefix of every registered MCP tool name.
 	Prefix = "mcp__"
 	// DefaultTimeout bounds connecting and each tool call.
-	DefaultTimeout = 15 * time.Second
+	DefaultTimeout = 60 * time.Second
 	// MaxResultBytes caps the text returned to the LLM per call.
 	MaxResultBytes = 64 << 10
 	maxToolName    = 64
@@ -62,6 +62,8 @@ type ServerStatus struct {
 	Connected bool       `json:"connected"`
 	Error     string     `json:"error"`
 	Tools     []ToolInfo `json:"tools"`
+	Retrying  bool       `json:"retrying"`
+	NextRetry string     `json:"next_retry,omitempty"` // RFC3339 while Retrying
 }
 
 var unsafeRe = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
@@ -129,9 +131,22 @@ func (c ServerConfig) timeout() time.Duration {
 	return DefaultTimeout
 }
 
+// connectTimeout bounds the initial connect + tools/list. stdio servers get
+// at least 120s (first uvx/npx run downloads dependencies); others at least 15s.
+func (c ServerConfig) connectTimeout() time.Duration {
+	min := DefaultTimeout
+	if c.Transport == "stdio" {
+		min = 120 * time.Second
+	}
+	if t := c.timeout(); t > min {
+		return t
+	}
+	return min
+}
+
 // connect opens a session on tr and lists the server's tools (all pages).
 func connect(ctx context.Context, c ServerConfig, tr sdk.Transport) (*sdk.ClientSession, []*sdk.Tool, error) {
-	cctx, cancel := context.WithTimeout(ctx, c.timeout())
+	cctx, cancel := context.WithTimeout(ctx, c.connectTimeout())
 	defer cancel()
 	client := sdk.NewClient(&sdk.Implementation{Name: "vox-mi-agent", Version: "1"}, nil)
 	cs, err := client.Connect(cctx, tr, nil)
@@ -210,6 +225,30 @@ type Manager struct {
 	sessions []*sdk.ClientSession
 	names    []string // registered tool names
 	status   []ServerStatus
+	gen      uint64
+	cancel   context.CancelFunc
+	srvNames map[int][]string // registered tool names per server index
+
+	// Backoff returns the wait before retry attempt n (0-based); injectable for tests.
+	Backoff func(n int) time.Duration
+	dial    func(ctx context.Context, c ServerConfig) (*sdk.ClientSession, []*sdk.Tool, error)
+}
+
+var defaultBackoff = []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute}
+
+func backoffN(n int) time.Duration {
+	if n >= len(defaultBackoff) {
+		return defaultBackoff[len(defaultBackoff)-1]
+	}
+	return defaultBackoff[n]
+}
+
+func defaultDial(ctx context.Context, c ServerConfig) (*sdk.ClientSession, []*sdk.Tool, error) {
+	tr, err := transportOf(c)
+	if err != nil {
+		return nil, nil, err
+	}
+	return connect(ctx, c, tr)
 }
 
 // NewManager creates a Manager registering tools into reg.
@@ -217,7 +256,7 @@ func NewManager(reg *tools.Registry, log *slog.Logger) *Manager {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Manager{reg: reg, log: log, status: []ServerStatus{}}
+	return &Manager{reg: reg, log: log, status: []ServerStatus{}, Backoff: backoffN, dial: defaultDial}
 }
 
 // Status returns a snapshot of the per-server state (configuration order).
@@ -238,8 +277,13 @@ func (m *Manager) Close() {
 
 func (m *Manager) teardown() {
 	m.mu.Lock()
+	m.gen++
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
+	}
 	sessions, names := m.sessions, m.names
-	m.sessions, m.names = nil, nil
+	m.sessions, m.names, m.srvNames = nil, nil, nil
 	m.mu.Unlock()
 	for _, n := range names {
 		m.reg.Unregister(n)
@@ -266,6 +310,14 @@ func (m *Manager) Reload(ctx context.Context, servers []Server) {
 	for i, s := range servers {
 		st[i] = ServerStatus{Name: s.Name, Enabled: s.Enabled, Transport: s.Transport, Tools: []ToolInfo{}}
 	}
+	rctx, cancel := context.WithCancel(context.Background())
+	m.mu.Lock()
+	m.cancel = cancel
+	m.status = st
+	m.srvNames = map[int][]string{}
+	gen := m.gen
+	m.mu.Unlock()
+
 	type result struct {
 		cs   *sdk.ClientSession
 		list []*sdk.Tool
@@ -280,49 +332,144 @@ func (m *Manager) Reload(ctx context.Context, servers []Server) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			tr, err := transportOf(s.ServerConfig)
-			if err != nil {
-				res[i].err = err
-				return
-			}
-			res[i].cs, res[i].list, res[i].err = connect(ctx, s.ServerConfig, tr)
+			res[i].cs, res[i].list, res[i].err = m.dial(ctx, s.ServerConfig)
 		}()
 	}
 	wg.Wait()
 
-	var sessions []*sdk.ClientSession
-	var names []string
 	for i, s := range servers {
 		if !s.Enabled {
 			continue
 		}
 		r := res[i]
 		if r.err != nil {
-			st[i].Error = trunc(r.err.Error(), 300)
+			m.mu.Lock()
+			if m.gen == gen {
+				m.status[i].Error = trunc(r.err.Error(), 300)
+			}
+			m.mu.Unlock()
 			m.log.Warn("mcp server unavailable", "server", s.Name, "err", r.err)
+			go m.retryLoop(rctx, gen, i, s, 0)
 			continue
 		}
-		st[i].Connected = true
-		sessions = append(sessions, r.cs)
-		for _, t := range r.list {
-			if !allowed(s.ServerConfig, t.Name) {
-				continue
-			}
-			name := ToolName(s.Name, t.Name)
-			if _, exists := m.reg.Get(name); exists {
-				m.log.Warn("mcp tool name collision, skipped", "server", s.Name, "tool", t.Name, "name", name)
-				continue
-			}
-			m.reg.Register(&mcpTool{name: name, orig: t.Name, desc: t.Description, schema: schemaOf(t.InputSchema),
-				cs: r.cs, timeout: s.timeout()})
-			names = append(names, name)
-			st[i].Tools = append(st[i].Tools, ToolInfo{Name: name, Original: t.Name, Description: t.Description})
+		if !m.attach(rctx, gen, i, s, r.cs, r.list) {
+			r.cs.Close()
 		}
-		m.log.Info("mcp server connected", "server", s.Name, "tools", len(st[i].Tools))
 	}
+}
+
+// attach registers a connected server's tools and status. It returns false
+// (and registers nothing) if the generation is stale.
+func (m *Manager) attach(rctx context.Context, gen uint64, i int, s Server, cs *sdk.ClientSession, list []*sdk.Tool) bool {
 	m.mu.Lock()
-	m.sessions, m.names, m.status = sessions, names, st
+	if m.gen != gen {
+		m.mu.Unlock()
+		return false
+	}
+	st := &m.status[i]
+	st.Connected, st.Error, st.Retrying, st.NextRetry = true, "", false, ""
+	st.Tools = []ToolInfo{}
+	m.sessions = append(m.sessions, cs)
+	var mine []string
+	for _, t := range list {
+		if !allowed(s.ServerConfig, t.Name) {
+			continue
+		}
+		name := ToolName(s.Name, t.Name)
+		if _, exists := m.reg.Get(name); exists {
+			m.log.Warn("mcp tool name collision, skipped", "server", s.Name, "tool", t.Name, "name", name)
+			continue
+		}
+		m.reg.Register(&mcpTool{name: name, orig: t.Name, desc: t.Description, schema: schemaOf(t.InputSchema),
+			cs: cs, timeout: s.timeout()})
+		m.names = append(m.names, name)
+		mine = append(mine, name)
+		st.Tools = append(st.Tools, ToolInfo{Name: name, Original: t.Name, Description: t.Description})
+	}
+	m.srvNames[i] = mine
+	n := len(st.Tools)
 	m.mu.Unlock()
+	m.log.Info("mcp server connected", "server", s.Name, "tools", n)
+	go func() {
+		_ = cs.Wait()
+		m.dropped(rctx, gen, i, s, cs)
+	}()
+	return true
+}
+
+// dropped handles a session that ended (e.g. stdio process exited).
+func (m *Manager) dropped(rctx context.Context, gen uint64, i int, s Server, cs *sdk.ClientSession) {
+	m.mu.Lock()
+	if m.gen != gen {
+		m.mu.Unlock()
+		return
+	}
+	gone := map[string]bool{}
+	for _, n := range m.srvNames[i] {
+		m.reg.Unregister(n)
+		gone[n] = true
+	}
+	delete(m.srvNames, i)
+	m.names = filterStr(m.names, gone)
+	for j, x := range m.sessions {
+		if x == cs {
+			m.sessions = append(m.sessions[:j:j], m.sessions[j+1:]...)
+			break
+		}
+	}
+	m.status[i].Connected = false
+	m.status[i].Tools = []ToolInfo{}
+	m.status[i].Error = "connection lost"
+	m.mu.Unlock()
+	m.log.Warn("mcp server disconnected", "server", s.Name)
+	m.retryLoop(rctx, gen, i, s, 0)
+}
+
+func filterStr(in []string, drop map[string]bool) []string {
+	var out []string
+	for _, n := range in {
+		if !drop[n] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// retryLoop reconnects a failed server with backoff until it connects or the
+// context is cancelled (next Reload/Close).
+func (m *Manager) retryLoop(ctx context.Context, gen uint64, i int, s Server, attempt int) {
+	for ; ; attempt++ {
+		d := m.Backoff(attempt)
+		m.mu.Lock()
+		if m.gen != gen {
+			m.mu.Unlock()
+			return
+		}
+		m.status[i].Retrying = true
+		m.status[i].NextRetry = time.Now().Add(d).Format(time.RFC3339)
+		m.mu.Unlock()
+		t := time.NewTimer(d)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+		}
+		cs, list, err := m.dial(ctx, s.ServerConfig)
+		if err != nil {
+			m.mu.Lock()
+			if m.gen == gen {
+				m.status[i].Error = trunc(err.Error(), 300)
+			}
+			m.mu.Unlock()
+			m.log.Warn("mcp server retry failed", "server", s.Name, "attempt", attempt+1, "err", err)
+			continue
+		}
+		if !m.attach(ctx, gen, i, s, cs, list) {
+			cs.Close()
+		}
+		return
+	}
 }
 
 func schemaOf(v any) json.RawMessage {

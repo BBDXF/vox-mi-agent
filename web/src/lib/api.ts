@@ -781,7 +781,7 @@ export interface McpServer {
 }
 export interface McpToolInfo { name: string; original: string; description?: string }
 export interface McpStatusItem {
-  name: string; enabled: boolean; transport: string; connected: boolean; error?: string; tools?: McpToolInfo[];
+  name: string; enabled: boolean; transport: string; connected: boolean; error?: string; tools?: McpToolInfo[]; retrying?: boolean; next_retry?: string;
 }
 export interface McpTestResult { ok: boolean; error?: string; latency_ms?: number; tools?: McpToolInfo[] }
 

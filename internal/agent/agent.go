@@ -606,6 +606,9 @@ func (r *Runtime) callTool(ctx context.Context, cfg *liveSettings, tc llm.ToolCa
 	name := r.resolveToolName(tc.Name)
 	t, ok := r.opt.Tools.Get(name)
 	if !ok || cfg.disabled[name] {
+		if strings.HasPrefix(tc.Name, "mcp__") {
+			return nil, fmt.Errorf("tool %q is unavailable (its MCP server is not connected); do not call it again this turn", tc.Name)
+		}
 		return nil, fmt.Errorf("unknown tool %q", tc.Name)
 	}
 	tctx, cancel := context.WithTimeout(ctx, r.opt.ToolTimeout)

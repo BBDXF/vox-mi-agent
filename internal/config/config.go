@@ -97,7 +97,7 @@ type MCPServer struct {
 	Command   string            `yaml:"command" json:"command"`
 	Args      []string          `yaml:"args" json:"args"`
 	Env       map[string]string `yaml:"env" json:"env"`
-	// Timeout bounds connecting and each tool call (default 15s).
+	// Timeout bounds connecting and each tool call (default 60s).
 	Timeout    time.Duration `yaml:"timeout" json:"timeout"`
 	ToolsAllow []string      `yaml:"tools_allow" json:"tools_allow"`
 }

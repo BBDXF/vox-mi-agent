@@ -13,7 +13,7 @@ import { Switch } from './AgentSettings';
 import { MCP_PRESETS, type McpPreset } from '@/lib/mcpPresets';
 
 const blank = (): McpServer => ({
-  name: '', enabled: false, transport: 'http', url: '', headers: {}, command: '', args: [], env: {}, timeout: '15s', tools_allow: [],
+  name: '', enabled: false, transport: 'http', url: '', headers: {}, command: '', args: [], env: {}, timeout: '60s', tools_allow: [],
 });
 
 function KV({ value, onChange, kp, vp }: { value: Record<string, string>; onChange: (v: Record<string, string>) => void; kp: string; vp: string }) {
@@ -62,6 +62,7 @@ function ServerEditor({ s, idx, errors, status, highlight, onChange, onRemove }:
   if (status) {
     if (!status.enabled) { dot = 'bg-muted-foreground/40'; label = '已停用'; }
     else if (status.connected) { dot = 'bg-green-500'; label = '已连接'; }
+    else if (status.retrying) { dot = 'bg-yellow-500'; label = `重试中（下次 ${status.next_retry ? new Date(status.next_retry).toLocaleTimeString('zh-CN', { hour12: false }) : '—'}）：${status.error || ''}`; }
     else { dot = 'bg-red-500'; label = `错误：${status.error || '未连接'}`; }
   }
   const tools = status?.tools || [];
@@ -100,7 +101,7 @@ function ServerEditor({ s, idx, errors, status, highlight, onChange, onRemove }:
         </div>
         <div>
           <label className="text-xs font-medium">超时</label>
-          <Input value={s.timeout} placeholder="15s" onChange={(e) => set({ timeout: e.target.value })} /><E k="timeout" />
+          <Input value={s.timeout} placeholder="60s" onChange={(e) => set({ timeout: e.target.value })} /><E k="timeout" />
         </div>
       </div>
 

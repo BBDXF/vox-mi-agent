@@ -244,7 +244,7 @@ func mcpSection() *section {
 		{Key: "command", Type: TString, Default: "", Description: "stdio 启动命令"},
 		{Key: "args", Type: TStrings, Default: []string{}, Description: "stdio 命令参数"},
 		{Key: "env", Type: TMap, Default: map[string]string{}, Secret: true, Description: "stdio 额外环境变量（敏感，同 headers）"},
-		{Key: "timeout", Type: TDuration, Default: "15s", Description: "连接与单次工具调用超时（最大 10m）"},
+		{Key: "timeout", Type: TDuration, Default: "60s", Description: "连接与单次工具调用超时（最大 10m）"},
 		{Key: "tools_allow", Type: TStrings, Default: []string{}, Description: "仅启用这些工具（服务端原始名称）；留空表示全部"},
 	}
 	f := &fieldDef{
