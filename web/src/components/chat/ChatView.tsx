@@ -139,6 +139,16 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
     finally { setSending(false); }
   };
 
+  const delLegacy = async () => {
+    if (!window.confirm(`删除全部 ${legacy.length} 个历史网页会话？\n消息及其追踪记录将一并删除，音箱会话不受影响。`)) return;
+    try {
+      await Promise.all(legacy.map((c) => deleteConversation(c.id)));
+      if (activeConvId && legacy.some((c) => c.id === activeConvId)) { setMessages([]); setEvents([]); setSelected('device:' + DEBUG_ID); }
+      await loadConversations();
+      toast({ type: 'success', title: '已删除历史网页会话', message: `${legacy.length} 个` });
+    } catch (e: any) { toastError(e.message || '删除失败'); await loadConversations(); }
+  };
+
   const del = async (id: string, label: string, isDevice: boolean) => {
     if (!window.confirm(`确定删除「${label}」${isDevice ? '的历史记录' : ''}吗？\n消息及其追踪记录将一并删除。`)) return;
     try {
@@ -223,10 +233,14 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
 
           {legacy.length > 0 && (
             <div className="pt-2">
-              <button type="button" onClick={() => setLegacyOpen(!legacyOpen)} className="w-full flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-muted-foreground hover:text-foreground">
-                {legacyOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                <History className="w-3 h-3" />历史网页会话 ({legacy.length})
-              </button>
+              <div className="flex items-center">
+                <button type="button" onClick={() => setLegacyOpen(!legacyOpen)} className="flex-1 flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-muted-foreground hover:text-foreground">
+                  {legacyOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                  <History className="w-3 h-3" />历史网页会话 ({legacy.length})
+                </button>
+                <button type="button" title="删除全部历史网页会话" onClick={delLegacy}
+                  className="px-2 py-1 text-[11px] text-muted-foreground hover:text-destructive flex items-center gap-1"><Trash2 className="w-3 h-3" />全部删除</button>
+              </div>
               {legacyOpen && legacy.map((c) => (
                 <div key={c.id} role="button" tabIndex={0} onClick={() => pick('conv:' + c.id)}
                   className={`group/item relative cursor-pointer p-2 rounded-lg text-xs ${selected === 'conv:' + c.id ? 'bg-primary/10 border border-primary/20' : 'hover:bg-muted/70 border border-transparent'}`}>
@@ -322,7 +336,7 @@ export function ChatView({ routeKey, onSelectKey, onOpenGuide }: ChatViewProps =
             </div>
           ) : (
             <div className="text-center text-xs text-muted-foreground py-2">
-              {activeDevice ? '真实音箱请直接对音箱说话，这里只显示记录' : '历史会话仅供查看'}
+              {activeDevice ? '真实音箱请直接对音箱说话，这里只显示记录' : '历史网页会话仅供查看，可清空或删除'}
             </div>
           )}
         </div>
