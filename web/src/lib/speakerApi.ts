@@ -4,6 +4,8 @@ export type AccountState = 'logged_out' | 'logging_in' | 'need_verify' | 'logged
 export interface SpeakerAccount {
   state: AccountState;
   user_id?: string;
+  method?: 'password' | 'token';
+  hint?: string;
   message?: string;
   cooldown_until?: number | string;
   verify_methods?: ('phone' | 'email')[];
@@ -73,6 +75,8 @@ async function acct(url: string, body: unknown): Promise<SpeakerAccount> {
 export const getSpeakerStatus = () => req<SpeakerStatus>('api/speaker/status');
 export const xiaomiLogin = (username: string, password: string) =>
   acct('api/speaker/xiaomi/login', { username, password });
+export const xiaomiLoginToken = (user_id: string, pass_token: string, device_id?: string) =>
+  acct('api/speaker/xiaomi/login-token', { user_id, pass_token, ...(device_id ? { device_id } : {}) });
 export const xiaomiSendCode = (method: string) =>
   acct('api/speaker/xiaomi/verify/send', { method });
 export const xiaomiVerify = (code: string) =>

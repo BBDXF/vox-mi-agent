@@ -650,3 +650,57 @@ func TestModelTables(t *testing.T) {
 		}
 	}
 }
+
+func TestLoginWithToken(t *testing.T) {
+	f := newFake(t)
+	f.passTokenLogin = true
+	dir := t.TempDir()
+	a := newAcct(t, f, dir)
+	if err := a.LoginWithToken(context.Background(), " 4242 ", "passToken=PT", ""); err != nil {
+		t.Fatal(err)
+	}
+	st := a.Status()
+	if st.State != StateLoggedIn || st.Method != "token" {
+		t.Fatalf("%+v", st)
+	}
+	sl := f.reqs("/pass/serviceLogin")
+	if len(sl) != 2 || !strings.Contains(sl[0].Cookie, "passToken=PT") || !strings.Contains(sl[0].Cookie, "userId=4242") || sl[1].Query.Get("sid") != SIDMiIO {
+		t.Fatalf("%+v", sl)
+	}
+	if _, err := a.Creds(context.Background(), SIDMiIO); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "mi_token.json")); err != nil || !strings.Contains(string(b), `"method": "token"`) {
+		t.Fatalf("%s %v", b, err)
+	}
+}
+
+func TestLoginWithTokenCookieString(t *testing.T) {
+	f := newFake(t)
+	f.passTokenLogin = true
+	a := newAcct(t, f, t.TempDir())
+	err := a.LoginWithToken(context.Background(), "", "a=b; userId=4242; passToken=PT; deviceId=wb_DEV", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sl := f.reqs("/pass/serviceLogin")
+	if !strings.Contains(sl[0].Cookie, "deviceId=wb_DEV") || !strings.Contains(sl[0].Cookie, "userId=4242") {
+		t.Fatalf("%q", sl[0].Cookie)
+	}
+	if err := newAcct(t, f, t.TempDir()).LoginWithToken(context.Background(), "", "PT", ""); err == nil {
+		t.Fatal("userId required")
+	}
+}
+
+func TestLoginWithTokenBad(t *testing.T) {
+	f := newFake(t)
+	a := newAcct(t, f, t.TempDir())
+	err := a.LoginWithToken(context.Background(), "4242", "BAD", "")
+	if err == nil || !strings.Contains(err.Error(), "passToken 无效或已过期") {
+		t.Fatal(err)
+	}
+	st := a.Status()
+	if st.State == StateLoggedIn || st.Hint == "" {
+		t.Fatalf("%+v", st)
+	}
+}

@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
 import { getSectionSettings, updateSectionSettings } from '@/lib/api';
 import {
-  getSpeakerStatus, xiaomiLogin, xiaomiSendCode, xiaomiVerify, xiaomiRetry, xiaomiLogout,
+  getSpeakerStatus, xiaomiLogin, xiaomiLoginToken, xiaomiSendCode, xiaomiVerify, xiaomiRetry, xiaomiLogout,
   discoverDevices, speakerTest,
   type SpeakerStatus, type SpeakerAccount, type SpeakerTestRes,
 } from '@/lib/speakerApi';
@@ -41,6 +41,13 @@ function AccountCard({ account, onChange }: { account?: SpeakerAccount; onChange
   const [pwd, setPwd] = useState('');
   const [method, setMethod] = useState<string>('');
   const [code, setCode] = useState('');
+  const [tab, setTab] = useState<'password' | 'token'>('password');
+  const [tUser, setTUser] = useState('');
+  const [tTok, setTTok] = useState('');
+  const [tDev, setTDev] = useState('');
+  const [showTok, setShowTok] = useState(false);
+  const [showHow, setShowHow] = useState(false);
+  const [showAdv, setShowAdv] = useState(false);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
   const state = account?.state || 'logged_out';
@@ -79,17 +86,86 @@ function AccountCard({ account, onChange }: { account?: SpeakerAccount; onChange
         {account?.message && <p className="text-xs text-muted-foreground">{account.message}</p>}
 
         {(state === 'logged_out' || state === 'error' || state === 'logging_in') && (
-          <form className="grid sm:grid-cols-2 gap-3" onSubmit={(e) => { e.preventDefault(); run(() => xiaomiLogin(user.trim(), pwd)); }}>
-            <Field label="账号" help="手机号 / 邮箱 / 小米 ID">
-              <Input value={user} onChange={(e) => setUser(e.target.value)} autoComplete="username" />
-            </Field>
-            <Field label="密码" help="密码仅用于登录，不保存">
-              <Input type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} autoComplete="current-password" />
-            </Field>
-            <div className="sm:col-span-2">
-              <Button type="submit" size="sm" disabled={busy || !user || !pwd || state === 'logging_in'}>登录</Button>
+          <div className="space-y-3">
+            {account?.hint && (
+              <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                <span className="flex-1 min-w-0">{account.hint}</span>
+                {tab !== 'token' && (
+                  <Button type="button" size="sm" variant="outline" onClick={() => setTab('token')}>改用 passToken 登录</Button>
+                )}
+              </div>
+            )}
+            <div className="inline-flex rounded-md border overflow-hidden">
+              {([['password', '账号密码'], ['token', 'passToken']] as const).map(([k, l]) => (
+                <button key={k} type="button" onClick={() => setTab(k)}
+                  className={`px-3 py-1 text-xs ${tab === k ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>{l}</button>
+              ))}
             </div>
-          </form>
+            {tab === 'password' ? (
+              <form className="grid sm:grid-cols-2 gap-3" onSubmit={(e) => { e.preventDefault(); run(() => xiaomiLogin(user.trim(), pwd)); }}>
+                <Field label="账号" help="手机号 / 邮箱 / 小米 ID">
+                  <Input value={user} onChange={(e) => setUser(e.target.value)} autoComplete="username" />
+                </Field>
+                <Field label="密码" help="密码仅用于登录，不保存">
+                  <Input type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} autoComplete="current-password" />
+                </Field>
+                <div className="sm:col-span-2">
+                  <Button type="submit" size="sm" disabled={busy || !user || !pwd || state === 'logging_in'}>登录</Button>
+                </div>
+              </form>
+            ) : (
+              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); run(() => xiaomiLoginToken(tUser.trim(), tTok.trim(), tDev.trim() || undefined)); }}>
+                <div className="text-xs">
+                  <button type="button" className="text-primary hover:underline" onClick={() => setShowHow(!showHow)}>
+                    {showHow ? '▾' : '▸'} 如何获取？
+                  </button>
+                  {showHow && (
+                    <div className="mt-2 space-y-1 rounded-md border bg-muted/40 p-3 text-muted-foreground">
+                      <ol className="list-decimal pl-4 space-y-0.5">
+                        <li>电脑 Chrome 打开 https://account.xiaomi.com 登录</li>
+                        <li>F12 → Application（应用）→ Cookies → account.xiaomi.com</li>
+                        <li>复制 passToken 与 userId</li>
+                        <li>粘贴到这里</li>
+                      </ol>
+                      <p className="text-amber-600 dark:text-amber-400">passToken 等同账号密码，请勿泄露。</p>
+                      <a href="https://github.com/idootop/mi-gpt/issues/326" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                        <ExternalLink className="w-3 h-3" />参考：mi-gpt issue #326
+                      </a>
+                    </div>
+                  )}
+                </div>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <Field label="userId" help="粘贴整段 Cookie 时可留空">
+                    <Input value={tUser} onChange={(e) => setTUser(e.target.value)} autoComplete="off" />
+                  </Field>
+                  <Field label="passToken">
+                    <div className="flex gap-2">
+                      <Input type={showTok ? 'text' : 'password'} value={tTok} onChange={(e) => setTTok(e.target.value)}
+                        placeholder="passToken 值，或粘贴整段 Cookie" autoComplete="off" />
+                      <Button type="button" size="sm" variant="outline" onClick={() => setShowTok(!showTok)}>{showTok ? '隐藏' : '显示'}</Button>
+                    </div>
+                  </Field>
+                </div>
+                <div className="text-xs">
+                  <button type="button" className="text-muted-foreground hover:underline" onClick={() => setShowAdv(!showAdv)}>
+                    {showAdv ? '▾' : '▸'} 高级
+                  </button>
+                  {showAdv && (
+                    <div className="mt-2 max-w-sm">
+                      <Field label="deviceId（可选）">
+                        <Input value={tDev} onChange={(e) => setTDev(e.target.value)} autoComplete="off" />
+                      </Field>
+                    </div>
+                  )}
+                </div>
+                <Button type="submit" size="sm" disabled={busy || !tTok.trim() || state === 'logging_in'}>登录</Button>
+              </form>
+            )}
+          </div>
+        )}
+
+        {state !== 'logged_in' && state !== 'logged_out' && state !== 'error' && state !== 'logging_in' && account?.hint && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">{account.hint}</p>
         )}
 
         {state === 'need_verify' && (
@@ -130,7 +206,10 @@ function AccountCard({ account, onChange }: { account?: SpeakerAccount; onChange
 
         {state === 'logged_in' && (
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm">用户 ID：<span className="font-mono">{account?.user_id || '-'}</span></span>
+            <div className="text-sm space-y-0.5">
+              <div>用户 ID：<span className="font-mono">{account?.user_id || '-'}</span></div>
+              {account?.method && <div>登录方式：{account.method === 'token' ? 'passToken' : '账号密码'}</div>}
+            </div>
             <Button size="sm" variant="outline" className="gap-1" disabled={busy} onClick={() => run(xiaomiLogout)}>
               <LogOut className="w-3.5 h-3.5" />退出登录
             </Button>

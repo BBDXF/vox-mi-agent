@@ -95,6 +95,7 @@ func New(a *app.App, opts ...Option) *Server {
 	r.Get("/api/media/artists", s.mediaArtists)
 	r.Get("/api/speaker/status", s.speakerStatus)
 	r.Post("/api/speaker/xiaomi/login", s.xiaomiLogin)
+	r.Post("/api/speaker/xiaomi/login-token", s.xiaomiLoginToken)
 	r.Post("/api/speaker/xiaomi/verify/send", s.xiaomiSend)
 	r.Post("/api/speaker/xiaomi/verify", s.xiaomiVerify)
 	r.Post("/api/speaker/xiaomi/retry", s.xiaomiRetry)

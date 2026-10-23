@@ -418,6 +418,7 @@ Agent ──Player/Speaker 接口──▶ speaker.Manager ──▶ Driver: moc
 #### 6.7.2 登录与令牌
 
 - 流程：`serviceLogin` → `serviceLoginAuth2`（`hash=MD5(pwd).upper`）→ `clientSign=b64(sha1("nonce=..&ssecurity"))` 换 `serviceToken`（sid `micoapi`；MIoT TTS 另需 sid `xiaomiio`）。
+- **passToken 登录（风控/验证码兜底）**：密码登录常被验证码/风控拦截（见 idootop/mi-gpt#326）。`POST /api/speaker/xiaomi/login-token {user_id, pass_token, device_id?, cookie?}` 接受浏览器 account.xiaomi.com 的 `passToken`/`userId`（`pass_token` 也可粘贴整串 Cookie），直接走静默 `serviceLogin`（sid `micoapi` + `xiaomiio`），成功后写入 `mi_token.json`（`method: "token"`），失败返回「passToken 无效或已过期」。账号状态含 `method`（password|token），error/need_verify/cooldown 状态附带 `hint` 建议改用 token 登录。
 - 令牌存 `/data/mi_token.json`（`deviceId,userId,passToken,micoapi:[ssecurity,serviceToken]`），0600；**密码不落盘**（仅登录时使用）。
 - 失效（401）：先用 `passToken` 静默重登；失败才置为「需要登录」并在 UI 提示。
 - **安全验证**：返回 `notificationUrl` 时进入「需要验证」状态，UI 显示可选方式（手机/邮箱），用户点「发送验证码」→ 输入验证码 → 后端完成 `verifyPhone/verifyEmail` 后重新 `serviceLogin`。备选：UI 给出 notificationUrl 链接，用户在浏览器完成验证后点「我已完成，重试」。

@@ -65,6 +65,27 @@ func (s *Server) xiaomiLogin(w http.ResponseWriter, r *http.Request) {
 	s.accountReply(w, http.StatusOK, nil)
 }
 
+func (s *Server) xiaomiLoginToken(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		UserID    string `json:"user_id"`
+		PassToken string `json:"pass_token"`
+		DeviceID  string `json:"device_id"`
+		Cookie    string `json:"cookie"`
+	}
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(in.PassToken) == "" {
+		in.PassToken = in.Cookie
+	}
+	if err := s.app.Xiaomi().Account().LoginWithToken(r.Context(), in.UserID, in.PassToken, in.DeviceID); err != nil {
+		s.accountReply(w, http.StatusBadGateway, err)
+		return
+	}
+	s.accountReply(w, http.StatusOK, nil)
+}
+
 func (s *Server) xiaomiSend(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Method string }
 	if err := decodeJSON(w, r, &in); err != nil {

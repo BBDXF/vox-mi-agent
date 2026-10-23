@@ -152,6 +152,17 @@ make up      # 构建本地镜像并用 compose 启动（读取 .env）
 | `make image` / `image-local` | 多架构镜像 / 本地单架构镜像 |
 | `make up` / `down` / `logs` | 用 compose 运行本地镜像 |
 
+## 小米账号登录失败？
+
+小米密码登录常被验证码 / 风控拦截。可改用浏览器 passToken 登录：
+
+1. 在 Chrome 打开 <https://account.xiaomi.com> 并登录；
+2. 按 F12 → Application → Cookies → `https://account.xiaomi.com`；
+3. 复制 `passToken` 与 `userId` 的值；
+4. 在本应用「设置 → 音箱 → 使用 passToken 登录」中粘贴（也可直接粘贴整串 Cookie）。
+
+> ⚠️ passToken 等同于账号密码，请勿泄露；它仅保存在本机 `mi_token.json`。
+
 ## 目录
 
 | 路径 | 说明 |

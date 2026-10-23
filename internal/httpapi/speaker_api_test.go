@@ -25,6 +25,10 @@ func miniXiaomi(t *testing.T, notify bool) *httptest.Server {
 		j := func(v any) { b, _ := json.Marshal(v); w.Write(append([]byte("&&&START&&&"), b...)) }
 		switch r.URL.Path {
 		case "/pass/serviceLogin":
+			if strings.Contains(r.Header.Get("Cookie"), "passToken=GOOD") {
+				j(map[string]any{"code": 0, "userId": 7, "passToken": "GOOD", "ssecurity": "c2Vj", "nonce": "n", "location": "http://" + r.Host + "/sts?a=1"})
+				return
+			}
 			j(map[string]any{"code": 70016, "qs": "q", "sid": "micoapi", "_sign": "s", "callback": "c"})
 		case "/pass/serviceLoginAuth2":
 			if notify {
@@ -428,5 +432,19 @@ func TestDebugDeviceWorksWithAnyDriver(t *testing.T) {
 	}
 	if resp, _ = e.do(t, "POST", "/api/speaker/mock/ask", `{"text":"x"}`); resp.StatusCode != 400 {
 		t.Fatal(resp.StatusCode)
+	}
+}
+
+func TestXiaomiLoginTokenEndpoint(t *testing.T) {
+	e := spkEnv(t, miniXiaomi(t, false), llm.NewFake())
+	resp, b := e.do(t, "POST", "/api/speaker/xiaomi/login-token", `{"user_id":"7","pass_token":"BAD"}`)
+	r := jsonOf(t, b)
+	if resp.StatusCode != 502 || r["error"] == nil || r["account"].(map[string]any)["state"] == "logged_in" {
+		t.Fatalf("%d %s", resp.StatusCode, b)
+	}
+	resp, b = e.do(t, "POST", "/api/speaker/xiaomi/login-token", `{"cookie":"userId=7; passToken=GOOD"}`)
+	acc := jsonOf(t, b)["account"].(map[string]any)
+	if resp.StatusCode != 200 || acc["state"] != "logged_in" || acc["method"] != "token" || acc["user_id"] != "7" {
+		t.Fatalf("%d %s", resp.StatusCode, b)
 	}
 }

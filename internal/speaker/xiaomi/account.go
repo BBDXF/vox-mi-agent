@@ -90,7 +90,11 @@ type Status struct {
 	CooldownUntil   *time.Time `json:"cooldown_until,omitempty"`
 	VerifyMethods   []string   `json:"verify_methods,omitempty"`
 	NotificationURL string     `json:"notification_url,omitempty"`
+	Method          string     `json:"method,omitempty"` // password | token (when logged in)
+	Hint            string     `json:"hint,omitempty"`   // suggestion shown with errors
 }
+
+const tokenHint = "小米账号密码登录常因验证码/风控失败；可改用浏览器 passToken 登录（account.xiaomi.com 登录后从 Cookie 复制 passToken 与 userId）"
 
 // ErrNotLoggedIn is returned when no valid Xiaomi session exists.
 var ErrNotLoggedIn = errors.New("xiaomi: not logged in")
@@ -102,6 +106,7 @@ type tokenFile struct {
 	PassToken     string    `json:"passToken,omitempty"`
 	Micoapi       []string  `json:"micoapi,omitempty"`  // [ssecurity, serviceToken]
 	Xiaomiio      []string  `json:"xiaomiio,omitempty"` // [ssecurity, serviceToken]
+	Method        string    `json:"method,omitempty"`
 	Failures      int       `json:"failures,omitempty"`
 	CooldownUntil time.Time `json:"cooldown_until,omitempty"`
 }
@@ -207,6 +212,12 @@ func (a *Account) Status() Status {
 		a.save()
 	}
 	s := a.st
+	switch s.State {
+	case StateLoggedIn:
+		s.Method = a.tok.Method
+	case StateError, StateNeedVerify, StateCooldown:
+		s.Hint = tokenHint
+	}
 	s.VerifyMethods = append([]string(nil), a.st.VerifyMethods...)
 	return s
 }
@@ -323,12 +334,80 @@ func (a *Account) Login(ctx context.Context, username, password string) error {
 		a.tok.DeviceID = strings.ToUpper(randString(16))
 	}
 	a.otp = nil
+	a.tok.Method = "password"
 	a.st = Status{State: StateLoggingIn}
 	err := a.passwordLogin(ctx, SIDMina, username, password)
 	if err != nil && a.st.State == StateLoggingIn {
 		a.st = Status{State: StateError, Message: err.Error()}
 	}
 	return err
+}
+
+// parseCookieFields extracts name=value pairs from a Cookie-header style string.
+func parseCookieFields(s string) map[string]string {
+	m := map[string]string{}
+	for _, part := range strings.Split(s, ";") {
+		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok {
+			continue
+		}
+		m[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"'`)
+	}
+	return m
+}
+
+// LoginWithToken logs in with a passToken copied from a browser session at
+// account.xiaomi.com (workaround for captcha/risk-control failures). passToken
+// may be the bare value, "passToken=...", or a whole Cookie header string
+// (which may also carry userId and deviceId).
+func (a *Account) LoginWithToken(ctx context.Context, userID, passToken, deviceID string) error {
+	userID, passToken, deviceID = strings.TrimSpace(userID), strings.TrimSpace(passToken), strings.TrimSpace(deviceID)
+	if strings.Contains(passToken, ";") || strings.HasPrefix(passToken, "passToken=") || strings.Contains(passToken, "userId=") {
+		f := parseCookieFields(passToken)
+		passToken = f["passToken"]
+		if userID == "" {
+			userID = f["userId"]
+		}
+		if deviceID == "" {
+			deviceID = f["deviceId"]
+		}
+	}
+	userID = strings.TrimPrefix(userID, "userId=")
+	if passToken == "" {
+		return errors.New("passToken is required (请填写 passToken)")
+	}
+	if userID == "" {
+		return errors.New("userId is required (请填写 userId)")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if until := a.cooldownLocked(); until != nil {
+		return fmt.Errorf("login is rate limited until %s", until.Format(time.RFC3339))
+	}
+	if deviceID != "" {
+		a.tok.DeviceID = deviceID
+	} else if a.tok.DeviceID == "" {
+		a.tok.DeviceID = strings.ToUpper(randString(16))
+	}
+	a.otp = nil
+	a.tok.UserID, a.tok.PassToken, a.tok.Method = userID, passToken, "token"
+	a.tok.Micoapi, a.tok.Xiaomiio = nil, nil
+	a.st = Status{State: StateLoggingIn, UserID: userID}
+	err := a.silentLocked(ctx, SIDMina)
+	if err == nil {
+		err = a.silentLocked(ctx, SIDMiIO)
+	}
+	if err != nil {
+		if a.st.State == StateCooldown {
+			return err
+		}
+		a.expireLocked("passToken 无效或已过期")
+		a.st.State = StateError
+		a.st.UserID = ""
+		return fmt.Errorf("passToken 无效或已过期 (passToken invalid or expired): %v", err)
+	}
+	a.save()
+	return nil
 }
 
 func (a *Account) passwordLogin(ctx context.Context, sid, user, pass string) error {
