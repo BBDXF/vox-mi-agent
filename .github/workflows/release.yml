@@ -39,44 +39,6 @@ jobs:
         # `make build` re-runs `make web` (idempotent); binaries land in dist/linux_<arch>/app
         run: make build VERSION="${VERSION}" COMMIT="${GITHUB_SHA::7}"
 
-      - name: Build fnOS package (.fpk)
-        run: |
-          sudo curl -fsSL -o /usr/local/bin/fnpack https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64
-          sudo chmod +x /usr/local/bin/fnpack
-          sh fnos/build.sh "${GITHUB_REF_NAME}"
-          mkdir -p release && cp dist/fpk/*.fpk release/
-
-      - name: Package release assets
-        run: |
-          mkdir -p release
-          for arch in amd64 arm64; do
-            tar -C "dist/linux_${arch}" -czf "release/app_${VERSION}_linux_${arch}.tar.gz" app
-          done
-          (cd release && sha256sum ./*.tar.gz ./*.fpk | sed 's#\./##' > SHA256SUMS.txt && cat SHA256SUMS.txt)
-
-      - name: Release notes (CHANGELOG section + commits)
-        run: |
-          tag="${GITHUB_REF_NAME}"
-          awk -v h="## ${tag}" '$0==h{f=1;next} /^## /{if(f)exit} f' CHANGELOG.md > notes.md
-          [ -s notes.md ] || echo "_CHANGELOG.md 中没有 ${tag} 一节。_" > notes.md
-          prev=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)
-          {
-            echo; echo "### 提交记录"; echo
-            git log --no-merges --format='- %s (%h)' ${prev:+$prev..}"${tag}"
-            [ -n "$prev" ] && { echo; echo "**完整对比**：https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${tag}"; }
-          } >> notes.md
-          cat notes.md
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: |
-            release/*.tar.gz
-            release/*.fpk
-            release/SHA256SUMS.txt
-          body_path: notes.md
-          prerelease: ${{ contains(github.ref_name, '-') }}
-
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
 
@@ -110,3 +72,42 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Build fnOS package (.fpk)
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/fnpack https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64
+          sudo chmod +x /usr/local/bin/fnpack
+          FPK_IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:${VERSION#v}" sh fnos/build.sh "${GITHUB_REF_NAME}"
+          mkdir -p release && cp dist/fpk/*.fpk release/
+
+      - name: Package release assets
+        run: |
+          mkdir -p release
+          for arch in amd64 arm64; do
+            tar -C "dist/linux_${arch}" -czf "release/app_${VERSION}_linux_${arch}.tar.gz" app
+          done
+          (cd release && sha256sum ./*.tar.gz ./*.fpk | sed 's#\./##' > SHA256SUMS.txt && cat SHA256SUMS.txt)
+
+      - name: Release notes (CHANGELOG section + commits)
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          awk -v h="## ${tag}" '$0==h{f=1;next} /^## /{if(f)exit} f' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "_CHANGELOG.md 中没有 ${tag} 一节。_" > notes.md
+          prev=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)
+          {
+            echo; echo "### 提交记录"; echo
+            git log --no-merges --format='- %s (%h)' ${prev:+$prev..}"${tag}"
+            [ -n "$prev" ] && { echo; echo "**完整对比**：https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${tag}"; }
+          } >> notes.md
+          cat notes.md
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            release/*.tar.gz
+            release/*.fpk
+            release/SHA256SUMS.txt
+          body_path: notes.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
+

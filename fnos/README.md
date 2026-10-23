@@ -45,3 +45,7 @@ appcenter-cli install-fpk vox-mi-agent.fpk
 - 网关入口（socket 转发）：https://developer.fnnas.com/docs/core-concepts/gateway-registration
 - fnpack 打包工具：https://developer.fnnas.com/docs/cli/fnpack
 - 参考项目：[TencentCloud/Octop](https://github.com/TencentCloud/Octop/tree/main/fnos/docker)、[conversun/fnos-apps](https://github.com/conversun/fnos-apps)、[langbot-app/LangBot](https://github.com/langbot-app/LangBot/tree/master/packaging/fnos)
+
+## 离线安装包
+
+Release 附带三个包：`vox-mi-agent_<V>.fpk`（在线，启动时从 ghcr.io 拉镜像）、`_x86.fpk` / `_arm.fpk`（离线，内含对应架构镜像 `app/docker/image.tar.gz`，`cmd/main start` 首次 `docker load` 后删除压缩包）。本地构建：`FPK_IMAGE=ghcr.io/bbdxf/vox-mi-agent:<V> sh fnos/build.sh v<V>`。

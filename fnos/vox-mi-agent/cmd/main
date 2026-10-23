@@ -5,6 +5,10 @@ dc() { (cd "$D" && docker compose --env-file "$D/.env" "$@"); }
 case "${1:-}" in
   start)
     mkdir -p "${TRIM_PKGVAR}/data"
+    # offline package: load the bundled image once, then drop the archive
+    if [ -f "$D/image.tar.gz" ]; then
+      docker load -i "$D/image.tar.gz" && rm -f "$D/image.tar.gz"
+    fi
     dc up -d ;;
   stop)
     dc down || true ;;

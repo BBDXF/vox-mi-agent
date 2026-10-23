@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+### fnOS 安装包
+- 新增离线安装包 `vox-mi-agent_<版本>_x86.fpk` / `_arm.fpk`（约 25 MB，内含 Docker 镜像，首次启动时 `docker load`，无需访问 ghcr.io）；原在线包（约 8 KB，启动时拉取镜像）保留。
+
 ## v0.2.2
 
 v0.1.0 之后的首个发布（v0.1.1–v0.2.1 已撤回），包含以下全部变更。
