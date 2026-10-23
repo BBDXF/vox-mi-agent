@@ -123,7 +123,7 @@ function buildSteps(evs: MockEvent[]): Step[] {
     const mode = d.mode ? MODES[d.mode] || d.mode : '';
     steps.unshift({
       key: 'det', icon: Radio,
-      label: <>检测到提问<Lat ms={det.latency_ms} />{mode && <span className="text-[10px] text-muted-foreground">接管模式：{mode}</span>}</>,
+      label: <>检测到提问<Lat ms={det.latency_ms} />{mode && <span className="text-[10px] text-muted-foreground">对话接管：{mode}</span>}</>,
       body: d.match ? <div className={`text-xs ${det.handled === false ? 'text-muted-foreground' : ''}`}>{det.handled === false ? '未接管：' : '已接管：'}{d.match}</div> : undefined,
     });
   }

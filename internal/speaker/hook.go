@@ -253,28 +253,28 @@ func (h *Hook) decide(ctx context.Context, s HookSettings, ask Ask) decision {
 func (h *Hook) decide0(ctx context.Context, s HookSettings, ask Ask) decision {
 	switch s.Mode {
 	case "all":
-		return decision{route: RouteAgent, text: ask.Query, match: "全部接管"}
+		return decision{route: RouteAgent, text: ask.Query, match: "全部接管，交给本 Agent"}
 	case "keyword":
 		if t, ok := stripKeyword(Normalize(ask.Query, s.WakeWords, false), s.Keywords); ok {
-			return decision{route: RouteAgent, text: t, match: "命中关键词，交给大模型：" + t}
+			return decision{route: RouteAgent, text: t, match: "以关键词开头，交给本 Agent：" + t}
 		}
-		return decision{route: RouteIgnored, match: "未命中关键词（" + strings.Join(s.Keywords, "、") + "），交给小爱"}
+		return decision{route: RouteIgnored, match: "未以关键词（" + strings.Join(s.Keywords, "、") + "）开头，由小爱回答"}
 	case "music":
 		p := ParseMusic(ask.Query, s.WakeWords, s.MusicTriggers, s.MusicExclude)
 		if !p.Music {
-			return decision{route: RouteIgnored, match: "不是点歌请求，交给小爱"}
+			return decision{route: RouteIgnored, match: "不是点歌请求（未命中点歌触发词，或命中排除词），由小爱处理"}
 		}
 		if d, ok := h.resolveMusic(ctx, s, p.Content); ok {
 			if d.route == RouteArtistRandom {
 				d.match = "点歌「" + p.Content + "」：匹配到歌手，随机播放"
 			} else {
-				d.match = "点歌「" + p.Content + "」：曲库命中，直接播放"
+				d.match = "点歌「" + p.Content + "」：结果唯一且不低于直接播放阈值 " + itoa(s.DirectPlayScore) + "，直接播放"
 			}
 			return d
 		}
-		return decision{route: RouteAgent, text: ask.Query, match: "点歌「" + p.Content + "」：曲库没有确定匹配，交给大模型"}
+		return decision{route: RouteAgent, text: ask.Query, match: "点歌「" + p.Content + "」：没有唯一且达到直接播放阈值的结果，交给本 Agent"}
 	}
-	return decision{route: RouteIgnored, match: "接管已关闭"}
+	return decision{route: RouteIgnored, match: "对话接管已关闭"}
 }
 
 func norm(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), "")) }
@@ -355,7 +355,7 @@ func (h *Hook) handle(ctx context.Context, drv Driver, dev Device, s HookSetting
 	h.cancelTurn(dev.DeviceID)
 	d := h.decide(ctx, s, ask)
 	if ask.TextTriggered && d.route == RouteIgnored { // typed by the user: always answer
-		d = decision{route: RouteAgent, text: ask.Query, mode: d.mode, match: "网页文字触发，交给大模型（原判定：" + d.match + "）"}
+		d = decision{route: RouteAgent, text: ask.Query, mode: d.mode, match: "网页文字触发，交给本 Agent（按对话接管规则：" + d.match + "）"}
 	}
 	ok := d.route != RouteIgnored
 	var conv string
