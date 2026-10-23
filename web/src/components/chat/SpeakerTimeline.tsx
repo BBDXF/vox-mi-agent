@@ -184,6 +184,9 @@ export function SpeakerTimeline({
     if (!id) {
       if (e.kind === 'ask' || !curLoose) { curLoose = 'loose' + (++loose); }
       id = curLoose;
+    } else if (!byId[id] && curLoose && byId[curLoose] && !byId[curLoose].evs.some((x) => x.turn_id)) {
+      // the ask event carries no turn_id: fold the pending loose group into this turn
+      byId[id] = byId[curLoose]; byId[id].id = id; delete byId[curLoose]; curLoose = id;
     }
     if (!byId[id]) { byId[id] = { id, evs: [] }; groups.push(byId[id]); }
     byId[id].evs.push(e);
