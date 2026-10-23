@@ -704,3 +704,13 @@ func TestLoginWithTokenBad(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 }
+
+func TestParseRespKeepsBigInts(t *testing.T) {
+	m, err := parseResp([]byte(`&&&START&&&{"nonce":7353628346512357376,"userId":123456789012,"code":0}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if str(m["nonce"]) != "7353628346512357376" || userIDOf(m) != "123456789012" || intOf(m["code"]) != 0 {
+		t.Fatalf("%v %s", m, str(m["nonce"]))
+	}
+}

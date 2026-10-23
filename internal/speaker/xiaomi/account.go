@@ -469,7 +469,7 @@ func (a *Account) finishLocked(ctx context.Context, sid string, resp map[string]
 	ssec := str(resp["ssecurity"])
 	sum := sha1.Sum([]byte("nonce=" + str(resp["nonce"]) + "&" + ssec))
 	sign := base64.StdEncoding.EncodeToString(sum[:])
-	r, err := a.do(ctx, http.MethodGet, str(resp["location"])+"&clientSign="+url.QueryEscape(sign), nil, nil, nil)
+	r, err := a.do(ctx, http.MethodGet, str(resp["location"])+"&_userIdNeedEncrypt=true&clientSign="+url.QueryEscape(sign), nil, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -504,7 +504,7 @@ func (a *Account) serviceLogin(ctx context.Context, sid string, form url.Values)
 	var r *result
 	var err error
 	if form == nil {
-		r, err = a.do(ctx, http.MethodGet, a.urls.Account+"/pass/serviceLogin?sid="+url.QueryEscape(sid)+"&_json=true", nil, cookies, hdr)
+		r, err = a.do(ctx, http.MethodGet, a.urls.Account+"/pass/serviceLogin?sid="+url.QueryEscape(sid)+"&_json=true&_locale=zh_CN", nil, cookies, hdr)
 	} else {
 		r, err = a.do(ctx, http.MethodPost, a.urls.Account+"/pass/serviceLoginAuth2", form, cookies, hdr)
 	}
@@ -788,7 +788,11 @@ func parseResp(b []byte) (map[string]any, error) {
 	if s == "" {
 		return map[string]any{}, nil
 	}
-	if err := json.Unmarshal([]byte(s), &m); err != nil {
+	// UseNumber: nonce/userId are 64-bit integers; float64 would corrupt them
+	// (a wrong nonce breaks clientSign and STS answers 401).
+	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
+	if err := dec.Decode(&m); err != nil {
 		return nil, fmt.Errorf("unexpected response: %s", trunc(s, 200))
 	}
 	return m, nil
@@ -819,6 +823,8 @@ func str(v any) string {
 	switch x := v.(type) {
 	case string:
 		return x
+	case json.Number:
+		return x.String()
 	case float64:
 		return strconv.FormatFloat(x, 'f', -1, 64)
 	}
