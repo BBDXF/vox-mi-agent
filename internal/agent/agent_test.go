@@ -496,3 +496,28 @@ func TestContextOverflowRetry(t *testing.T) {
 		t.Fatalf("third %d", n)
 	}
 }
+
+func TestPromptContextAppended(t *testing.T) {
+	f := llm.NewFake(llm.FakeTurn{Text: "a"}, llm.FakeTurn{Text: "b"})
+	rt := New(Options{Provider: f, Tools: tools.NewRegistry(echoTool()), SystemPrompt: "SYS",
+		PromptContext: func(enabled func(string) bool) string {
+			if enabled("echo") && !enabled("nope") {
+				return "CTX"
+			}
+			return ""
+		}})
+	var c collector
+	if err := rt.Run(context.Background(), Input{Text: "x"}, c.emit); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.Requests()[0].Messages[0].Content; got != "SYS\n\nCTX" {
+		t.Fatalf("system = %q", got)
+	}
+	rt.Apply(Settings{SystemPrompt: "SYS", DisabledTools: []string{"echo"}})
+	if err := rt.Run(context.Background(), Input{Text: "y"}, c.emit); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.Requests()[1].Messages[0].Content; got != "SYS" {
+		t.Fatalf("system = %q", got)
+	}
+}

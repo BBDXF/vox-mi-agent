@@ -48,6 +48,10 @@ type Options struct {
 	ContextTokens int
 	// DisabledTools are tool names not offered to (nor callable by) the LLM.
 	DisabledTools []string
+	// PromptContext, if set, returns text appended to the system prompt on
+	// every turn. enabled reports whether a tool is registered and not
+	// disabled. Empty result = nothing appended.
+	PromptContext func(enabled func(name string) bool) string
 }
 
 // Settings are the hot-reloadable knobs of a Runtime (see Runtime.Apply).
@@ -273,9 +277,23 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 		}
 	}
 
+	sysPrompt := cfg.SystemPrompt
+	if r.opt.PromptContext != nil {
+		enabled := func(name string) bool {
+			if cfg.disabled[name] || r.opt.Tools == nil {
+				return false
+			}
+			_, ok := r.opt.Tools.Get(name)
+			return ok
+		}
+		if extra := strings.TrimSpace(r.opt.PromptContext(enabled)); extra != "" {
+			sysPrompt += "\n\n" + extra
+		}
+	}
+
 	userMsg := llm.Message{Role: llm.RoleUser, Content: in.Text}
 	if cfg.ContextTokens > 0 {
-		fixed := estTokens(cfg.SystemPrompt) + estTokens(in.Text) + 8
+		fixed := estTokens(sysPrompt) + estTokens(in.Text) + 8
 		for _, d := range defs {
 			fixed += estTokens(d.Name) + estTokens(d.Description) + estTokens(string(d.Parameters))
 		}
@@ -302,7 +320,7 @@ func (r *Runtime) run(ctx context.Context, in Input, emit func(Event), ts *turnS
 		stepNo := step + 1
 		ts.steps = stepNo
 		msgs := make([]llm.Message, 0, len(prior)+len(cur)+1)
-		msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: cfg.SystemPrompt})
+		msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: sysPrompt})
 		msgs = append(msgs, prior...)
 		msgs = append(msgs, cur...)
 		// Last allowed step after tool use: offer no tools so the model must

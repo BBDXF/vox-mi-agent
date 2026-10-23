@@ -758,6 +758,7 @@ export interface AgentSettings {
   context_tokens: number;
   tools_disabled: string[];
   default_system_prompt: string;
+  prompt_context?: string;
   available_tools: { name: string; description: string }[];
 }
 export interface McpServer {

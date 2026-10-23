@@ -205,6 +205,7 @@ func Build(cfg *config.Config, opts ...Option) (*App, error) {
 	a.Tracer.Start()
 	a.Agent = agent.New(agent.Options{
 		Provider: a.Provider, Tools: reg, Store: st, Logger: a.Log, Tracer: a.Tracer,
+		PromptContext: a.libraryPromptContext,
 	})
 	a.Agent.Apply(agentSettings(c.Agent))
 	a.MCP = mcp.NewManager(reg, a.Log)

@@ -302,3 +302,32 @@ func TestMCPToolName(t *testing.T) {
 		t.Error(len(n))
 	}
 }
+
+func TestLibraryPromptContext(t *testing.T) {
+	fake := llm.NewFake(llm.FakeTurn{Text: "one"}, llm.FakeTurn{Text: "two"})
+	a, dir := newFakeApp(t, fake)
+	runTurn(t, a, "hi")
+	if got := fake.Requests()[0].Messages[0].Content; got != agent.DefaultSystemPrompt {
+		t.Fatalf("unsynced prompt must be unchanged: %q", got)
+	}
+	if got, _ := a.GetSection(context.Background(), "agent"); got["prompt_context"] != "" {
+		t.Fatalf("prompt_context = %v", got["prompt_context"])
+	}
+
+	m := musicDir(t, "Artist - Song One.mp3")
+	if _, err := a.UpdateMedia(context.Background(), MediaUpdate{Folders: []string{m}}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "sync", func() bool { return a.Library.Len() == 1 && !a.Syncer.Status().Running })
+	put(t, a, "agent", `{"tools_disabled":["query_json","run_shell"]}`)
+	runTurn(t, a, "again")
+	sys := fake.Requests()[1].Messages[0].Content
+	for _, want := range []string{agent.DefaultSystemPrompt, "曲库数据：" + dir, "songs.jsonl", "共 1 首", "search_audio"} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("missing %q in %q", want, sys)
+		}
+	}
+	if strings.Contains(sys, "query_json") || strings.Contains(sys, "run_shell") {
+		t.Errorf("disabled tools mentioned: %q", sys)
+	}
+}

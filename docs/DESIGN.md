@@ -222,7 +222,7 @@ desktop_applaunchname=fnos-ai-agent.main
 - 后端只监听 Unix socket（本地开发可用 `--listen tcp://127.0.0.1:8080`）。
 - 路由：`/api/*`、`/sse/chat`、`/healthz`，其余返回前端静态文件（`/api`、`/sse` 下的 404 不回退到 `index.html`）。
 - 监听：`server.listen` 支持逗号分隔多个地址（如 `unix:///sock/app.sock,tcp://0.0.0.0:8080`），共用同一 handler；自动 URL 推导与健康检查取第一个 tcp 项。
-- 前缀：配置 `server.base_path` / 环境变量 `VOX_BASE_PATH`（默认 `/app/vox`）。只有一个入口：带前缀的请求剥掉前缀后处理；访问 `/` 302 跳转到 `<前缀>/`，`<前缀>` 跳到 `<前缀>/`；`/healthz` 保留在根路径供容器健康检查；其他不带前缀的路径一律 404。
+- 前缀：配置 `server.base_path` / 环境变量 `VOX_BASE_PATH`（默认 `/app/vox-mi-agent`）。只有一个入口：带前缀的请求剥掉前缀后处理；访问 `/` 302 跳转到 `<前缀>/`，`<前缀>` 跳到 `<前缀>/`；`/healthz` 保留在根路径供容器健康检查；其他不带前缀的路径一律 404。
 - 前端：Vite `base: './'`，API 请求使用相对路径。
 
 ### 5.3 鉴权

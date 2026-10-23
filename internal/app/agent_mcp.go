@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/BBDXF/vox-mi-agent/internal/agent"
 	"github.com/BBDXF/vox-mi-agent/internal/config"
 	"github.com/BBDXF/vox-mi-agent/internal/mcp"
+	"github.com/BBDXF/vox-mi-agent/internal/media"
 )
 
 const maxMCPServers = 20
@@ -89,6 +91,7 @@ func agentSection() *section {
 		out := s.values(a.Config())
 		out["default_system_prompt"] = agent.DefaultSystemPrompt
 		out["available_tools"] = a.builtinTools()
+		out["prompt_context"] = a.promptContextPreview()
 		return out, nil
 	}
 	s.validate = func(a *App, old, n *config.Config, provided, changed keySet, fe fieldErrs) {
@@ -322,4 +325,38 @@ func (a *App) TestMCP(ctx context.Context, d MCPServerDTO) (*mcp.TestResult, err
 	}
 	res := mcp.Test(ctx, mcpConfig(m))
 	return &res, nil
+}
+
+// libraryPromptContext builds the per-turn media library block appended to the
+// system prompt; empty until the library has been synced.
+func (a *App) libraryPromptContext(enabled func(string) bool) string {
+	st := a.Syncer.Status()
+	if st.LastSyncAt.IsZero() {
+		return ""
+	}
+	path := media.SongsPath(a.Config().DataDir)
+	var hints []string
+	if enabled("search_audio") {
+		hints = append(hints, "search_audio")
+	}
+	if enabled("query_json") {
+		hints = append(hints, "query_json")
+	}
+	s := fmt.Sprintf("曲库数据：%s（JSONL，每行一首：id,title,artist,artists[],album,alias[],path；共 %d 首，最近同步 %s）。",
+		path, st.Tracks, st.LastSyncAt.Local().Format("2006-01-02 15:04"))
+	if len(hints) > 0 {
+		s += "查询曲库优先用 " + strings.Join(hints, " / ") + "。"
+	}
+	if enabled("run_shell") {
+		s += "run_shell 可直接读取该文件。"
+	}
+	return s
+}
+
+func (a *App) promptContextPreview() string {
+	enabled := func(n string) bool {
+		_, ok := a.Tools.Get(n)
+		return ok && !slices.Contains(a.Config().Agent.ToolsDisabled, n)
+	}
+	return a.libraryPromptContext(enabled)
 }

@@ -100,6 +100,9 @@ export function AgentSettings() {
             <span>工具说明由系统自动提供，无需写在这里。{editing ? '清空后保存将使用默认提示词。' : ''}</span>
             <span>{(editing ? prompt : data.default_system_prompt).length} 字</span>
           </div>
+          {data.prompt_context && (
+            <div className="text-xs text-muted-foreground">运行时追加：<span className="font-mono break-all">{data.prompt_context}</span></div>
+          )}
           <Err k="system_prompt" />
         </section>
 
