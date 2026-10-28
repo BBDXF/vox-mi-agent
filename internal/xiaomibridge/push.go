@@ -8,42 +8,45 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 )
 
-// Event is the JSON body POSTed to the push URL.
-type Event struct {
-	Type     string `json:"type"` // always "asr"
-	Device   string `json:"device"`
-	DialogID string `json:"dialog_id"`
-	Text     string `json:"text"`
-	Final    bool   `json:"final"`
-	TS       int64  `json:"ts"` // unix ms when the bridge read the line
+// Pusher POSTs events to the configured URL from a single goroutine, in order.
+// Delivery is best-effort: no retries (a late ask is worse than a lost one)
+// and events are dropped when the queue is full. URL, token and the partial
+// flag are read from the settings at the time of each event.
+type Pusher struct {
+	settings func() PushSettings
+	client   *http.Client
+	timeout  time.Duration
+	log      *slog.Logger
+	q        chan Event
+
+	mu    sync.Mutex
+	stats PushStats
 }
 
-// Pusher delivers events in order from a single goroutine. Delivery is
-// best-effort: no retries (a late ask is worse than a lost one) and events are
-// dropped when the queue is full.
-type Pusher struct {
-	url, token string
-	client     *http.Client
-	timeout    time.Duration
-	log        *slog.Logger
-	q          chan Event
+// PushStats are reported by /v1/status.
+type PushStats struct {
+	Sent      int64  `json:"sent"`
+	Failed    int64  `json:"failed"`
+	Dropped   int64  `json:"dropped"`
+	LastError string `json:"last_error,omitempty"`
+	LastOKAt  int64  `json:"last_ok_at,omitempty"` // unix ms
 }
 
 const pushQueue = 64
 
-// NewPusher creates a pusher; token is sent as "Authorization: Bearer <token>"
-// when non-empty. A nil client means http.DefaultClient.
-func NewPusher(url, token string, client *http.Client, timeout time.Duration, log *slog.Logger) *Pusher {
+// NewPusher creates a pusher. A nil client means http.DefaultClient.
+func NewPusher(settings func() PushSettings, client *http.Client, timeout time.Duration, log *slog.Logger) *Pusher {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	if timeout <= 0 {
 		timeout = 3 * time.Second
 	}
-	return &Pusher{url: url, token: token, client: client, timeout: timeout, log: log, q: make(chan Event, pushQueue)}
+	return &Pusher{settings: settings, client: client, timeout: timeout, log: log, q: make(chan Event, pushQueue)}
 }
 
 // Run delivers queued events until ctx is done.
@@ -53,38 +56,67 @@ func (p *Pusher) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case ev := <-p.q:
-			if err := p.post(ctx, ev); err != nil && ctx.Err() == nil {
-				p.log.Warn("push failed", "dialog_id", ev.DialogID, "err", err)
+			s := p.settings()
+			if s.URL == "" { // disabled while queued
+				continue
+			}
+			err := p.post(ctx, s, ev)
+			if ctx.Err() != nil {
+				return
+			}
+			p.mu.Lock()
+			if err != nil {
+				p.stats.Failed++
+				p.stats.LastError = err.Error()
+			} else {
+				p.stats.Sent++
+				p.stats.LastOKAt = time.Now().UnixMilli()
+			}
+			p.mu.Unlock()
+			if err != nil {
+				p.log.Warn("push failed", "seq", ev.Seq, "err", err)
 			}
 		}
 	}
 }
 
-// Enqueue queues ev without blocking; it reports false when ev was dropped.
-func (p *Pusher) Enqueue(ev Event) bool {
+// Offer queues ev if push is enabled and ev qualifies; it never blocks.
+func (p *Pusher) Offer(ev Event) {
+	s := p.settings()
+	if s.URL == "" || (!ev.Final && !s.Partial) {
+		return
+	}
 	select {
 	case p.q <- ev:
-		return true
 	default:
-		p.log.Warn("push queue full, event dropped", "dialog_id", ev.DialogID)
-		return false
+		p.mu.Lock()
+		p.stats.Dropped++
+		p.mu.Unlock()
+		p.log.Warn("push queue full, event dropped", "seq", ev.Seq)
 	}
 }
 
-func (p *Pusher) post(ctx context.Context, ev Event) error {
+// Stats returns a snapshot of the delivery counters.
+func (p *Pusher) Stats() PushStats {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stats
+}
+
+func (p *Pusher) post(ctx context.Context, s PushSettings, ev Event) error {
 	body, err := json.Marshal(ev)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.URL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if p.token != "" {
-		req.Header.Set("Authorization", "Bearer "+p.token)
+	if s.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.Token)
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {

@@ -8,7 +8,7 @@
 - 新增离线安装包 `vox-mi-agent_<版本>_x86.fpk` / `_arm.fpk`（约 25 MB，内含 Docker 镜像，首次启动时 `docker load`，无需访问 ghcr.io）；原在线包（约 8 KB，启动时拉取镜像）保留。
 
 ### 研究（分支 research/xiaomi-bridge）
-- 新增刷机音箱端桥接程序 `xiaomi-bridge`（`make bridge`，armv7 / arm64 静态二进制）：读取小爱本地 `instruction.log`，把识别出的用户语音实时 POST 到指定 URL；提供带 token 的局域网接口用于本地 TTS、播放 URL、打断播放。尚未真机验证，见 `docs/research/xiaomi-bridge.md`。
+- 新增刷机音箱端桥接程序 `xiaomi-bridge`（`make bridge`，armv7 / arm64 静态二进制）：读取小爱本地 `instruction.log` 获取用户语音识别结果。默认端口 4390、HTTP Basic 认证（默认 `admin` / `xiaomi-bridge`）；推送地址、认证、设备名通过 `PUT /v1/config` 设置并保存到 `/data/xiaomi-bridge/config.json`，重启自动读取。接口：播报（打断上一次）、打断、SSE 流式获取用户输入、最近输入、内部状态；`/mcp` 提供 MCP 服务，`/v1/mcp.json` 提供 MCP 描述文件。尚未真机验证，见 `docs/research/xiaomi-bridge.md`。
 
 ## v0.2.2
 
