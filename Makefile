@@ -12,7 +12,7 @@ BI       := github.com/BBDXF/vox-mi-agent/internal/buildinfo
 LDFLAGS  := -s -w -X $(BI).Version=$(VERSION) -X $(BI).Commit=$(COMMIT) -X $(BI).Date=$(DATE)
 export VOX_TOOLS_DIR ?= $(CURDIR)/.tools
 
-.PHONY: tools build web test test-docker image dev clean fpk
+.PHONY: tools build web test test-docker image dev clean fpk bridge
 
 tools: .tools/fzq
 .tools/fzq: tools.lock
@@ -23,6 +23,11 @@ build: web
 	  echo "build linux/$$a"; \
 	  CGO_ENABLED=0 GOOS=linux GOARCH=$$a go build -trimpath -ldflags '$(LDFLAGS)' -o dist/linux_$$a/app ./cmd/app || exit 1; \
 	done
+
+# On-speaker bridge for flashed LX06 / OH2P (32-bit ARMv7 userland); arm64 for other boards.
+bridge:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags '$(LDFLAGS)' -o dist/xiaomi-bridge_linux_armv7 ./cmd/xiaomi-bridge
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags '$(LDFLAGS)' -o dist/xiaomi-bridge_linux_arm64 ./cmd/xiaomi-bridge
 
 web:
 	@if [ -f web/package.json ]; then cd web && \
