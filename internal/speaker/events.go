@@ -136,6 +136,13 @@ func (r *recordingDriver) rec(ctx context.Context, ev MockEvent) {
 	r.log.Record(ev)
 }
 
+func (r *recordingDriver) StreamAsks(ctx context.Context, d Device, receive func(Ask)) error {
+	if s, ok := r.Driver.(AskStreamer); ok {
+		return s.StreamAsks(ctx, d, receive)
+	}
+	return ErrNotImplemented
+}
+
 func (r *recordingDriver) TextToSpeech(ctx context.Context, d Device, text string) error {
 	err := r.Driver.TextToSpeech(ctx, d, text)
 	if err == nil {

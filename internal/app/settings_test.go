@@ -564,3 +564,107 @@ func TestEnvLockedAndReadOnlyFields(t *testing.T) {
 	}
 	put(t, a, "speaker", `{"public_base_url":""}`)
 }
+
+func TestSpeakerBridgeSettingsSecretsAndHotReload(t *testing.T) {
+	a, dir := newTestApp(t, nil)
+	put(t, a, "speaker", `{"xiaomi.devices":[{"device_id":"cloud-id","name":"云音箱","enabled":true}]}`)
+	put(t, a, "speaker", `{"driver":"bridge","bridge.devices":[
+		{"device_id":"living-room","name":"客厅","hardware":"L06A","enabled":true,"url":"http://speaker.local:8080","username":"local-user","password":"local-password"},
+		{"device_id":"kitchen","name":"厨房","enabled":true,"url":"https://kitchen.local","username":"kitchen-user","password":"kitchen-password"}]}`)
+	if a.Speaker.Driver().Name() != "bridge" {
+		t.Fatal("bridge settings were not applied")
+	}
+	if devices := a.Speaker.Configured(); len(devices) != 2 || devices[0].DeviceID != "living-room" {
+		t.Fatal("bridge devices not mapped into speaker manager")
+	}
+	version := a.Speaker.Version()
+	put(t, a, "speaker", `{"volume_default":35,"hook.keywords":["请问"]}`)
+	if a.Speaker.Version() != version {
+		t.Fatal("unrelated speaker settings replaced bridge driver")
+	}
+	got, err := a.GetSection(context.Background(), "speaker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"local-user", "local-password", "kitchen-user", "kitchen-password"} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatal("settings exposed bridge credentials")
+		}
+	}
+	items := got["bridge"].(map[string]any)["devices"]
+	roundtrip, err := json.Marshal(map[string]any{"bridge.devices": items})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := put(t, a, "speaker", string(roundtrip)); len(result.Changed) != 0 || a.Speaker.Version() != version {
+		t.Fatal("masked roundtrip changed bridge endpoints")
+	}
+	// Empty and omitted credentials preserve by stable local ID, even reordered.
+	put(t, a, "speaker", `{"bridge.devices":[
+		{"device_id":"kitchen","name":"厨房","enabled":true,"url":"https://kitchen.local","username":"","password":""},
+		{"device_id":"living-room","name":"客厅","hardware":"L06A","enabled":true,"url":"http://speaker.local:8080"}]}`)
+	r := reload(t, dir)
+	if r.Speaker.Bridge.Devices[0].Password != "kitchen-password" || r.Speaker.Bridge.Devices[1].Username != "local-user" ||
+		len(r.Speaker.Xiaomi.Devices) != 1 || r.Speaker.Xiaomi.Devices[0].DeviceID != "cloud-id" {
+		t.Fatal("credentials or independent cloud devices were not preserved")
+	}
+	version = a.Speaker.Version()
+	result := put(t, a, "speaker", `{"bridge.devices":[{"device_id":"living-room","name":"客厅","enabled":true,"url":"http://speaker.local:8080","username":"****","password":"replacement-password"}]}`)
+	if len(result.Changed) != 1 || result.Changed[0] != "bridge.devices" || a.Speaker.Version() == version {
+		t.Fatal("credential replacement did not reconfigure bridge")
+	}
+	if d := reload(t, dir).Speaker.Bridge.Devices[0]; d.Username != "local-user" || d.Password != "replacement-password" {
+		t.Fatal("credential replacement was not persisted")
+	}
+	put(t, a, "speaker", `{"driver":"mock"}`)
+	if len(a.Config().Speaker.Bridge.Devices) != 1 || len(a.Config().Speaker.Xiaomi.Devices) != 1 {
+		t.Fatal("driver switch lost independent device settings")
+	}
+}
+
+func TestSpeakerBridgeSettingsValidation(t *testing.T) {
+	a, _ := newTestApp(t, nil)
+	for _, js := range []string{
+		`{"bridge.devices":[{"device_id":"debug","url":"http://speaker"}]}`,
+		`{"bridge.devices":[{"device_id":"a","url":"http://speaker"},{"device_id":"a","url":"http://other"}]}`,
+		`{"bridge.devices":[{"device_id":"a","enabled":true,"url":"http://speaker","username":"u"}]}`,
+		`{"bridge.devices":[{"device_id":"a","enabled":true,"url":"http://speaker","username":"****","password":"****"}]}`,
+		`{"bridge.devices":[{"device_id":"a","url":"http://user:secret@speaker"}]}`,
+		`{"bridge.devices":[{"device_id":"a","url":"http://speaker?token=secret"}]}`,
+		`{"bridge.devices":[{"device_id":"a","url":"http://speaker#fragment"}]}`,
+		`{"bridge.devices":[{"device_id":"a","url":"file:///tmp/bridge"}]}`,
+		`{"bridge.devices":[{"device_id":"a","url":"http://speaker","unknown":true}]}`,
+	} {
+		if fields := putFields(t, a, "speaker", js); fields["bridge.devices"] == "" {
+			t.Fatalf("missing bridge validation error: %v", fields)
+		}
+	}
+	if len(a.Config().Speaker.Bridge.Devices) != 0 {
+		t.Fatal("invalid bridge settings mutated live config")
+	}
+	for _, section := range Schema() {
+		if section.Name != "speaker" {
+			continue
+		}
+		for _, field := range section.Fields {
+			if field.Key != "bridge.devices" {
+				continue
+			}
+			secrets := 0
+			for _, item := range field.Items {
+				if (item.Key == "username" || item.Key == "password") && item.Secret {
+					secrets++
+				}
+			}
+			if secrets != 2 {
+				t.Fatal("bridge credential schema is not secret")
+			}
+			return
+		}
+	}
+	t.Fatal("missing bridge devices schema")
+}

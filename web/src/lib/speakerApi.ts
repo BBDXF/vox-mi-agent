@@ -1,5 +1,16 @@
 import { ApiError } from './api';
 
+export type SpeakerDriver = 'mock' | 'xiaomi' | 'bridge';
+export interface BridgeDeviceConfig {
+  device_id: string;
+  name: string;
+  hardware: string;
+  enabled: boolean;
+  url: string;
+  username: string;
+  password: string;
+}
+
 export type AccountState = 'logged_out' | 'logging_in' | 'need_verify' | 'logged_in' | 'cooldown' | 'error';
 export interface SpeakerAccount {
   state: AccountState;
@@ -22,13 +33,14 @@ export interface SpeakerDeviceStatus {
   tts_mode_effective?: string;
 }
 export interface SpeakerStatus {
-  driver?: 'mock' | 'xiaomi';
+  driver?: SpeakerDriver;
   account?: SpeakerAccount;
   devices?: SpeakerDeviceStatus[];
   hook?: { running?: boolean; last_ask?: { device?: string; query?: string; time?: string | number; handled?: boolean } };
 }
 export interface DiscoveredDevice {
   device_id: string; name: string; hardware?: string; miot_did?: string; serial_number?: string;
+  enabled?: boolean; online?: boolean;
 }
 export interface SpeakerTestReq {
   device_id?: string;
@@ -83,7 +95,7 @@ export const xiaomiVerify = (code: string) =>
   acct('api/speaker/xiaomi/verify', { code });
 export const xiaomiRetry = () => acct('api/speaker/xiaomi/retry', {});
 export const xiaomiLogout = () => acct('api/speaker/xiaomi/logout', {});
-export const discoverDevices = () => req<{ driver?: string; devices: any[] }>('api/speaker/devices/discover');
+export const discoverDevices = () => req<{ driver?: SpeakerDriver; devices: DiscoveredDevice[] }>('api/speaker/devices/discover');
 export const speakerTest = (b: SpeakerTestReq) => req<SpeakerTestRes>('api/speaker/test', 'POST', b);
 // Flow events carry details in `data`; flatten them (top-level fields win,
 // so latency_ms stays "ms since the ask").

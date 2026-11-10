@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getMediaStatus } from '@/lib/api';
-import { getSpeakerStatus } from '@/lib/speakerApi';
+import { getSpeakerStatus, type BridgeDeviceConfig } from '@/lib/speakerApi';
 import type { NavTab } from '@/components/layout/Sidebar';
 
 interface Step {
@@ -23,6 +23,7 @@ const getJson = (u: string) => fetch(u).then((r) => (r.ok ? r.json() : null)).ca
 export function GuideView({ onGo }: { onGo: (tab: NavTab, section?: string) => void }) {
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [bridgeMode, setBridgeMode] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -35,9 +36,13 @@ export function GuideView({ onGo }: { onGo: (tab: NavTab, section?: string) => v
     const tracks = media?.tracks ?? 0;
     const url: string = (spk?.public_base_url || '').trim();
     const urlOk = !!url && !/(127\.0\.0\.1|localhost)/i.test(url);
+    const bridge = spk?.driver === 'bridge';
+    setBridgeMode(bridge);
     const loggedIn = st?.account?.state === 'logged_in';
-    const devs = spk?.xiaomi?.devices;
-    const saved = Array.isArray(devs) && devs.length > 0 && spk?.driver === 'xiaomi';
+    const devs = bridge ? spk?.bridge?.devices : spk?.xiaomi?.devices;
+    const saved = Array.isArray(devs) && (bridge
+      ? devs.some((d: BridgeDeviceConfig) => d.enabled && d.username && d.password)
+      : devs.length > 0 && spk?.driver === 'xiaomi');
     const talked = (st?.devices || []).some((d) => d.device_id !== 'debug' && !!d.conversation_id);
     setSteps([
       { title: '配置大模型', done: !!(llm?.has_api_key && llm?.model), action: '去设置大模型', tab: 'settings', section: 'llm',
@@ -48,13 +53,16 @@ export function GuideView({ onGo }: { onGo: (tab: NavTab, section?: string) => v
       { title: '试一下调试音箱', done: null, action: '去对话页', tab: 'chat',
         desc: '不需要真实音箱，在对话页对「调试音箱」说一句就能看到效果。', tip: '试试输入：播放晴天' },
       { title: '设置对外地址', done: urlOk, action: '去设置音箱', tab: 'settings', section: 'speaker',
-        desc: '小爱音箱通过这个地址拉取歌曲，需为 NAS 的局域网 IP 和端口（例如 http://192.168.1.10:8081），通过环境变量 VOX_PUBLIC_BASE_URL 或配置文件设置，此处只读显示（飞牛：应用设置）。' },
-      { title: '登录小米账号', done: loggedIn, action: '去登录', tab: 'settings', section: 'speaker',
-        desc: '在音箱设置中选择「小米音箱」驱动并登录。密码不会被保存；如需验证，按页面提示收验证码。' },
+        desc: '音箱通过这个地址拉取歌曲，需为 NAS 的局域网 IP 和端口（例如 http://192.168.1.10:8081），通过环境变量 VOX_PUBLIC_BASE_URL 或配置文件设置，此处只读显示（飞牛：应用设置）。' },
+      bridge
+        ? { title: '选择本地桥接驱动', done: st?.driver === 'bridge', action: '去设置桥接', tab: 'settings', section: 'speaker',
+            desc: '选择「本地桥接（bridge）」并保存，通过本地 HTTP(S) 服务连接音箱；无需登录小米账号，原有云端音箱列表会独立保留。' }
+        : { title: '登录小米账号', done: loggedIn, action: '去登录', tab: 'settings', section: 'speaker',
+            desc: '在音箱设置中选择「小米音箱」驱动并登录。密码不会被保存；如需验证，按页面提示收验证码。' },
       { title: '添加并保存音箱', done: saved, action: '去添加音箱', tab: 'settings', section: 'speaker',
-        desc: '登录后发现你的小爱音箱，勾选添加并保存配置。' },
+        desc: bridge ? '添加本地端点，设置稳定的本地设备 ID、HTTP(S) URL、用户名和密码并启用；保存后可探测和测试。已保存的凭据留空保留。' : '登录后发现你的小爱音箱，勾选添加并保存配置。' },
       { title: '对音箱说话', done: talked, action: '看对话记录', tab: 'chat',
-        desc: '对真实音箱说：「小爱同学，播放晴天」。有对话记录即视为完成。' },
+        desc: bridge ? '在对话页选择本地音箱，发送「播放晴天」测试；有对话记录即视为完成。' : '对真实音箱说：「小爱同学，播放晴天」。有对话记录即视为完成。' },
     ]);
     setLoading(false);
   }, []);
@@ -97,7 +105,7 @@ export function GuideView({ onGo }: { onGo: (tab: NavTab, section?: string) => v
           <>
             <div className="space-y-2">{steps.slice(0, 3).map((s, i) => render(s, i + 1))}</div>
             <div className="space-y-2">
-              <h2 className="text-sm font-semibold">接入小米音箱（可选）</h2>
+              <h2 className="text-sm font-semibold">接入真实音箱（小米云端 / 本地桥接，可选）</h2>
               {steps.slice(3).map((s, i) => render(s, i + 4))}
             </div>
           </>
@@ -116,8 +124,12 @@ export function GuideView({ onGo }: { onGo: (tab: NavTab, section?: string) => v
           <CardHeader><CardTitle className="text-base">常见问题</CardTitle></CardHeader>
           <CardContent className="text-sm space-y-3 text-muted-foreground">
             <p><b className="text-foreground">音箱没声音？</b> 用手机浏览器打开对外地址，确认能访问。</p>
-            <p><b className="text-foreground">没打断小爱？</b> 在音箱设置里调大打断窗口。</p>
-            <p><b className="text-foreground">登录要验证？</b> 收验证码填入，或在浏览器完成验证后重试。</p>
+            {bridgeMode
+              ? <p><b className="text-foreground">桥接端点离线？</b> 确认服务可达、URL 正确且用户名和密码已设置，保存后重新探测；无需小米账号登录。</p>
+              : <>
+                  <p><b className="text-foreground">没打断小爱？</b> 在音箱设置里调大打断窗口。</p>
+                  <p><b className="text-foreground">登录要验证？</b> 收验证码填入，或在浏览器完成验证后重试。</p>
+                </>}
             <p><b className="text-foreground">搜不到歌？</b> 看曲库是否已同步，必要时给歌曲或歌手加别名。</p>
           </CardContent>
         </Card>

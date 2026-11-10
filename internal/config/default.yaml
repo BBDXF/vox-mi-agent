@@ -56,11 +56,15 @@ search:
   candidates: 500
 
 speaker:
-  driver: mock                        # mock | xiaomi
+  driver: mock                        # mock | xiaomi | bridge
   debug_device: true                  # always-available mock device "debug" (调试音箱)
   volume_default: 30                  # default for the volume test action; 0 = unset (never applied automatically)
   xiaomi:
     devices: []                       # {device_id, name, hardware, enabled, play_mode: auto|url|music, tts_mode: auto|mina|miot, miot_tts: "5-1"}
+  bridge:
+    # Local stable device_id (not a Xiaomi ID); enabled endpoints require explicit credentials.
+    # url is HTTP(S), without userinfo, query or fragment. No Xiaomi login is needed.
+    devices: []                       # {device_id, name, hardware, enabled, url, username, password}
   hook:
     mode: music                       # music | keyword | all | off
     wake_words: ["小爱同学", "小爱"]    # stripped from the start of every ask

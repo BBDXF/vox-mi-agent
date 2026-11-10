@@ -397,13 +397,16 @@ LLM 可见参数（JSON Schema）：
 
 #### 6.7.1 分层
 
-```
-Agent ──Player/Speaker 接口──▶ speaker.Manager ──▶ Driver: mock（模拟音箱）| xiaomi（小米音箱）
-                                    ▲                      │
-                          Hook(轮询到用户提问) ◀────────────┘
+```mermaid
+flowchart LR
+  Agent --> Manager["speaker.Manager"]
+  Manager --> Driver["mock / xiaomi / bridge"]
+  Driver --> Input["云端轮询 / 本地 SSE"]
+  Input --> Hook
+  Hook --> Agent
 ```
 
-`speaker.Driver` 接口（mock 与 xiaomi 同一套，方法名对齐 MiNAService）：
+`speaker.Driver` 接口由 mock、xiaomi、bridge 共用；bridge 额外实现可选 `AskStreamer.StreamAsks`，由 Manager 路由及日志包装保留能力，Hook 优先使用流式输入，不支持时才使用轮询：
 
 | 方法 | 小米实现 |
 |---|---|
@@ -426,7 +429,7 @@ Agent ──Player/Speaker 接口──▶ speaker.Manager ──▶ Driver: moc
 
 #### 6.7.3 Hook：接管小爱对话
 
-- 轮询间隔默认 1s（0.5–5s 可调），按设备 `time` 去重，启动时以当前时间为起点（不处理历史）。
+- 云端/模拟驱动：轮询间隔默认 1s（0.5–5s 可调），按设备 `time` 去重，启动时以当前时间为起点（不处理历史）。本地 bridge：每台启用设备订阅一个认证 SSE，仅处理最终输入，按到达顺序交给 Hook，不使用远端时间戳或可重置序号作为水位。断线以 250ms 起、最大 5s 退避重连，不补发历史；离线期间输入可能丢失。配置变更、禁用设备及关闭接管会取消旧订阅。
 - **规范化**：每条提问先去掉开头的唤醒词（`hook.wake_words`，默认 `["小爱同学","小爱"]`，可与指令连说）、标点/空格；`music` 模式还会去掉礼貌前缀（请/帮我/给我/麻烦）。
 - **触发策略**（`speaker.hook.mode`）：
   - `music`（默认）：规范化后以点歌动词开头（`hook.music_triggers`，默认 播放/放一首/放首/放一下/放/来一首/来首/来点/我想听/想听/听一下/听听/听）且后面有内容才接管；以 `hook.music_exclude`（放假/放心/放松/听说/听话/听见）开头的不接管；暂停/下一首/停止/音量等纯控制指令交给小爱；
@@ -442,12 +445,12 @@ Agent ──Player/Speaker 接口──▶ speaker.Manager ──▶ Driver: moc
 
 #### 6.7.3a 调试音箱与事件流
 
-- **调试音箱**：虚拟设备 `debug`（名称「调试音箱」，型号 LX06）始终可用，与 `speaker.driver` 无关（配置 `speaker.debug_device`，默认 true，可隐藏）。`Manager` 按设备 id 路由：`debug` → mock 驱动实例，其余设备 → 配置的驱动（xiaomi）；`driver: mock`（模拟音箱）仅有调试音箱、无真实设备；`driver: xiaomi`（小米音箱）= 真实设备 + 调试音箱。发现设备 `GET /api/speaker/devices/discover` 始终查询小米账号（MiNA device_list），与已保存的驱动无关，未登录返回 409，不含调试音箱。无 `device_id` 的播放/音量默认指向第一个真实设备，没有则指向 `debug`。统一聊天界面的输入走 `POST /api/speaker/mock/ask`（默认设备 `debug`，任意驱动均可），真实音箱的对话只读地出现在同一事件流中。
+- **调试音箱**：虚拟设备 `debug`（名称「调试音箱」，型号 LX06）与驱动无关，由 `speaker.debug_device` 控制。Manager 按设备 ID 路由：`debug` → mock，其余 → 当前配置的 xiaomi 或 bridge；bridge 使用独立配置的稳定本地 ID、URL 和凭据，不要求小米云 ID 或账号。`GET /api/speaker/devices/discover` 在 bridge 模式列出并探测已配置端点，其他模式仍查询小米账号，未登录返回 409；不含调试音箱。默认播放/音量指向第一个启用的真实设备，没有则指向 debug。统一聊天输入继续走 `POST /api/speaker/mock/ask`，所有驱动共用会话及事件时间线；bridge 的 status/discovery/control 不初始化小米账号，未知设备不回退到小米云。
 - **事件流**（`GET /api/speaker/events?after=&device_id=&conversation_id=` → `{events,last_seq}`；`/api/speaker/mock/events` 为别名；环形缓冲 5000 条，所有驱动共用）。每条事件：`seq, ts, device_id, kind, conversation_id?, turn_id?, latency_ms?`（自该设备最近一次提问起，ms），其余字段按 kind：
 
 | kind | 字段 |
 |---|---|
-| `ask` | `text`（用户提问；真实音箱的 `ts` 为设备记录时间） |
+| `ask` | `text`（用户提问；云端 `ts` 为设备记录时间，bridge 为 NAS 收到事件的时间） |
 | `ask_detected` | `text, handled, route(direct\|artist_random\|agent\|ignored), latency_ms=检测延迟` |
 | `native_reply` | `text="（小爱原生回复）"`；仅调试音箱开启 native_reply 且该提问被忽略时 |
 | `turn_start` | `route`，`data:{route,text}` |
@@ -472,11 +475,11 @@ Agent ──Player/Speaker 接口──▶ speaker.Manager ──▶ Driver: moc
 
 #### 6.7.5 配置（`speaker` 段，均可在 Web 修改）
 
-`driver(mock|xiaomi；旧值 log 载入时迁移为 mock)`、`public_base_url`、`url_ttl`、`xiaomi.devices[]{device_id,name,hardware,enabled,play_mode,tts_mode,miot_tts}`、`hook.mode/wake_words/music_triggers/music_exclude/direct_play_score/keywords/poll_interval/interrupt_window`、`volume_default`。账号状态与登录动作走独立接口 `/api/speaker/xiaomi/*`，不进配置文件。
+`driver(mock|xiaomi|bridge；旧值 log 载入时迁移为 mock)`、`public_base_url`、`url_ttl`、`xiaomi.devices[]{device_id,name,hardware,enabled,play_mode,tts_mode,miot_tts}`、`bridge.devices[]{device_id,name,hardware,enabled,url,username,password}`、`hook.mode/wake_words/music_triggers/music_exclude/direct_play_score/keywords/poll_interval/interrupt_window`、`volume_default`。云端账号状态与登录动作走 `/api/speaker/xiaomi/*`，不进配置文件。bridge 凭据存 0600 配置文件，设置视图中用户名/密码均脱敏，按稳定 ID 保留未修改的凭据；小米云设备列表与 bridge 端点独立保留。不改变端点的设置更新复用驱动实例，避免重连。
 
 #### 6.7.6 风险
 
-登录风控与接口变化仍是最高风险；协议层独立包、有完整的模拟 HTTP 测试；失败时 UI 明确显示状态与下一步，Agent 的 Web/CLI 对话不受影响。
+云端模式仍受登录风控与接口变化影响。bridge 模式无需 vox 的 mi login / passToken / mi_token.json，但仍依赖音箱原厂 ASR 与 TTS，不替代音箱绑定或提供离线语音链路。HTTP Basic 和语音仅适合可信局域网或受信任 HTTPS。本地 pause 同时终止 bridge 自己的 TTS，未知播放器状态/命令失败显式报错；真机日志、原生回复竞争、mphelper 输出及音量命令须验证，不能由本机夹具通过推断为硬件可用。
 
 ### 6.8 可观测性
 

@@ -17,7 +17,7 @@ import (
 // the bridge can be exercised off-device.
 type Device struct {
 	Ubus     string // ubus CLI
-	Mphelper string // mphelper (pause / mute_stat)
+	Mphelper string // mphelper (pause / play / mute_stat)
 	TTSPlay  string // blocking TTS script: pauses players, synthesizes, then miplayer plays it
 	AivsInit string // init script of mico_aivs_lab (XiaoAi's AIVS client)
 
@@ -77,7 +77,12 @@ func (p *playback) wasKilled() bool {
 // returns when playback ended (interrupted reports an early end by Stop, a
 // newer Speak or ctx); otherwise it returns once playback started.
 func (d *Device) Speak(ctx context.Context, text string, wait bool) (interrupted bool, err error) {
-	cmd := exec.Command(d.TTSPlay, text)
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	// Firmware ships this script without a shebang. Pass text as one argument,
+	// never as shell source; the process group still includes its player child.
+	cmd := exec.Command("/bin/sh", d.TTSPlay, text)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	d.mu.Lock() // serializes concurrent Speak calls: exactly one survives
 	if d.play != nil {
@@ -148,15 +153,59 @@ func (d *Device) Stop(ctx context.Context) (interrupted bool, err error) {
 	if p != nil {
 		interrupted = p.kill()
 	}
-	_, e1 := d.run(ctx, d.Mphelper, "pause")
-	_, e2 := d.run(ctx, d.Ubus, "call", "mediaplayer", "player_play_operation", ubusArg(map[string]any{"action": "stop"}))
+	e1 := d.Pause(ctx)
+	e2 := d.ubus(ctx, "player_play_operation", map[string]any{"action": "stop"})
 	return interrupted, errors.Join(e1, e2)
 }
 
 // PlayURL plays an audio URL on the system media player.
 func (d *Device) PlayURL(ctx context.Context, url string) error {
-	_, err := d.run(ctx, d.Ubus, "call", "mediaplayer", "player_play_url", ubusArg(map[string]any{"url": url, "type": 1}))
+	return d.ubus(ctx, "player_play_url", map[string]any{"url": url, "type": 1})
+}
+
+// Pause interrupts bridge-owned TTS as well as pausing the firmware player.
+func (d *Device) Pause(ctx context.Context) error {
+	d.mu.Lock()
+	if d.play != nil {
+		d.play.kill()
+	}
+	d.mu.Unlock()
+	_, err := d.run(ctx, d.Mphelper, "pause")
 	return err
+}
+
+// Play resumes the firmware player.
+func (d *Device) Play(ctx context.Context) error {
+	_, err := d.run(ctx, d.Mphelper, "play")
+	return err
+}
+
+// SetVolume sets the firmware player's volume in the range 0..100.
+func (d *Device) SetVolume(ctx context.Context, volume int) error {
+	if volume < 0 || volume > 100 {
+		return errors.New("volume must be between 0 and 100")
+	}
+	return d.ubus(ctx, "player_set_volume", map[string]any{"volume": volume})
+}
+
+func (d *Device) ubus(ctx context.Context, method string, args map[string]any) error {
+	out, err := d.run(ctx, d.Ubus, "call", "mediaplayer", method, ubusArg(args))
+	if err != nil {
+		return err
+	}
+	var result *struct {
+		Code int `json:"code"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		return fmt.Errorf("invalid ubus response: %w", err)
+	}
+	if result == nil {
+		return errors.New("invalid null ubus response")
+	}
+	if result.Code != 0 {
+		return fmt.Errorf("ubus %s failed: code %d", method, result.Code)
+	}
+	return nil
 }
 
 // AbortXiaoAI restarts mico_aivs_lab, dropping XiaoAi's current dialog. It
@@ -173,13 +222,16 @@ func (d *Device) PlayerStatus(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	switch {
-	case strings.Contains(out, "1"):
+	switch strings.TrimSpace(out) {
+	case "1":
 		return "playing", nil
-	case strings.Contains(out, "2"):
+	case "2":
 		return "paused", nil
+	case "0":
+		return "idle", nil
+	default:
+		return "", fmt.Errorf("unrecognized mphelper mute_stat response: %q", out)
 	}
-	return "idle", nil
 }
 
 // run executes a short command without a shell (arguments are never parsed).

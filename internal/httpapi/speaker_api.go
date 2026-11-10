@@ -27,21 +27,28 @@ type speakerDeviceView struct {
 func (s *Server) speakerStatus(w http.ResponseWriter, r *http.Request) {
 	a := s.app
 	devs := a.Speaker.AllDevices()
+	driver := a.Speaker.Driver().Name()
 	views := make([]speakerDeviceView, 0, len(devs))
 	for _, d := range devs {
 		var conv *string
 		if id := a.Hook.LookupConversation(d.DeviceID); id != "" {
 			conv = &id
 		}
+		playMode, ttsMode := xiaomi.PlayMode(d.PlayMode, d.Hardware), xiaomi.TTSMode(d.TTSMode)
+		if driver == "bridge" {
+			playMode, ttsMode = "bridge", "bridge"
+			if d.DeviceID == speaker.DebugDeviceID {
+				playMode, ttsMode = "url", "mock"
+			}
+		}
 		views = append(views, speakerDeviceView{DeviceID: d.DeviceID, ConversationID: conv, Debug: d.DeviceID == speaker.DebugDeviceID, Name: d.Name, Hardware: d.Hardware, Enabled: d.Enabled, Online: d.Online,
-			PlayModeEffective: xiaomi.PlayMode(d.PlayMode, d.Hardware), TTSModeEffective: xiaomi.TTSMode(d.TTSMode)})
+			PlayModeEffective: playMode, TTSModeEffective: ttsMode})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"driver":  a.Speaker.Driver().Name(),
-		"account": a.Xiaomi().Account().Status(),
-		"devices": views,
-		"hook":    a.Hook.Status(),
-	})
+	out := map[string]any{"driver": driver, "devices": views, "hook": a.Hook.Status()}
+	if driver != "bridge" {
+		out["account"] = a.Xiaomi().Account().Status()
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) accountReply(w http.ResponseWriter, code int, err error) {
@@ -131,7 +138,26 @@ func (s *Server) xiaomiLogout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) speakerDiscover(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	// Always the Xiaomi account, whatever driver is saved (never mock/debug).
+	if driver := s.app.Speaker.Driver(); driver.Name() == "bridge" {
+		list, err := driver.DeviceList(ctx)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		for i := range list {
+			probe, stop := context.WithTimeout(ctx, 3*time.Second)
+			_, err := driver.PlayerGetStatus(probe, list[i])
+			stop()
+			online := err == nil
+			list[i].Online = &online
+		}
+		if list == nil {
+			list = []speaker.Device{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"driver": "bridge", "devices": list})
+		return
+	}
+	// Cloud discovery remains available while mock is selected (test before save).
 	list, err := s.app.Xiaomi().DeviceList(ctx)
 	if err != nil {
 		if errors.Is(err, xiaomi.ErrNotLoggedIn) {
@@ -171,7 +197,7 @@ func (s *Server) speakerTest(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Not saved yet: look it up in the Xiaomi account (test before save).
 		found := false
-		if in.DeviceID != "" && in.DeviceID != speaker.DebugDeviceID {
+		if drv.Name() != "bridge" && in.DeviceID != "" && in.DeviceID != speaker.DebugDeviceID {
 			xm := s.app.Xiaomi()
 			if d, ok, lerr := xm.Lookup(ctx, in.DeviceID); lerr == nil && ok {
 				dev, drv, note, found = d, xm, "设备尚未保存", true

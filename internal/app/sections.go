@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -482,23 +483,75 @@ func speakerSection() *section {
 			return yamlOf(c.Speaker.Xiaomi.Devices)
 		},
 	}
+	bridgeDevices := &fieldDef{
+		Field: Field{Key: "bridge.devices", Type: TObjects, Default: []any{}, Description: "本地 bridge 端点（整体替换，无需小米登录；凭据留空或原样回传掩码保持不变）", Items: []Field{
+			{Key: "device_id", Type: TString, Default: "", Description: "稳定的本地设备 ID（不是小米云设备 ID；不能为 debug）"},
+			{Key: "name", Type: TString, Default: "", Description: "显示名称（也是该设备对话的标题）"},
+			{Key: "hardware", Type: TString, Default: "", Description: "型号（可选，如 L06A）"},
+			{Key: "enabled", Type: TBool, Default: true, Description: "启用播放与实时语音监听"},
+			{Key: "url", Type: TString, Default: "", Description: "HTTP(S) bridge 地址，不得包含凭据、查询参数或片段"},
+			{Key: "username", Type: TString, Default: "", Secret: true, Description: "bridge 用户名（完整隐藏；留空保持已有值）"},
+			{Key: "password", Type: TString, Default: "", Secret: true, Description: "bridge 密码（完整隐藏；留空保持已有值）"},
+		}},
+		get: func(c *config.Config) any {
+			items := make([]config.SpeakerBridgeDevice, len(c.Speaker.Bridge.Devices))
+			for i, d := range c.Speaker.Bridge.Devices {
+				d.Username, d.Password = config.MaskCredential(d.Username), config.MaskCredential(d.Password)
+				items[i] = d
+			}
+			return items
+		},
+		equal: func(a, b *config.Config) bool {
+			return slices.Equal(a.Speaker.Bridge.Devices, b.Speaker.Bridge.Devices)
+		},
+		set: func(c *config.Config, raw json.RawMessage) error {
+			var items []config.SpeakerBridgeDevice
+			if isNull(raw) || decodeStrict(raw, &items) != nil {
+				return fmt.Errorf("must be an array of {device_id, name, hardware, enabled, url, username, password}")
+			}
+			stored := make(map[string]config.SpeakerBridgeDevice, len(c.Speaker.Bridge.Devices))
+			for _, d := range c.Speaker.Bridge.Devices {
+				stored[d.DeviceID] = d
+			}
+			for i := range items {
+				d := &items[i]
+				d.DeviceID, d.Name, d.Hardware, d.URL = strings.TrimSpace(d.DeviceID), strings.TrimSpace(d.Name), strings.TrimSpace(d.Hardware), strings.TrimSpace(d.URL)
+				old := stored[d.DeviceID]
+				if d.Username == "" || d.Username == "****" {
+					d.Username = old.Username
+				}
+				if d.Password == "" || d.Password == "****" {
+					d.Password = old.Password
+				}
+			}
+			c.Speaker.Bridge.Devices = items
+			return nil
+		},
+		node: func(c *config.Config) (*yamlNode, error) {
+			if len(c.Speaker.Bridge.Devices) == 0 {
+				return &yamlNode{Kind: yamlSeq, Tag: "!!seq", Style: yamlFlow}, nil
+			}
+			return yamlOf(c.Speaker.Bridge.Devices)
+		},
+	}
 	s := &section{
 		Name: "speaker", Title: "音箱",
-		Description: "播放输出驱动（mock / log / xiaomi）、小米音箱设备与对话接管（hook）。修改后立即生效；小米账号登录走 /api/speaker/xiaomi/*。",
+		Description: "播放输出驱动（mock / xiaomi / bridge）、设备与对话接管（hook）。bridge 直连本地端点，无需小米账号；修改后立即生效。",
 		fields: []*fieldDef{
-			enumField("driver", "驱动：mock（模拟音箱，仅常驻的调试音箱，无真实设备）、xiaomi（小米音箱，真实设备 + 调试音箱）", []string{"mock", "xiaomi"}, func(c *config.Config) *string { return &c.Speaker.Driver }),
+			enumField("driver", "驱动：mock（模拟）、xiaomi（小米云）、bridge（本地直连，无需小米登录）", []string{"mock", "xiaomi", "bridge"}, func(c *config.Config) *string { return &c.Speaker.Driver }),
 			readOnly(strField("public_base_url", "（只读，通过环境变量 VOX_PUBLIC_BASE_URL 或配置文件设置）音箱访问本服务的地址，如 http://192.168.1.10:8081（无结尾斜杠）；留空则自动取本机首个非回环 IPv4 + 服务端口（Docker 桥接模式下通常不可达，请显式设置）", func(c *config.Config) *string { return &c.Speaker.PublicBaseURL })),
 			durField("url_ttl", "签名媒体 URL 有效期（如 1h，最小 1m）", func(c *config.Config) *time.Duration { return &c.Speaker.URLTTL }),
 			boolField("debug_device", "调试音箱：始终可用的虚拟设备 debug（与驱动无关；聊天页的输入都经它走完整的音箱流程）。关闭则隐藏", func(c *config.Config) *bool { return &c.Speaker.DebugDevice }),
 			intField("volume_default", "默认音量（0–100，默认 30）：仅在测试面板「音量」未指定数值时使用，不会自动应用到音箱；0 = 不设置（不改动音箱音量）", func(c *config.Config) *int { return &c.Speaker.VolumeDefault }),
 			devices,
+			bridgeDevices,
 			enumField("hook.mode", "对话接管：music（默认，只接管点歌请求，置信命中时不经大模型直接播放）、keyword（去掉唤醒词后以 hook.keywords 前缀开头才接管）、all（接管全部提问）、off（只播报不监听）", []string{"music", "keyword", "all", "off"}, func(c *config.Config) *string { return &c.Speaker.Hook.Mode }),
 			stringsField("hook.wake_words", "唤醒词：先从每条提问开头去掉（默认 小爱同学、小爱）", func(c *config.Config) *[]string { return &c.Speaker.Hook.WakeWords }),
 			stringsField("hook.music_triggers", "music 模式的点歌动词：规范化后的提问以其开头且后面有内容才接管；暂停/下一首/音量等纯控制指令不接管", func(c *config.Config) *[]string { return &c.Speaker.Hook.MusicTriggers }),
 			stringsField("hook.music_exclude", "music 模式的排除词：以其开头的提问不接管（放假、听说等）", func(c *config.Config) *[]string { return &c.Speaker.Hook.MusicExclude }),
 			intField("hook.direct_play_score", "music 模式直接播放的最低搜索分数（1–100，默认 85）：唯一且不模糊的命中达到该分数时跳过大模型，否则交给 Agent", func(c *config.Config) *int { return &c.Speaker.Hook.DirectPlayScore }),
 			stringsField("hook.keywords", "keyword 模式的前缀（去掉唤醒词后匹配，接管后会从问题中去掉，默认 问问）", func(c *config.Config) *[]string { return &c.Speaker.Hook.Keywords }),
-			durField("hook.poll_interval", "轮询小爱对话的间隔（500ms–5s）", func(c *config.Config) *time.Duration { return &c.Speaker.Hook.PollInterval }),
+			durField("hook.poll_interval", "云端/模拟对话轮询间隔（500ms–5s）；bridge 使用 SSE，不受此值影响", func(c *config.Config) *time.Duration { return &c.Speaker.Hook.PollInterval }),
 			durField("hook.interrupt_window", "接管后打断小爱原生回复的观察窗口（0–30s）", func(c *config.Config) *time.Duration { return &c.Speaker.Hook.InterruptWindow }),
 			intField("mock.latency_ms", "mock 驱动：每次调用的人为延迟（毫秒，0–60000）", func(c *config.Config) *int { return &c.Speaker.Mock.LatencyMS }),
 			floatField("mock.fail_rate", "mock 驱动：随机失败概率（0–1）", func(c *config.Config) *float64 { return &c.Speaker.Mock.FailRate }),
@@ -548,6 +601,11 @@ func speakerSection() *section {
 		trim("hook.wake_words", &sp.Hook.WakeWords)
 		trim("hook.music_triggers", &sp.Hook.MusicTriggers)
 		trim("hook.music_exclude", &sp.Hook.MusicExclude)
+		if provided["bridge.devices"] || (provided["driver"] && sp.Driver == "bridge") {
+			if err := sp.Bridge.Validate(); err != nil {
+				fe["bridge.devices"] = err.Error()
+			}
+		}
 		if provided["xiaomi.devices"] {
 			if len(sp.Xiaomi.Devices) > 20 {
 				fe["xiaomi.devices"] = "at most 20 devices"

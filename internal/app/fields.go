@@ -49,6 +49,8 @@ type fieldDef struct {
 	yamlPath []string
 	// get returns the API (JSON) value, secrets masked.
 	get func(c *config.Config) any
+	// equal compares stored values when masking hides meaningful changes.
+	equal func(a, b *config.Config) bool
 	// set decodes raw into c; the error text is shown to the user.
 	set func(c *config.Config, raw json.RawMessage) error
 	// node returns the persisted YAML form.

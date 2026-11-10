@@ -328,7 +328,13 @@ func (a *App) PutSection(ctx context.Context, name string, body map[string]json.
 		ch := keySet{}
 		for k := range provided {
 			f := s.field(k)
-			if !reflect.DeepEqual(f.get(old), f.get(n)) {
+			var equal bool
+			if f.equal != nil {
+				equal = f.equal(old, n)
+			} else {
+				equal = reflect.DeepEqual(f.get(old), f.get(n))
+			}
+			if !equal {
 				ch[k] = true
 			}
 		}

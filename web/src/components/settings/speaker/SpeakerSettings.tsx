@@ -9,11 +9,12 @@ import { getSectionSettings, updateSectionSettings } from '@/lib/api';
 import {
   getSpeakerStatus, xiaomiLogin, xiaomiLoginToken, xiaomiSendCode, xiaomiVerify, xiaomiRetry, xiaomiLogout,
   discoverDevices, speakerTest,
-  type SpeakerStatus, type SpeakerAccount, type SpeakerTestRes,
+  type SpeakerStatus, type SpeakerAccount, type SpeakerTestRes, type BridgeDeviceConfig, type DiscoveredDevice,
 } from '@/lib/speakerApi';
 
 const selectCls = 'h-9 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring';
 const helpCls = 'text-xs text-muted-foreground mt-1';
+const CREDENTIAL_MASK = '****';
 
 function Field({ label, help, error, children }: { label: string; help?: string; error?: string; children: React.ReactNode }) {
   return (
@@ -282,18 +283,22 @@ function Chips({ label, help, items, onChange, error }: { label: string; help?: 
 export function SpeakerSettings() {
   const { success, error: toastError } = useToast();
   const [v, setVRaw] = useState<Record<string, any> | null>(null);
+  const [savedBridgeDevices, setSavedBridgeDevices] = useState<BridgeDeviceConfig[]>([]);
   const [dirty, setDirty] = useState(false);
   const setV: typeof setVRaw = (x) => { setDirty(true); setVRaw(x); };
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<SpeakerStatus | null>(null);
   const [saving, setSaving] = useState(false);
-  const [found, setFound] = useState<any[] | null>(null);
+  const [found, setFound] = useState<DiscoveredDevice[] | null>(null);
   const [finding, setFinding] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
 
   const loadStatus = useCallback(() => getSpeakerStatus().then(setStatus).catch(() => {}), []);
   useEffect(() => {
-    getSectionSettings('speaker').then((x) => { const xm = x?.xiaomi; setVRaw(xm?.devices ? { ...x, xiaomi: { ...xm, devices: xm.devices.filter((d: any) => d.device_id !== 'debug') } } : x); }).catch((e) => toastError(e.message || '加载音箱配置失败'));
+    getSectionSettings('speaker').then((x) => {
+      setVRaw(x);
+      setSavedBridgeDevices(x.bridge?.devices || []);
+    }).catch((e) => toastError(e.message || '加载音箱配置失败'));
     loadStatus();
     const t = setInterval(loadStatus, 5000);
     return () => clearInterval(t);
@@ -304,19 +309,67 @@ export function SpeakerSettings() {
   const set = (k: string, val: any) => { setV((p) => ({ ...(p || {}), [k]: val })); setErrs((p) => { const c = { ...p }; delete c[k]; return c; }); };
   const hook = v.hook || {};
   const setHook = (k: string, val: any) => set('hook', { ...hook, [k]: val });
-  const devices: any[] = v.xiaomi?.devices || [];
+  const devices: any[] = (v.xiaomi?.devices || []).filter((d: any) => d.device_id !== 'debug');
   const setDevices = (d: any[]) => set('xiaomi', { ...(v.xiaomi || {}), devices: d });
   const patchDev = (i: number, p: any) => setDevices(devices.map((d, j) => (j === i ? { ...d, ...p } : d)));
+  const bridgeDevices: BridgeDeviceConfig[] = v.bridge?.devices || [];
+  const setBridgeDevices = (d: BridgeDeviceConfig[]) => set('bridge', { ...(v.bridge || {}), devices: d });
+  const patchBridgeDevice = (i: number, patch: Partial<BridgeDeviceConfig>) =>
+    setBridgeDevices(bridgeDevices.map((d, j) => j === i ? { ...d, ...patch } : d));
+  const savedBridgeDevice = (id: string) => savedBridgeDevices.find((d) => d.device_id === id);
+  const setBridgeCredential = (i: number, key: 'username' | 'password', value: string) => {
+    const saved = savedBridgeDevice(bridgeDevices[i].device_id);
+    patchBridgeDevice(i, { [key]: value || (saved?.[key] ? CREDENTIAL_MASK : '') });
+  };
+  const addBridgeDevice = () => {
+    let n = 1;
+    while (bridgeDevices.some((d) => d.device_id === `bridge-${n}`) || savedBridgeDevice(`bridge-${n}`)) n++;
+    setBridgeDevices([...bridgeDevices, { device_id: `bridge-${n}`, name: `本地音箱 ${n}`, hardware: '', enabled: true, url: '', username: '', password: '' }]);
+  };
   const keywords: string[] = hook.keywords || [];
   const driver = v.driver || 'mock';
   const eff = (id: string) => status?.devices?.find((d) => d.device_id === id);
-  const E = (k: string) => errs[k] || errs[k.replace(/\.\d+/g, '')];
+  const E = (k: string) => errs[k] || errs[k.replace(/\[(\d+)\]/g, '.$1')] || errs[k.replace(/\[\d+\]|\.\d+/g, '')];
   const num = (x: string) => (x === '' ? '' : Number(x));
 
   const save = async () => {
+    if (driver === 'bridge') {
+      const fields: Record<string, string> = {};
+      const ids = new Set<string>();
+      bridgeDevices.forEach((d, i) => {
+        const key = `bridge.devices[${i}]`;
+        if (!d.device_id.trim() || d.device_id !== d.device_id.trim() || d.device_id === 'debug' || ids.has(d.device_id)) {
+          fields[`${key}.device_id`] = '填写唯一的本地 ID，不能为 debug 或包含首尾空格';
+        }
+        ids.add(d.device_id);
+        try {
+          const url = new URL(d.url);
+          if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || d.url.includes('?') || d.url.includes('#')) throw new Error();
+        } catch {
+          fields[`${key}.url`] = '填写 HTTP(S) 地址，不得包含凭据、查询参数或片段';
+        }
+        for (const credential of ['username', 'password'] as const) {
+          const existing = savedBridgeDevice(d.device_id)?.[credential];
+          if (d.enabled && (!d[credential] || d[credential] === CREDENTIAL_MASK) && !existing) {
+            fields[`${key}.${credential}`] = '启用端点必须提供用户名和密码';
+          }
+        }
+      });
+      if (Object.keys(fields).length) { setErrs(fields); toastError('请检查本地桥接端点配置'); return; }
+    }
     setSaving(true); setErrs({});
     try {
       const r = await updateSectionSettings('speaker', (({ env_locked, public_base_url, ...rest }: any) => rest)(v));
+      const saved = v.bridge?.devices ? {
+        ...v,
+        bridge: { ...v.bridge, devices: bridgeDevices.map((d) => ({
+          ...d,
+          username: (d.username && d.username !== CREDENTIAL_MASK) || savedBridgeDevice(d.device_id)?.username ? CREDENTIAL_MASK : '',
+          password: (d.password && d.password !== CREDENTIAL_MASK) || savedBridgeDevice(d.device_id)?.password ? CREDENTIAL_MASK : '',
+        })) },
+      } : v;
+      setVRaw(saved);
+      setSavedBridgeDevices(saved.bridge?.devices || []);
       setDirty(false);
       success((r as any)?.restart_required ? '已保存，部分设置需重启生效' : '音箱配置已保存');
       loadStatus();
@@ -337,7 +390,7 @@ export function SpeakerSettings() {
   const last = status?.hook?.last_ask;
 
   return (
-    <div className="space-y-6">
+    <fieldset disabled={saving} className="space-y-6 min-w-0">
       {dirty && (
         <div className="sticky top-0 z-20 flex items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-background/95 backdrop-blur px-4 py-2 shadow">
           <span className="text-sm text-amber-600">有未保存的更改</span>
@@ -345,11 +398,11 @@ export function SpeakerSettings() {
         </div>
       )}
       <Card>
-        <CardHeader><CardTitle>驱动</CardTitle><CardDescription>模拟音箱：仅调试音箱；小米音箱：真实设备 + 调试音箱。{driver !== (status?.driver ?? driver) && ' 保存后生效。'}</CardDescription></CardHeader>
+        <CardHeader><CardTitle>驱动</CardTitle><CardDescription>模拟音箱用于调试；小米音箱通过云端账号连接；本地桥接通过自配 HTTP(S) 端点连接，无需小米登录。{driver !== (status?.driver ?? driver) && ' 保存后生效。'}</CardDescription></CardHeader>
         <CardContent className="grid sm:grid-cols-2 gap-4">
           <Field label="驱动" error={E('driver')}>
-            <select className={selectCls + ' w-full'} value={driver} onChange={(e) => set('driver', e.target.value)}>
-              <option value="mock">模拟音箱</option><option value="xiaomi">小米音箱</option>
+            <select className={selectCls + ' w-full'} value={driver} onChange={(e) => { set('driver', e.target.value); setFound(null); setTesting(null); }}>
+              <option value="mock">模拟音箱</option><option value="xiaomi">小米音箱</option><option value="bridge">本地桥接（bridge）</option>
             </select>
           </Field>
           <Field label="对外地址" error={E('public_base_url')} help={(v.env_locked?.public_base_url ? `由环境变量 ${v.env_locked.public_base_url} 管理，` : '') + '通过环境变量 VOX_PUBLIC_BASE_URL 或配置文件设置（飞牛：应用设置）'}>
@@ -377,6 +430,81 @@ export function SpeakerSettings() {
           </CardContent>
         </Card>
       )}
+
+      {driver === 'bridge' && <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle>本地桥接端点</CardTitle>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" className="gap-1" onClick={addBridgeDevice}><Plus className="w-3.5 h-3.5" />添加端点</Button>
+              <Button size="sm" variant="outline" className="gap-1" onClick={discover} disabled={finding || dirty || status?.driver !== 'bridge'}>
+                {finding ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}探测已保存端点
+              </Button>
+            </div>
+          </div>
+          <CardDescription>直接连接配置的本地 HTTP(S) 桥接服务，无需小米账号登录，也不从小米云端发现设备。小米音箱列表会独立保留。</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className={helpCls}>设备 ID 是本地稳定标识，不是小米云端 ID；不能重复或使用 debug。保存后固定 ID，以保持会话和凭据关联；如需更换 ID，请删除并新建端点。</p>
+          <p className={helpCls}>用户名和密码均隐藏显示；已保存的凭据留空表示保留，填写新值才会替换。启用端点必须同时设置用户名和密码。</p>
+          {(dirty || status?.driver !== 'bridge') && <p className="text-xs text-amber-600">请先保存配置，再探测或测试端点。</p>}
+          {found && !dirty && status?.driver === 'bridge' && (
+            <div className="rounded-lg border p-3 space-y-2">
+              <div className="text-xs font-medium">已探测 {found.length} 个本地端点</div>
+              {found.map((d) => <div key={d.device_id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div><span className="font-medium">{d.name || d.device_id}</span> <span className="text-muted-foreground font-mono">{d.hardware} · {d.device_id}</span></div>
+                <Badge variant={d.enabled === false || !d.online ? 'secondary' : 'success'}>{d.enabled === false ? '未启用' : d.online ? '在线' : '离线'}</Badge>
+              </div>)}
+            </div>
+          )}
+          {E('bridge.devices') && <p className="text-xs text-destructive">{E('bridge.devices')}</p>}
+          {bridgeDevices.length === 0 && <p className="text-xs text-muted-foreground py-4 text-center">尚未配置本地端点，点击「添加端点」开始。</p>}
+          {bridgeDevices.map((d, i) => {
+            const saved = savedBridgeDevice(d.device_id);
+            const st = status?.driver === 'bridge' ? eff(d.device_id) : undefined;
+            const field = (key: string) => `bridge.devices[${i}].${key}`;
+            return (
+              <div key={i} className="rounded-lg border p-3 space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-sm font-medium">端点 {i + 1}</span>
+                  {st?.online != null && <Badge variant={st.online ? 'success' : 'secondary'}>{st.online ? '在线' : '离线'}</Badge>}
+                  <label className="ml-auto flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" role="switch" aria-label={`端点 ${i + 1} 启用`} checked={!!d.enabled} onChange={(e) => patchBridgeDevice(i, { enabled: e.target.checked })} className="accent-primary w-4 h-4" />启用
+                  </label>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <Field label="本地设备 ID" help={saved ? '已保存的稳定 ID，不可更改' : '本地唯一标识，保存后固定'} error={E(field('device_id'))}>
+                    <Input aria-label={`端点 ${i + 1} 本地设备 ID`} className="font-mono" value={d.device_id} readOnly={!!saved} onChange={(e) => patchBridgeDevice(i, { device_id: e.target.value })} />
+                  </Field>
+                  <Field label="名称" error={E(field('name'))}>
+                    <Input aria-label={`端点 ${i + 1} 名称`} value={d.name || ''} onChange={(e) => patchBridgeDevice(i, { name: e.target.value })} />
+                  </Field>
+                  <Field label="硬件型号" help="仅用于识别设备，可选" error={E(field('hardware'))}>
+                    <Input aria-label={`端点 ${i + 1} 硬件型号`} value={d.hardware || ''} placeholder="例如 L06A" onChange={(e) => patchBridgeDevice(i, { hardware: e.target.value })} />
+                  </Field>
+                  <Field label="桥接 URL" help="HTTP(S) 地址，不得包含用户名、密码、查询参数或片段" error={E(field('url'))}>
+                    <Input type="url" aria-label={`端点 ${i + 1} 桥接 URL`} className="font-mono" value={d.url || ''} placeholder="http://192.168.1.10:8080" onChange={(e) => patchBridgeDevice(i, { url: e.target.value })} />
+                  </Field>
+                  {(['username', 'password'] as const).map((credential) => <Field key={credential} label={credential === 'username' ? '桥接用户名' : '桥接密码'} error={E(field(credential))}>
+                    <Input type="password" aria-label={`端点 ${i + 1} ${credential === 'username' ? '桥接用户名' : '桥接密码'}`} autoComplete="off"
+                      value={d[credential] === CREDENTIAL_MASK ? '' : d[credential] || ''}
+                      placeholder={saved?.[credential] ? '已设置，留空保留现有凭据' : '启用时必填'}
+                      onChange={(e) => setBridgeCredential(i, credential, e.target.value)} />
+                  </Field>)}
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs text-muted-foreground">播放方式：{st?.play_mode_effective || 'bridge'} · 播报方式：{st?.tts_mode_effective || 'bridge'}</div>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className="gap-1" disabled={dirty || status?.driver !== 'bridge' || !d.enabled} onClick={() => setTesting(testing === d.device_id ? null : d.device_id)}><FlaskConical className="w-3.5 h-3.5" />测试</Button>
+                    <Button size="sm" variant="outline" className="gap-1 text-destructive" onClick={() => { setBridgeDevices(bridgeDevices.filter((_, j) => j !== i)); setTesting(null); }}><Trash2 className="w-3.5 h-3.5" />删除</Button>
+                  </div>
+                </div>
+                {testing === d.device_id && !dirty && status?.driver === 'bridge' && d.enabled && <TestPanel deviceId={d.device_id} defVolume={v.volume_default} />}
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>}
 
       {driver === 'xiaomi' && <AccountCard account={status?.account} onChange={(a) => setStatus((s) => ({ ...(s || {}), account: a }))} />}
 
@@ -484,8 +612,8 @@ export function SpeakerSettings() {
             <Chips label="关键词" help="以这些词开头的提问交给本 Agent，其余仍由小爱回答（默认 问问）" items={keywords} onChange={(x) => setHook('keywords', x)} error={E('hook.keywords')} />
           )}
           <div className="grid sm:grid-cols-2 gap-4">
-            <Field label="轮询间隔（500ms–5s）" error={E('hook.poll_interval')}>
-              <Input value={hook.poll_interval ?? ''} placeholder="1s" onChange={(e) => setHook('poll_interval', e.target.value)} />
+            <Field label={driver === 'bridge' ? '轮询间隔（bridge 使用 SSE，此项不生效）' : '轮询间隔（500ms–5s）'} error={E('hook.poll_interval')}>
+              <Input disabled={driver === 'bridge'} value={hook.poll_interval ?? ''} placeholder="1s" onChange={(e) => setHook('poll_interval', e.target.value)} />
             </Field>
             <Field label="打断窗口（0–30s）" error={E('hook.interrupt_window')}>
               <Input value={hook.interrupt_window ?? ''} placeholder="3s" onChange={(e) => setHook('interrupt_window', e.target.value)} />
@@ -500,6 +628,6 @@ export function SpeakerSettings() {
           <Button onClick={save} disabled={saving} className="gap-2"><Save className="w-4 h-4" />{saving ? '保存中…' : '保存音箱配置'}</Button>
         </CardFooter>
       </Card>
-    </div>
+    </fieldset>
   );
 }

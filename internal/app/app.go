@@ -26,6 +26,7 @@ import (
 	"github.com/BBDXF/vox-mi-agent/internal/media"
 	"github.com/BBDXF/vox-mi-agent/internal/mediaurl"
 	"github.com/BBDXF/vox-mi-agent/internal/speaker"
+	"github.com/BBDXF/vox-mi-agent/internal/speaker/bridge"
 	"github.com/BBDXF/vox-mi-agent/internal/speaker/xiaomi"
 	"github.com/BBDXF/vox-mi-agent/internal/store"
 	"github.com/BBDXF/vox-mi-agent/internal/toolrunner"
@@ -85,12 +86,14 @@ type App struct {
 	cfg   *config.Config
 	updMu sync.Mutex // the single settings lock: serialises all settings updates
 
-	healthMu sync.RWMutex
-	sources  *data.SourceSet
-	xmOpts   func(*xiaomi.Options)
-	xmMu     sync.Mutex
-	xm       *xiaomi.Driver
-	hookOn   bool
+	healthMu      sync.RWMutex
+	sources       *data.SourceSet
+	xmOpts        func(*xiaomi.Options)
+	xmMu          sync.Mutex
+	xm            *xiaomi.Driver
+	bridgeDriver  *bridge.Driver
+	bridgeDevices []config.SpeakerBridgeDevice
+	hookOn        bool
 
 	secret   []byte
 	baseOnce sync.Once

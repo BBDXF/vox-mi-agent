@@ -4,6 +4,28 @@
 
 > 状态：代码在本机用模拟日志和模拟命令跑通（`go test`、二进制冒烟）；**未在真机上运行**。所有设备行为来自下列开源项目的源码与 issue，标注了来源；第 7 节是真机验证清单。
 
+## 目标设备与适配边界
+
+- 用户已确认自有音箱型号为 **L06A**；固件版本尚未确认。
+- 目标是在自有音箱上实现低延迟用户输入获取、接入自托管 Agent、本地播放回复与打断，而不只是通过小米云对话记录轮询控制音箱。
+- 当前桥接程序尚未在 L06A 上验证。本文引用的 LX06 / OH2P SSH 补丁与刷机教程不代表支持 L06A；不得直接混刷。L06A 的 SSH 入口、日志路径、播放命令和启动方式需要分别确认。
+
+### 同型号参考：L06A-patch
+
+主要参考项目：[xuys2025/L06A-patch](https://github.com/xuys2025/L06A-patch)。我们的产品目标与其类似：复用 L06A 的原厂唤醒和音频硬件，让可配置的助手接管后续语音会话，并降低响应延迟。
+
+根据该项目 README，其实现保留原厂唤醒与六麦克风前端，使用豆包流式 ASR、OpenAI 兼容 LLM 接口和原厂 TTS，另有连续对话、音乐控制、灯环反馈、网页配置与 SSH 更新。以上为参考项目的功能说明，不代表 vox-mi-agent 已实现或已验证这些能力。
+
+当前架构差异：参考项目让音箱上的 Go 助手管理会话并调用云端 ASR / LLM；我们的现有实现是音箱侧桥接输入与播放控制，Agent 和工具编排保留在自托管 vox-mi-agent。当前 bridge 读取小米云识别结果日志，不等于已经接入独立流式 ASR。连续对话、唤醒接管和灯环反馈可作为后续设计参考，不在此处宣称完成。
+
+适配与刷机证据：
+
+- 参考项目声明适配 **L06A / AS06 VER0106 / Amlogic A113X**，目标程序为 Linux ARMv7；其混合固件基于原厂 **1.88.221 的 system1**。用户设备的 PCB 与固件版本仍需核对。
+- 仓库提供源码、补丁和维护脚本，**不提供原厂固件或可直接通刷的成品镜像**，需要自己的分区备份和恢复方式。
+- [USB-only 单槽试刷方案](https://github.com/xuys2025/L06A-patch/blob/main/docs/build/USB_ONLY_FLASH_PLAN.md) 记录了该作者设备通过 Micro-USB WorldCup 模式写非活动 system1、回读校验、切槽与 USB 回滚的流程。这里的 USB-only 不等于免拆机：该文档没有证明用户设备可从外部接口接入，也不是纯 Wi-Fi 开启 SSH 的教程。
+- 文档里的镜像哈希、长度和槽位版本是作者特定设备的历史记录，不能直接套用到我们的音箱或新构建镜像。L06A 已有公开改造参考，但我们的首次 SSH 入口、USB 接入条件和恢复方案尚未实机确认。
+
+
 ## 1. 结论
 
 | 问题 | 结论 |
@@ -98,6 +120,8 @@ curl -u admin:xiaomi-bridge -X PUT http://<音箱IP>:4390/v1/config -d '{
 | `GET /v1/mcp.json` | MCP 描述文件：可直接粘贴的客户端配置（含调用者自己的认证头）+ 工具列表与参数 schema + 对应 REST 接口和 curl 示例 |
 | `POST /mcp` | MCP（Streamable HTTP，无状态，JSON 响应） |
 | `POST /v1/play-url {"url":"http://…"}` | 媒体播放器播放 URL |
+| `POST /v1/pause` / `POST /v1/play` | 暂停（同时终止 bridge 自己的 TTS）/ 恢复系统播放 |
+| `POST /v1/set-volume {"volume":0..100}` | 设置系统播放器音量；命令是否被当前固件支持须实机验证 |
 | `POST /v1/abort-xiaoai` | 重启 `mico_aivs_lab`，丢弃小爱当前对话（副作用见第 6 节） |
 
 用户输入事件（推送、流、`latest`、MCP 共用同一格式）：
@@ -190,15 +214,43 @@ ssh -o HostKeyAlgorithms=+ssh-rsa root@<音箱IP> "mkdir -p /data/xiaomi-bridge 
 
 ## 8. 风险
 
-- 刷机：仅 LX06 / OH2P 有现成固件；旧款 LX06 需拆机；补丁关闭了 OTA；Open-XiaoAI 已停止维护，新固件版本可能不兼容。
+- 刷机：Open-XiaoAI 在本文引用的现成固件仅覆盖 LX06 / OH2P；旧款 LX06 需拆机。L06A 另有 L06A-patch 源码与 USB 刷写记录，但无可直接通刷的成品镜像，不能混用其他型号固件或照抄作者设备的分区参数。补丁可能禁用 OTA，固件版本变化也可能影响兼容性。
 - 安全：默认账号密码是公开的，**部署后第一件事是改密码**；在改之前，同一局域网内任何人都能让音箱发声、读到家里人说的话、改推送地址。API 与推送都是明文 HTTP，Basic 认证的密码可被局域网嗅探，只适合可信局域网；默认 SSH 密码 `open-xiaoai` 也要改掉。
 - `instruction.log` 是小米内部实现，固件版本变化可能改格式或路径。
 
-## 9. 接入 vox-mi-agent 的下一步（未做）
+## 9. 接入 vox-mi-agent 主流程
 
-- vox 订阅 `GET /v1/asr/stream`（或配置推送到新的接收端点），收到 `final` 事件直接进入 `Hook.handle`，替代 `poll` 循环里的 `GetLatestAsk`。
-- 新增 `speaker.Driver` 实现，`TextToSpeech` / `PlayByURL` / `PlayerPause` / `PlayerStop` / `PlayerGetStatus` 改为调用 bridge 的控制 API；`interrupt` 改为"收到输入立即 stop + 首句前循环 pause"。
-- 播放本地歌曲仍用 `PlayByURL` 指向 NAS 上的签名 URL，音箱直连 NAS，不经小米云。
+已实现独立的 `speaker.driver: bridge`，不需要在 vox 执行小米账号登录，也不读取小米云设备列表。音箱上的 bridge 和 NAS 上的 vox 都需升级到包含本次本地播放控制接口的版本。
+
+```yaml
+speaker:
+  driver: bridge
+  public_base_url: http://192.168.1.10:8080
+  bridge:
+    devices:
+      - device_id: living-room
+        name: 客厅
+        hardware: L06A
+        enabled: true
+        url: http://192.168.1.20:4390
+        username: admin
+        password: "在音箱 bridge 上设置的新密码"
+  hook:
+    mode: all # music / keyword / all / off，沿用现有接管策略
+```
+
+- 也可在「系统设置 → 音箱」选择「本地桥接（bridge）」、添加端点并保存；此模式不显示小米账号登录卡片，快速开始向导也不要求小米登录。`xiaomi.devices` 独立保留，切回云端驱动时仍可使用。
+- `device_id` 是自行指定的稳定本地标识，不是小米云 ID；不能重复或使用 `debug`。修改 ID 会改变关联的设备会话。URL 必须为 HTTP(S)，不能夹带凭据、查询参数或片段。启用的端点必须显式填写用户名和密码。
+- 配置文件包含明文凭据，权限为 0600；设置 API 不回显用户名或密码。编辑已有端点时，凭据留空、未传或保持掩码表示沿用；填写新值才替换。同一套接管、设备会话、聊天时间线、音乐快路径和 Agent 工具继续生效。
+- 每台启用设备建立一个 Basic 认证 SSE 连接，只接收最终识别结果，直接交给 Hook；`hook.poll_interval` 不影响 bridge 延迟。断线会有界退避重连，关闭接管或修改端点会取消旧连接。重连不补发历史输入，因此断线期间的提问可能丢失，但不会主动重放旧命令；设备时钟偏差和 bridge 重启后的序号归零不影响新输入。
+- TTS、URL 播放、暂停/恢复、停止、音量和状态通过本地 API，不回退到小米云。TTS 仍异步启动，Hook 按播放状态等待再播下一句或歌曲；暂停会杀掉 bridge 自己的 TTS 进程组。无 shebang 的原厂 `tts_play.sh` 通过 `/bin/sh` 执行。
+- `public_base_url` 必须能从音箱访问，用于下载签名歌曲 URL；NAS 也必须能访问各端点。Basic 认证与语音文本在 HTTP 上传输不加密，仅用于可信局域网，或自行提供受信任的 HTTPS 入口。
+
+验证：先在设置页「探测已保存端点」，测试 TTS/播放/暂停/恢复/停止/音量，再对音箱说话，确认聊天时间线产生 `ask → turn_start → tts`，点歌时产生 `play_url`；`GET /api/speaker/status` 应显示 `driver: bridge`，不要求 `account`。bridge `/v1/status` 的 `instruction_log.exists` 和 `asr.stream_clients` 可帮助排查输入问题。
+
+**登录替代边界：**免去的是 NAS/vox 的 `mi login`、passToken、验证码、`mi_token.json` 及小米云控制/对话记录轮询。当前识别结果仍来自原厂小米云 ASR，TTS 仍调用原厂服务；不等于免音箱绑定、不等于离线 ASR/TTS，也没有消除原生回答竞争。完全去小米账号/云依赖需要另行实现独立的录音、唤醒、ASR 和 TTS 链路。
+
+验证范围：本机实际运行 bridge、完整 App/Hook/Agent、SSE、媒体签名下载和网页配置保存/探测，无 `mi_token.json`；外部模型响应和硬件命令由隔离夹具提供。L06A 真机上的日志生成、`mphelper` 输出、音量命令及原生回复打断效果仍未验证。
 
 ## 参考
 
@@ -206,3 +258,6 @@ ssh -o HostKeyAlgorithms=+ssh-rsa root@<音箱IP> "mkdir -p /data/xiaomi-bridge 
 - cxjava/open-xiaoai（Go 版客户端，`apps/client/utils/shell.go`）：<https://github.com/cxjava/open-xiaoai>
 - open-xiaoai-bridge（播放通道与中断方式整理）：<https://github.com/coderzc/open-xiaoai-bridge/blob/main/AGENTS.md>
 - open-speaker-llm/xiaomi_ai_llm（S12A，aivs/mipns 本地协议逆向）：<https://github.com/open-speaker-llm/xiaomi_ai_llm>
+- L06A-patch（同型号主要参考；原厂唤醒、流式 ASR、可配置助手、原厂 TTS 与固件维护）：<https://github.com/xuys2025/L06A-patch>；[USB-only 单槽试刷方案](https://github.com/xuys2025/L06A-patch/blob/main/docs/build/USB_ONLY_FLASH_PLAN.md)。我们的产品目标与其类似，但当前采用音箱桥接 + 自托管 Agent 的分工。
+- 瀚思彼岸《小爱音箱 LX06/LX06A/S12A 1.88.51 版 SSH 固件：增加网络收音机脚本》：<https://bbs.hassbian.com/thread-26621-1-1.html>。作者在已有修改版固件上增加 SSH 电台控制脚本，并将显示版本改为 `17.88.51`，刷机方法指向原帖；作者自述使用的是两台 S12A。标题中的 **LX06A 不能直接等同于用户的 L06A**，本文仅作社区 SSH 固件与播放控制参考，不据此认定 L06A 兼容或可免拆机解锁。
+- 雨林园《小爱音箱 L06A TTL 刷机教程》：<http://www.yl-blog.com/article/1144.html>。记录卡黄灯 L06A 通过主板 TTL 进入 U-Boot、用 YMODEM 上传镜像并写入 NAND 的恢复流程；夹具接线免焊接，但仍需接触主板，**不是免拆机方案**。文章示例覆盖 boot0/boot1、system0/system1 并擦除 data，具有破坏性；仅作串口恢复参考，不照抄分区地址、写入长度或双槽覆盖步骤，操作前需核对本机分区、镜像和备份。

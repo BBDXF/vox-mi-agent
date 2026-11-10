@@ -1,6 +1,6 @@
-// Package speaker defines the speaker driver abstraction (mock |
-// xiaomi), the Manager that adapts it to the audio tools, and the Hook that
-// lets the agent take over the speaker's conversations (docs/DESIGN.md §6.7).
+// Package speaker defines local bridge, Xiaomi cloud and mock speaker drivers,
+// the Manager that adapts them to audio tools, and the Hook that lets the agent
+// take over the speaker's conversations (docs/DESIGN.md §6.7).
 package speaker
 
 import (
@@ -50,7 +50,7 @@ type Status struct {
 // Playing reports whether audio is currently playing.
 func (s Status) Playing() bool { return s.Status == StatusPlaying }
 
-// Driver is implemented by mock and xiaomi (method names follow MiNAService).
+// Driver is implemented by local bridge, Xiaomi cloud and mock speakers.
 type Driver interface {
 	Name() string
 	DeviceList(ctx context.Context) ([]Device, error)
@@ -63,6 +63,13 @@ type Driver interface {
 	PlayerPlay(ctx context.Context, d Device) error
 	PlayerStop(ctx context.Context, d Device) error
 	PlayerGetStatus(ctx context.Context, d Device) (Status, error)
+}
+
+// AskStreamer delivers live asks without polling. Implementations invoke receive
+// synchronously, do not replay history, and return when ctx is canceled or the
+// connection ends. ErrNotImplemented selects the driver's polling path.
+type AskStreamer interface {
+	StreamAsks(ctx context.Context, d Device, receive func(Ask)) error
 }
 
 // ErrNoDevice means no speaker is configured / enabled.

@@ -279,6 +279,7 @@ type Speaker struct {
 	// independent of the driver.
 	DebugDevice bool          `yaml:"debug_device" json:"debug_device"`
 	Xiaomi      SpeakerXiaomi `yaml:"xiaomi" json:"xiaomi"`
+	Bridge      SpeakerBridge `yaml:"bridge" json:"bridge"`
 	Hook        SpeakerHook   `yaml:"hook" json:"hook"`
 	Mock        SpeakerMock   `yaml:"mock" json:"mock"`
 }
@@ -287,6 +288,62 @@ type Speaker struct {
 // <data>/mi_token.json, never in the config).
 type SpeakerXiaomi struct {
 	Devices []SpeakerDevice `yaml:"devices" json:"devices"`
+}
+
+// SpeakerBridge holds local bridge endpoints independently of cloud devices.
+type SpeakerBridge struct {
+	Devices []SpeakerBridgeDevice `yaml:"devices" json:"devices"`
+}
+
+// SpeakerBridgeDevice identifies a local endpoint; DeviceID is not a Xiaomi ID.
+type SpeakerBridgeDevice struct {
+	DeviceID string `yaml:"device_id" json:"device_id"`
+	Name     string `yaml:"name" json:"name"`
+	Hardware string `yaml:"hardware" json:"hardware"`
+	Enabled  bool   `yaml:"enabled" json:"enabled"`
+	URL      string `yaml:"url" json:"url"`
+	Username string `yaml:"username" json:"username"`
+	Password string `yaml:"password" json:"password"`
+}
+
+// Validate checks endpoint identities, URLs and explicit enabled credentials.
+func (s SpeakerBridge) Validate() error {
+	seen := make(map[string]bool, len(s.Devices))
+	for i, d := range s.Devices {
+		prefix := fmt.Sprintf("speaker.bridge.devices[%d]", i)
+		id := strings.TrimSpace(d.DeviceID)
+		switch {
+		case id == "":
+			return fmt.Errorf("config: %s.device_id is required", prefix)
+		case id != d.DeviceID:
+			return fmt.Errorf("config: %s.device_id must not have surrounding whitespace", prefix)
+		case id == "debug":
+			return fmt.Errorf("config: %s.device_id is reserved for the debug device", prefix)
+		case seen[id]:
+			return fmt.Errorf("config: %s.device_id is duplicated", prefix)
+		}
+		seen[id] = true
+		u, err := url.Parse(d.URL)
+		if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" ||
+			u.User != nil || strings.ContainsAny(d.URL, "?#") || strings.TrimSpace(d.URL) != d.URL {
+			return fmt.Errorf("config: %s.url must be HTTP(S), without credentials, query or fragment", prefix)
+		}
+		if d.Enabled && strings.TrimSpace(d.Username) == "" {
+			return fmt.Errorf("config: %s.username is required for enabled endpoints", prefix)
+		}
+		if d.Enabled && strings.TrimSpace(d.Password) == "" {
+			return fmt.Errorf("config: %s.password is required for enabled endpoints", prefix)
+		}
+	}
+	return nil
+}
+
+// MaskCredential hides an entire bridge credential, including short secrets.
+func MaskCredential(value string) string {
+	if value == "" {
+		return ""
+	}
+	return "****"
 }
 
 // SpeakerDevice is one configured speaker (also used by the mock driver).
@@ -661,6 +718,7 @@ func (c *Config) Clone() *Config {
 	cp.Media.Extensions = append([]string(nil), c.Media.Extensions...)
 	cp.Search.StripPatterns = append([]string(nil), c.Search.StripPatterns...)
 	cp.Speaker.Xiaomi.Devices = append([]SpeakerDevice(nil), c.Speaker.Xiaomi.Devices...)
+	cp.Speaker.Bridge.Devices = append([]SpeakerBridgeDevice(nil), c.Speaker.Bridge.Devices...)
 	cp.Speaker.Hook.Keywords = append([]string(nil), c.Speaker.Hook.Keywords...)
 	cp.Speaker.Hook.WakeWords = append([]string(nil), c.Speaker.Hook.WakeWords...)
 	cp.Speaker.Hook.MusicTriggers = append([]string(nil), c.Speaker.Hook.MusicTriggers...)
@@ -721,6 +779,10 @@ func cloneValue(v any) any {
 func (c *Config) Redacted() *Config {
 	cp := c.Clone()
 	cp.LLM.APIKey = maskSecret(c.LLM.APIKey)
+	for i := range cp.Speaker.Bridge.Devices {
+		d := &cp.Speaker.Bridge.Devices[i]
+		d.Username, d.Password = MaskCredential(d.Username), MaskCredential(d.Password)
+	}
 	for i := range cp.MCP.Servers {
 		m := &cp.MCP.Servers[i]
 		m.Headers, m.Env = MaskValues(m.Headers), MaskValues(m.Env)
@@ -755,9 +817,12 @@ var miotTTSRe = regexp.MustCompile(`^[0-9]{1,3}-[0-9]{1,3}$`)
 
 func (s Speaker) validate() error {
 	switch s.Driver {
-	case "mock", "xiaomi":
+	case "mock", "xiaomi", "bridge":
 	default:
-		return fmt.Errorf("config: speaker.driver must be mock|xiaomi, got %q", s.Driver)
+		return fmt.Errorf("config: speaker.driver must be mock|xiaomi|bridge, got %q", s.Driver)
+	}
+	if err := s.Bridge.Validate(); err != nil {
+		return err
 	}
 	if s.VolumeDefault < 0 || s.VolumeDefault > 100 {
 		return errors.New("config: speaker.volume_default must be 0-100")

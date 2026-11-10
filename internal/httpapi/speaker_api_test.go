@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -51,7 +52,7 @@ func miniXiaomi(t *testing.T, notify bool) *httptest.Server {
 	return srv
 }
 
-func spkEnv(t *testing.T, xm *httptest.Server, p llm.Provider) *testEnv {
+func spkEnv(t *testing.T, xm *httptest.Server, p llm.Provider, options ...app.Option) *testEnv {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("VOX_LLM_API_KEY", "")
@@ -66,12 +67,12 @@ func spkEnv(t *testing.T, xm *httptest.Server, p llm.Provider) *testEnv {
 	cfg.Media.Folders, cfg.Media.SyncOnStart = nil, false
 	cfg.Speaker.Hook.Mode = "all"
 	cfg.Speaker.Hook.InterruptWindow = 50 * time.Millisecond
-	a, err := app.Build(cfg, app.WithProvider(p), app.WithLogger(logx.New("error", io.Discard)),
+	a, err := app.Build(cfg, append([]app.Option{app.WithProvider(p), app.WithLogger(logx.New("error", io.Discard)),
 		app.WithXiaomiOptions(func(o *xiaomi.Options) {
 			if xm != nil {
 				o.URLs = xiaomi.URLs{Account: xm.URL, Mina: xm.URL, Profile: xm.URL, MIIO: xm.URL}
 			}
-		}))
+		})}, options...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -458,5 +459,81 @@ func TestXiaomiLoginTokenEndpoint(t *testing.T) {
 	acc := jsonOf(t, b)["account"].(map[string]any)
 	if resp.StatusCode != 200 || acc["state"] != "logged_in" || acc["method"] != "token" || acc["user_id"] != "7" {
 		t.Fatalf("%d %s", resp.StatusCode, b)
+	}
+}
+
+func TestBridgeSpeakerAPINeedsNoXiaomiAccount(t *testing.T) {
+	var cloudInitializations, probes, speech atomic.Int32
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		username, password, ok := r.BasicAuth()
+		if !ok || username != "local-user" || password != "local-password" {
+			t.Error("bridge credentials were not sent using Basic auth")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/status":
+			probes.Add(1)
+			io.WriteString(w, `{"ok":true,"status":{"tts":{"speaking":false},"player":"idle"}}`)
+		case "/offline/v1/status":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case "/v1/tts":
+			speech.Add(1)
+			io.WriteString(w, `{"ok":true}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer local.Close()
+	e := spkEnv(t, nil, llm.NewFake(), app.WithXiaomiOptions(func(*xiaomi.Options) { cloudInitializations.Add(1) }))
+	if resp, b := e.do(t, "PUT", "/api/settings/speaker", `{"xiaomi.devices":[{"device_id":"cloud-id","enabled":true}]}`); resp.StatusCode != 200 {
+		t.Fatalf("cloud settings: %d %s", resp.StatusCode, b)
+	}
+	settings := `{"driver":"bridge","bridge.devices":[
+		{"device_id":"living-room","name":"客厅","hardware":"L06A","enabled":true,"url":` + strconv.Quote(local.URL) + `,"username":"local-user","password":"local-password"},
+		{"device_id":"kitchen","name":"厨房","enabled":true,"url":` + strconv.Quote(local.URL+"/offline") + `,"username":"local-user","password":"local-password"}]}`
+	if resp, b := e.do(t, "PUT", "/api/settings/speaker", settings); resp.StatusCode != 200 {
+		t.Fatalf("bridge settings: %d %s", resp.StatusCode, b)
+	}
+	resp, b := e.do(t, "GET", "/api/speaker/status", "")
+	status := jsonOf(t, b)
+	if resp.StatusCode != 200 || status["driver"] != "bridge" || status["account"] != nil {
+		t.Fatalf("bridge status: %d %s", resp.StatusCode, b)
+	}
+	for _, value := range status["devices"].([]any) {
+		device := value.(map[string]any)
+		if device["device_id"] == "debug" {
+			continue
+		}
+		if device["play_mode_effective"] != "bridge" || device["tts_mode_effective"] != "bridge" {
+			t.Fatalf("bridge portrayed as cloud TTS: %s", b)
+		}
+	}
+	resp, b = e.do(t, "GET", "/api/speaker/devices/discover", "")
+	discovery := jsonOf(t, b)
+	if resp.StatusCode != 200 || discovery["driver"] != "bridge" {
+		t.Fatalf("local discovery: %d %s", resp.StatusCode, b)
+	}
+	devices := discovery["devices"].([]any)
+	if len(devices) != 2 || devices[0].(map[string]any)["device_id"] != "living-room" ||
+		devices[0].(map[string]any)["online"] != true || devices[1].(map[string]any)["online"] != false || probes.Load() != 1 {
+		t.Fatalf("local discovery did not probe configured devices: %s", b)
+	}
+	if resp, b = e.do(t, "POST", "/api/speaker/test", `{"device_id":"living-room","action":"tts","text":"你好"}`); resp.StatusCode != 200 || speech.Load() != 1 {
+		t.Fatalf("local speech: %d %s", resp.StatusCode, b)
+	}
+	if resp, b = e.do(t, "POST", "/api/speaker/test", `{"device_id":"cloud-id","action":"status"}`); resp.StatusCode != 400 {
+		t.Fatalf("unknown bridge device used cloud fallback: %d %s", resp.StatusCode, b)
+	}
+	_, b = e.do(t, "GET", "/api/settings/speaker", "")
+	if strings.Contains(string(b), "local-user") || strings.Contains(string(b), "local-password") {
+		t.Fatal("settings API returned bridge credentials")
+	}
+	if cloudInitializations.Load() != 0 {
+		t.Fatal("bridge status/discovery/control initialized Xiaomi account")
+	}
+	if cfg := e.app.Config(); len(cfg.Speaker.Xiaomi.Devices) != 1 || cfg.Speaker.Xiaomi.Devices[0].DeviceID != "cloud-id" {
+		t.Fatal("bridge settings overwrote saved cloud devices")
 	}
 }

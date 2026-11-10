@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -341,5 +343,87 @@ func TestEnvLockedRecorded(t *testing.T) {
 	}
 	if c.Clone().EnvLocked["llm.model"] != "VOX_LLM_MODEL" {
 		t.Fatal("clone lost EnvLocked")
+	}
+}
+
+func TestSpeakerBridgeValidation(t *testing.T) {
+	valid := SpeakerBridgeDevice{DeviceID: "living-room", Name: "客厅", Hardware: "L06A", Enabled: true,
+		URL: "http://192.168.1.20:8080", Username: "bridge-user", Password: "bridge-password"}
+	for _, driver := range []string{"mock", "xiaomi", "bridge"} {
+		c := Defaults()
+		c.Speaker.Driver = driver
+		c.Speaker.Bridge.Devices = []SpeakerBridgeDevice{valid}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("%s: %v", driver, err)
+		}
+	}
+	for name, mutate := range map[string]func(*SpeakerBridgeDevice){
+		"empty ID":        func(d *SpeakerBridgeDevice) { d.DeviceID = " " },
+		"spaced ID":       func(d *SpeakerBridgeDevice) { d.DeviceID = " living-room" },
+		"debug ID":        func(d *SpeakerBridgeDevice) { d.DeviceID = "debug" },
+		"empty URL":       func(d *SpeakerBridgeDevice) { d.URL = "" },
+		"non HTTP":        func(d *SpeakerBridgeDevice) { d.URL = "ftp://speaker" },
+		"missing host":    func(d *SpeakerBridgeDevice) { d.URL = "http:///v1" },
+		"URL credentials": func(d *SpeakerBridgeDevice) { d.URL = "http://private-user:private-password@speaker" },
+		"query":           func(d *SpeakerBridgeDevice) { d.URL += "?token=private-password" },
+		"empty query":     func(d *SpeakerBridgeDevice) { d.URL += "?" },
+		"fragment":        func(d *SpeakerBridgeDevice) { d.URL += "#private-password" },
+		"empty fragment":  func(d *SpeakerBridgeDevice) { d.URL += "#" },
+		"no username":     func(d *SpeakerBridgeDevice) { d.Username = "" },
+		"blank username":  func(d *SpeakerBridgeDevice) { d.Username = " " },
+		"no password":     func(d *SpeakerBridgeDevice) { d.Password = "" },
+		"blank password":  func(d *SpeakerBridgeDevice) { d.Password = " " },
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := valid
+			mutate(&d)
+			err := (SpeakerBridge{Devices: []SpeakerBridgeDevice{d}}).Validate()
+			if err == nil {
+				t.Fatal("accepted invalid bridge endpoint")
+			}
+			if strings.Contains(err.Error(), "private-password") || strings.Contains(err.Error(), "private-user") {
+				t.Fatal("validation exposed URL credentials")
+			}
+		})
+	}
+	if err := (SpeakerBridge{Devices: []SpeakerBridgeDevice{valid, valid}}).Validate(); err == nil {
+		t.Fatal("accepted duplicate local IDs")
+	}
+	disabled := valid
+	disabled.Enabled, disabled.Username, disabled.Password = false, "", ""
+	if err := (SpeakerBridge{Devices: []SpeakerBridgeDevice{disabled}}).Validate(); err != nil {
+		t.Fatalf("disabled endpoint requires credentials: %v", err)
+	}
+}
+
+func TestSpeakerBridgeYAMLCloneAndRedaction(t *testing.T) {
+	dir := t.TempDir()
+	contents := "speaker:\n  driver: bridge\n  bridge:\n    devices:\n      - device_id: kitchen\n        name: 厨房\n        hardware: L06A\n        enabled: true\n        url: https://speaker.local:8443/base\n        username: bridge-user\n        password: bridge-password\n"
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := load(dir, envMap(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Speaker.Driver != "bridge" || len(c.Speaker.Bridge.Devices) != 1 || c.Speaker.Bridge.Devices[0].DeviceID != "kitchen" {
+		t.Fatal("bridge YAML did not load")
+	}
+	clone := c.Clone()
+	clone.Speaker.Bridge.Devices[0].Password = "changed"
+	if c.Speaker.Bridge.Devices[0].Password != "bridge-password" {
+		t.Fatal("clone shared bridge endpoint slice")
+	}
+	redacted := c.Redacted()
+	b, err := json.Marshal(redacted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "bridge-user") || strings.Contains(string(b), "bridge-password") ||
+		redacted.Speaker.Bridge.Devices[0].Username != "****" || redacted.Speaker.Bridge.Devices[0].Password != "****" {
+		t.Fatal("bridge credentials were not fully masked")
+	}
+	if c.Speaker.Bridge.Devices[0].Username != "bridge-user" || c.Speaker.Bridge.Devices[0].Password != "bridge-password" {
+		t.Fatal("redaction mutated live credentials")
 	}
 }

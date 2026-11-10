@@ -72,7 +72,7 @@ type MusicDeps struct {
 	MinScore func() int // live search.min_score
 }
 
-// Hook polls the enabled devices for user asks and answers them with the agent.
+// Hook listens for live asks (or polls drivers without streams) and runs agent turns.
 type Hook struct {
 	d HookDeps
 
@@ -126,7 +126,7 @@ func (h *Hook) Status() HookStatus {
 	return st
 }
 
-// Apply (re)starts the pollers for the manager's current driver and enabled
+// Apply (re)starts input listeners for the manager's current driver and enabled
 // devices. It is a no-op when nothing changed. Mode "off" stops everything.
 func (h *Hook) Apply(s HookSettings) {
 	drv, devs, ver := h.d.Mgr.Driver(), h.d.Mgr.Devices(), h.d.Mgr.Version()
@@ -148,7 +148,7 @@ func (h *Hook) Apply(s HookSettings) {
 	since := time.Now().Truncate(time.Millisecond).Add(-time.Millisecond) // ask times have ms precision
 	for _, d := range devs {
 		h.wg.Add(1)
-		go h.poll(ctx, drv, d, s, since)
+		go h.listen(ctx, drv, d, s, since)
 	}
 	h.mu.Unlock()
 }
@@ -173,8 +173,57 @@ func (h *Hook) Stop() {
 	h.wg.Wait()
 }
 
-func (h *Hook) poll(ctx context.Context, drv Driver, dev Device, s HookSettings, since time.Time) {
+// listen keeps a live connection for streaming drivers. A disconnected stream
+// reconnects without fetching the last ask: replaying a command can play music
+// or invoke a tool twice. Events retain arrival order, not device clock order.
+func (h *Hook) listen(ctx context.Context, drv Driver, dev Device, s HookSettings, since time.Time) {
 	defer h.wg.Done()
+	stream, ok := drv.(AskStreamer)
+	if !ok {
+		h.poll(ctx, drv, dev, s, since)
+		return
+	}
+	backoff := 250 * time.Millisecond
+	var th pollThrottle
+	for ctx.Err() == nil {
+		err := stream.StreamAsks(ctx, dev, func(ask Ask) {
+			if ctx.Err() != nil || strings.TrimSpace(ask.Query) == "" {
+				return
+			}
+			ask.DeviceID = dev.DeviceID
+			if ask.Time.IsZero() {
+				ask.Time = time.Now()
+			}
+			backoff = 250 * time.Millisecond
+			th.reset()
+			h.handle(ctx, drv, dev, s, ask)
+		})
+		if ctx.Err() != nil {
+			return
+		}
+		if errors.Is(err, ErrNotImplemented) {
+			h.poll(ctx, drv, dev, s, since)
+			return
+		}
+		if err == nil {
+			err = errors.New("input stream closed")
+		}
+		if th.shouldLog(time.Now(), err) {
+			h.d.Log.Warn("speaker hook: stream disconnected", "device", dev.DeviceID, "err", err)
+		}
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		backoff = min(backoff*2, 5*time.Second)
+	}
+}
+
+func (h *Hook) poll(ctx context.Context, drv Driver, dev Device, s HookSettings, since time.Time) {
+	// The listener owns the worker's lifetime for both input modes.
 	errs := 0
 	var th pollThrottle
 	for {

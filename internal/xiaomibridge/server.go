@@ -23,6 +23,9 @@ const sseHeartbeat = 15 * time.Second
 //	PUT  /v1/config                 partial update, persisted to the config file
 //	POST /v1/tts         {"text","wait"}  speak, interrupting the previous TTS
 //	POST /v1/stop                   interrupt playback
+//	POST /v1/pause                  interrupt TTS and pause the player
+//	POST /v1/play                   resume the player
+//	POST /v1/set-volume  {"volume":0..100}
 //	POST /v1/play-url    {"url"}
 //	POST /v1/abort-xiaoai
 //	GET  /v1/asr/latest             latest recognized user input
@@ -43,6 +46,37 @@ func (b *Bridge) Handler() http.Handler {
 	api.HandleFunc("POST /v1/tts", b.postTTS)
 	api.HandleFunc("POST /v1/stop", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusOK, b.stop(r.Context()))
+	})
+	api.HandleFunc("POST /v1/pause", func(w http.ResponseWriter, r *http.Request) {
+		if err := b.dev.Pause(r.Context()); err != nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		reply(w, http.StatusOK, map[string]any{"ok": true})
+	})
+	api.HandleFunc("POST /v1/play", func(w http.ResponseWriter, r *http.Request) {
+		if err := b.dev.Play(r.Context()); err != nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		reply(w, http.StatusOK, map[string]any{"ok": true})
+	})
+	api.HandleFunc("POST /v1/set-volume", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Volume *int `json:"volume"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.Volume == nil || *in.Volume < 0 || *in.Volume > 100 {
+			fail(w, http.StatusBadRequest, "volume must be between 0 and 100")
+			return
+		}
+		if err := b.dev.SetVolume(r.Context(), *in.Volume); err != nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		reply(w, http.StatusOK, map[string]any{"ok": true})
 	})
 	api.HandleFunc("POST /v1/play-url", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -221,6 +255,10 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		fail(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return false
+	}
+	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
+		fail(w, http.StatusBadRequest, "body must contain exactly one JSON value")
 		return false
 	}
 	return true

@@ -118,6 +118,12 @@ func (r *router) DeviceList(ctx context.Context) ([]Device, error) {
 func (r *router) GetLatestAsk(ctx context.Context, d Device, since time.Time) (*Ask, error) {
 	return r.m.target(d.DeviceID).GetLatestAsk(ctx, d, since)
 }
+func (r *router) StreamAsks(ctx context.Context, d Device, receive func(Ask)) error {
+	if s, ok := r.m.target(d.DeviceID).(AskStreamer); ok {
+		return s.StreamAsks(ctx, d, receive)
+	}
+	return ErrNotImplemented
+}
 func (r *router) TextToSpeech(ctx context.Context, d Device, t string) error {
 	return r.m.target(d.DeviceID).TextToSpeech(ctx, d, t)
 }

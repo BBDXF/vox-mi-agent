@@ -9,6 +9,7 @@
 
 ### 研究（分支 research/xiaomi-bridge）
 - 新增刷机音箱端桥接程序 `xiaomi-bridge`（`make bridge`，armv7 / arm64 静态二进制）：读取小爱本地 `instruction.log` 获取用户语音识别结果。默认端口 4390、HTTP Basic 认证（默认 `admin` / `xiaomi-bridge`）；推送地址、认证、设备名通过 `PUT /v1/config` 设置并保存到 `/data/xiaomi-bridge/config.json`，重启自动读取。接口：播报（打断上一次）、打断、SSE 流式获取用户输入、最近输入、内部状态；`/mcp` 提供 MCP 服务，`/v1/mcp.json` 提供 MCP 描述文件。尚未真机验证，见 `docs/research/xiaomi-bridge.md`。
+- bridge 接入主流程：新增 `speaker.driver: bridge`、多端点设置与探测、SSE 最终语音输入，以及本地 TTS/歌曲/暂停/恢复/停止/音量/状态控制；复用 Hook、Agent、设备会话、聊天时间线与音乐快路径。设置和向导无需小米账号登录，凭据脱敏且可热更新；云端设备列表独立保留。连接取消/断线重连不重放历史，原厂无 shebang 的 TTS 脚本由 shell 执行。本机端到端及网页验证通过，硬件命令和真实语音链路待真机验证；不消除音箱原厂 ASR/TTS 的小米云依赖。
 
 ## v0.2.2
 
