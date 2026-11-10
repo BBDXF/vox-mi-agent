@@ -1,5 +1,15 @@
 # vox-mi-agent
 
+> [!WARNING]
+> **本项目已归档，不再开发和维护。**
+>
+> vox-mi-agent 以 Docker 容器的形式运行在 NAS / 服务器上，再通过轮询小米云端对话记录、远程控制音箱来实现点歌。实际使用中这个部署方案限制太多：
+> 依赖小米账号登录与云端接口（易失效、有延迟），需要额外常驻的容器服务，音箱只能被动“接管”，无法直接利用设备本地的语音识别与播放能力。
+>
+> 推荐改用 **[mico-agent](https://github.com/BBDXF/mico-agent)**：直接运行在小爱音箱内部的轻量 AI Agent（C++ + Lua，约 470 KB），
+> 读取音箱本地语音识别结果，无需 NAS 上的额外服务；同样支持拼音模糊点歌、飞牛音乐本地曲库、在线音乐源、Web 控制台，以及边播边存到 NAS。
+
+
 [![ci](https://github.com/BBDXF/vox-mi-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/BBDXF/vox-mi-agent/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/BBDXF/vox-mi-agent)](https://github.com/BBDXF/vox-mi-agent/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
